@@ -16,12 +16,19 @@ const CONFIG_PATH: &str = "/etc/g7-installer/config.toml";
 const ETC_DIR: &str = "/etc/g7-installer";
 const LIB_DIR: &str = "/var/lib/g7-installer";
 const LOG_DIR: &str = "/var/log/g7-installer";
+const BACKUP_DIR: &str = "/var/backups/g7-installer";
 const LOG_PATH: &str = "/var/log/g7-installer/install.log";
+const REPORT_PATH: &str = "/var/log/g7-installer/report.json";
+const ROLLBACK_PATH: &str = "/var/lib/g7-installer/rollback.json";
 const WEB_ROOT: &str = "/var/www/g7";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallReport {
     pub domain: String,
+    pub php_version: String,
+    pub www_mode: String,
+    pub redis_mode: String,
+    pub mail_mode: String,
     pub phase: String,
     pub state_path: PathBuf,
     pub owned_files_path: PathBuf,
@@ -59,16 +66,22 @@ impl InstallPaths {
     }
 }
 
-pub fn run(domain: String) -> Result<InstallReport> {
-    run_with_probe_and_paths(domain, &SystemProbe::real(), &InstallPaths::system())
+pub fn run(domain: String, options: plan::PlanOptions) -> Result<InstallReport> {
+    run_with_probe_and_paths(
+        domain,
+        options,
+        &SystemProbe::real(),
+        &InstallPaths::system(),
+    )
 }
 
 pub fn run_with_probe_and_paths<R: CommandRunner>(
     domain: String,
+    options: plan::PlanOptions,
     probe: &SystemProbe<R>,
     paths: &InstallPaths,
 ) -> Result<InstallReport> {
-    let install_plan = plan::build(domain)?;
+    let install_plan = plan::build_with_options(domain, options)?;
     let doctor_report = doctor::run_with_probe(probe);
 
     require_root(&doctor_report)?;
@@ -78,18 +91,23 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     create_owned_dir(paths, ETC_DIR, &mut owned)?;
     create_owned_dir(paths, LIB_DIR, &mut owned)?;
     create_owned_dir(paths, LOG_DIR, &mut owned)?;
+    create_owned_dir(paths, BACKUP_DIR, &mut owned)?;
     create_owned_dir(paths, WEB_ROOT, &mut owned)?;
 
     write_new_file(
         paths,
         CONFIG_PATH,
-        &format!(
-            "domain = \"{}\"\nphase = \"prepared\"\n",
-            install_plan.domain
-        ),
+        &config_content(&install_plan),
         &mut owned,
     )?;
     write_new_file(paths, LOG_PATH, "G7 installer prepared.\n", &mut owned)?;
+    write_new_file(paths, ROLLBACK_PATH, &rollback_content(&owned), &mut owned)?;
+    write_new_file(
+        paths,
+        REPORT_PATH,
+        &report_content(&install_plan),
+        &mut owned,
+    )?;
 
     let mut owned_file_list = owned.clone();
     owned_file_list.push(STATE_PATH.to_string());
@@ -112,6 +130,8 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         "directories-created".to_string(),
         "config-written".to_string(),
         "log-created".to_string(),
+        "rollback-prepared".to_string(),
+        "problem-report-prepared".to_string(),
         "owned-files-written".to_string(),
         "state-written".to_string(),
     ];
@@ -127,6 +147,10 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
 
     Ok(InstallReport {
         domain: state.domain,
+        php_version: install_plan.php_version,
+        www_mode: install_plan.www_mode,
+        redis_mode: install_plan.redis_mode,
+        mail_mode: install_plan.mail_mode,
         phase: state.phase,
         state_path,
         owned_files_path,
@@ -204,6 +228,51 @@ fn write_new_file(
     Ok(())
 }
 
+fn config_content(plan: &plan::InstallPlan) -> String {
+    let mut content = String::new();
+    content.push_str(&format!("domain = \"{}\"\n", plan.domain));
+    content.push_str("phase = \"prepared\"\n");
+    content.push_str(&format!("php_version = \"{}\"\n", plan.php_version));
+    content.push_str(&format!("www_mode = \"{}\"\n", plan.www_mode));
+    content.push_str(&format!("redis = \"{}\"\n", plan.redis_mode));
+    content.push_str(&format!("mail_mode = \"{}\"\n", plan.mail_mode));
+    content.push_str(&format!("rollback = {}\n", plan.rollback_enabled));
+    content.push_str(&format!("preserve_config = {}\n", plan.preserve_config));
+    content.push_str(&format!("dns_check = {}\n", plan.dns_check_required));
+
+    if let Some(host) = &plan.smtp_host {
+        content.push_str(&format!("smtp_host = \"{host}\"\n"));
+    }
+    if let Some(port) = plan.smtp_port {
+        content.push_str(&format!("smtp_port = {port}\n"));
+    }
+    if let Some(from) = &plan.smtp_from {
+        content.push_str(&format!("smtp_from = \"{from}\"\n"));
+    }
+    if let Some(encryption) = &plan.smtp_encryption {
+        content.push_str(&format!("smtp_encryption = \"{encryption}\"\n"));
+    }
+
+    content
+}
+
+fn rollback_content(owned: &[String]) -> String {
+    let files = owned
+        .iter()
+        .map(|path| format!("    \"{path}\""))
+        .collect::<Vec<String>>()
+        .join(",\n");
+
+    format!("{{\n  \"version\": 1,\n  \"created_paths\": [\n{files}\n  ]\n}}\n")
+}
+
+fn report_content(plan: &plan::InstallPlan) -> String {
+    format!(
+        "{{\n  \"version\": 1,\n  \"domain\": \"{}\",\n  \"phase\": \"prepared\",\n  \"problem\": null\n}}\n",
+        plan.domain
+    )
+}
+
 fn install_id(domain: &str) -> String {
     let seconds = match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => duration.as_secs(),
@@ -235,11 +304,25 @@ mod tests {
         let probe = clean_root_probe(&os_release_path, &fs_root)?;
         let paths = InstallPaths::with_root(&fs_root);
 
-        let report = run_with_probe_and_paths("Example.COM.".to_string(), &probe, &paths)?;
+        let report = run_with_probe_and_paths(
+            "Example.COM.".to_string(),
+            super::plan::PlanOptions::default(),
+            &probe,
+            &paths,
+        )?;
 
         assert_eq!(report.domain, "example.com");
+        assert_eq!(report.php_version, "8.5");
+        assert_eq!(report.redis_mode, "enable");
         assert_eq!(report.phase, "prepared");
         assert!(fs_root.join("etc/g7-installer/config.toml").exists());
+        let config = fs::read_to_string(fs_root.join("etc/g7-installer/config.toml"))?;
+        assert!(config.contains("php_version = \"8.5\""));
+        assert!(config.contains("www_mode = \"redirect-to-root\""));
+        assert!(config.contains("redis = \"enable\""));
+        assert!(fs_root.join("var/lib/g7-installer/rollback.json").exists());
+        assert!(fs_root.join("var/log/g7-installer/report.json").exists());
+        assert!(fs_root.join("var/backups/g7-installer").exists());
         assert!(fs_root.join(strip_root(STATE_PATH)).exists());
         assert!(fs_root.join(strip_root(OWNED_FILES_PATH)).exists());
         assert!(report.owned_files.contains(&"/var/www/g7".to_string()));
@@ -256,7 +339,12 @@ mod tests {
         let probe = clean_probe_with_uid(&os_release_path, &fs_root, "1000\n")?;
         let paths = InstallPaths::with_root(&fs_root);
 
-        let err = match run_with_probe_and_paths("example.com".to_string(), &probe, &paths) {
+        let err = match run_with_probe_and_paths(
+            "example.com".to_string(),
+            super::plan::PlanOptions::default(),
+            &probe,
+            &paths,
+        ) {
             Ok(_) => return Err(std::io::Error::other("install should require root").into()),
             Err(err) => err,
         };
@@ -277,7 +365,12 @@ mod tests {
         let probe = clean_root_probe(&os_release_path, &fs_root)?;
         let paths = InstallPaths::with_root(&fs_root);
 
-        let err = match run_with_probe_and_paths("example.com".to_string(), &probe, &paths) {
+        let err = match run_with_probe_and_paths(
+            "example.com".to_string(),
+            super::plan::PlanOptions::default(),
+            &probe,
+            &paths,
+        ) {
             Ok(_) => return Err(std::io::Error::other("install should be blocked").into()),
             Err(err) => err,
         };

@@ -79,6 +79,10 @@ G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 ro
 - 오류 메시지는 해결 가능한 다음 명령을 포함한다.
 - plan은 실제 변경될 패키지, 파일, 서비스, 포트를 보여준다.
 - install 완료 출력은 domain, 설치 경로, HTTPS 상태, 다음 접속 URL을 포함한다.
+- PHP는 기본 8.5로 계획하고, 8.3은 명시 옵션으로만 사용한다.
+- www canonical 정책은 설치 전 plan에 반드시 드러나야 한다.
+- Redis, 메일 발송, Certbot 자동갱신, DNS/IP 검증은 전체 기능 설치 프로필의 일부로 본다.
+- SMTP 비밀번호/API key 같은 비밀값은 CLI 인자와 로그에 남기지 않는다.
 - 대화형 확인은 명확해야 하며, CI나 자동화 환경을 위한 non-interactive 옵션을 고려한다.
 
 ## 10. 테스트 원칙
@@ -118,6 +122,9 @@ G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 ro
 - root shell string 임의 조합
 - 실패를 무시하고 다음 단계 진행
 - state 기록 없는 변경 작업
+- rollback/report 기록 없는 서버 변경 작업
+- DNS/IP 불일치를 무시한 Certbot 발급 시도
+- Redis 6379 포트 외부 공개
 - 테스트 없이 fresh server 판정 변경
 - G7 본체 레포 직접 수정
 
@@ -130,4 +137,3 @@ G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 ro
 3. 실패 원인과 다음 조치가 명확한가
 4. installer 책임 범위 안에 있는가
 5. 테스트 가능한 구조인가
-

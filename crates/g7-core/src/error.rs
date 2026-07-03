@@ -19,6 +19,24 @@ pub enum Error {
     )]
     InvalidDomain { domain: String },
 
+    #[error("invalid PHP version: {version}")]
+    #[diagnostic(
+        code(g7::input::invalid_php_version),
+        help("Use one of the supported PHP versions.")
+    )]
+    InvalidPhpVersion { version: String, supported: String },
+
+    #[error("invalid value for {field}: {value}")]
+    #[diagnostic(
+        code(g7::input::invalid_option),
+        help("Use one of the supported values.")
+    )]
+    InvalidOption {
+        field: &'static str,
+        value: String,
+        supported: String,
+    },
+
     #[error("{command} is not implemented yet")]
     #[diagnostic(
         code(g7::command::not_implemented),

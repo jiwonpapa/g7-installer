@@ -43,9 +43,11 @@ G7 본체와의 관계:
 OS: Ubuntu 24.04 LTS
 권한: root 또는 sudo
 웹서버: Nginx
-PHP: PHP-FPM 8.3 이상
+PHP: PHP-FPM 8.5 기본, 8.3 호환 옵션
 DB: MariaDB 10.11 또는 MySQL 8
 HTTPS: Certbot Let's Encrypt
+Cache/Queue: Redis 기본 지원
+메일: SMTP relay 기본 권장, local Postfix 선택
 설치 대상: 새 VPS
 ```
 
@@ -84,12 +86,28 @@ bootstrap은 최소 Bash만 사용합니다. 실제 설치 로직은 Rust 바이
 
 ```bash
 g7 doctor
-g7 plan --domain example.com
-sudo g7 install --domain example.com
+g7 plan --domain example.com [options]
+sudo g7 install --domain example.com [options]
 g7 status
 g7 logs
 sudo g7 update
 sudo g7 self-update
+```
+
+주요 옵션:
+
+```bash
+--php-version 8.5|8.3
+--www-mode redirect-to-root|redirect-to-www|include|none
+--redis enable|disable
+--mail-mode none|smtp-relay|local-postfix
+--smtp-host smtp.example.com
+--smtp-port 587
+--smtp-from no-reply@example.com
+--smtp-encryption none|starttls|tls
+--rollback true|false
+--preserve-config true|false
+--dns-check true|false
 ```
 
 명령 설명:
@@ -113,25 +131,31 @@ sudo g7 self-update
 3. Ubuntu 버전 확인
 4. fresh server 검사
 5. 도메인 DNS가 서버 IP를 가리키는지 확인
-6. 80/443 포트 점유 확인
-7. 설치 계획 출력
-8. 사용자 확인
-9. apt repository 업데이트
-10. Nginx 설치
-11. PHP-FPM 및 필수 PHP 확장 설치
-12. MariaDB/MySQL 설치
-13. DB 및 DB 사용자 생성
-14. G7 릴리스 다운로드
-15. checksum 검증
-16. `/var/www/g7` 배치
-17. `.env` 생성 또는 G7 웹 인스톨러 연결 준비
-18. 파일 권한 설정
-19. Nginx vhost 생성
-20. Certbot HTTPS 발급
-21. queue worker, scheduler, reverb 선택 설정
-22. 서비스 재시작
-23. HTTP/HTTPS smoke test
-24. 설치 결과 출력
+6. www canonical 정책 확인
+7. 80/443 포트 점유 확인
+8. SMTP outbound 포트 확인
+9. 설치 계획 출력
+10. rollback/report/설정보존 준비
+11. 사용자 확인
+12. apt repository 업데이트
+13. Nginx 설치
+14. PHP-FPM 및 필수 PHP 확장 설치
+15. Redis 설치 및 localhost-only hardening
+16. MariaDB/MySQL 설치
+17. DB 및 DB 사용자 생성
+18. G7 릴리스 다운로드
+19. checksum 검증
+20. `/var/www/g7` 배치
+21. `.env` 생성 또는 G7 웹 인스톨러 연결 준비
+22. 메일 발송 설정 반영
+23. 파일 권한 설정
+24. Nginx vhost 생성
+25. Certbot HTTPS 발급
+26. Certbot 자동갱신 timer 확인
+27. queue worker, scheduler, reverb 선택 설정
+28. 서비스 재시작
+29. HTTP/HTTPS/mail/Redis smoke test
+30. 설치 결과 출력
 
 ## 6. fresh server 검사
 
@@ -144,6 +168,10 @@ sudo g7 self-update
 - `/etc/g7-installer/owned-files.json` 없이 G7 관련 파일이 존재
 - 기존 Certbot 인증서가 동일 도메인으로 존재하지만 installer 소유가 아님
 - `/etc/g7-installer/state.json` 기준으로 다른 설치가 진행 중
+- 도메인 A/AAAA 레코드가 VPS 공인 IP와 불일치
+- 요청한 www host가 VPS 공인 IP와 불일치
+- SMTP outbound 포트가 차단됨
+- Redis가 외부 공개 bind로 설정됨
 
 중단 메시지는 사용자가 이해할 수 있어야 합니다.
 
@@ -169,8 +197,12 @@ g7 doctor
 /etc/g7-installer/config.toml
 /var/lib/g7-installer/state.json
 /var/lib/g7-installer/owned-files.json
+/var/lib/g7-installer/rollback.json
 /var/log/g7-installer/install.log
+/var/log/g7-installer/report.json
+/var/backups/g7-installer
 /var/www/g7
+/var/www/g7/.env
 /etc/nginx/sites-available/g7.conf
 /etc/nginx/sites-enabled/g7.conf
 /etc/systemd/system/g7-queue.service

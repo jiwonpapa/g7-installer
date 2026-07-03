@@ -25,6 +25,26 @@ g7 doctor
 sudo g7 install --domain example.com
 ```
 
+전체 기능 스택 기준 설치 계획 예시:
+
+```bash
+g7 plan \
+  --domain example.com \
+  --php-version 8.5 \
+  --www-mode redirect-to-root \
+  --redis enable \
+  --mail-mode smtp-relay \
+  --smtp-host smtp.example.com \
+  --smtp-port 587 \
+  --smtp-from no-reply@example.com
+```
+
+PHP 8.3 호환 모드:
+
+```bash
+g7 plan --domain example.com --php-version 8.3
+```
+
 `bootstrap.sh`는 GitHub Release의 최신 바이너리를 다운로드하고, `checksums.txt`로 SHA256 검증 후 `/usr/local/bin/g7`에 설치합니다.
 
 ## 지원 환경
@@ -34,17 +54,36 @@ sudo g7 install --domain example.com
 - 아키텍처:
   - `x86_64-unknown-linux-musl`
   - `aarch64-unknown-linux-musl`
+- PHP: 기본 `8.5`, 호환 옵션 `8.3`
+- Redis: 기본 활성화 계획
+- 메일: SMTP relay 권장, local Postfix는 선택 옵션
 
 ## 현재 명령
 
 ```bash
 g7 doctor
-g7 plan --domain example.com
-sudo g7 install --domain example.com
+g7 plan --domain example.com [options]
+sudo g7 install --domain example.com [options]
 g7 status
 g7 logs
 sudo g7 update
 sudo g7 self-update
+```
+
+주요 옵션:
+
+```text
+--php-version 8.5|8.3
+--www-mode redirect-to-root|redirect-to-www|include|none
+--redis enable|disable
+--mail-mode none|smtp-relay|local-postfix
+--smtp-host smtp.example.com
+--smtp-port 587
+--smtp-from no-reply@example.com
+--smtp-encryption none|starttls|tls
+--rollback true|false
+--preserve-config true|false
+--dns-check true|false
 ```
 
 ## 현재 구현된 기능
@@ -62,17 +101,26 @@ sudo g7 self-update
 - `g7 plan --domain example.com`
   - 설치 전 dry-run 계획 출력
   - preflight gate, 설치 예정 패키지, 파일, 서비스, 포트, 중단 조건 표시
+  - PHP 8.5 기본, PHP 8.3 호환 옵션 반영
+  - www canonical 정책 반영
+  - Redis/cache/session/queue 준비 항목 반영
+  - SMTP relay/local Postfix 메일 발송 준비 항목 반영
+  - DNS/IP, SMTP outbound, Certbot renewal, rollback, 설정보존 gate 표시
 
 - `sudo g7 install --domain example.com`
   - 현재는 MVP 준비 단계입니다.
   - 실제 apt/Nginx/PHP/MariaDB/Certbot 설치 전 단계까지만 수행합니다.
+  - 선택 옵션을 `/etc/g7-installer/config.toml`에 저장합니다.
   - fresh-server gate 통과 후 아래 파일과 디렉터리를 생성합니다.
 
 ```text
 /etc/g7-installer/config.toml
 /var/lib/g7-installer/state.json
 /var/lib/g7-installer/owned-files.json
+/var/lib/g7-installer/rollback.json
 /var/log/g7-installer/install.log
+/var/log/g7-installer/report.json
+/var/backups/g7-installer
 /var/www/g7
 ```
 
@@ -90,6 +138,11 @@ sudo g7 self-update
 - MariaDB/MySQL 설정
 - G7 Release 다운로드 및 압축 해제
 - Certbot 인증서 발급
+- Certbot 자동갱신 timer 실제 활성화
+- 도메인 DNS A/AAAA와 VPS 공인 IP 실제 비교
+- SMTP outbound 실제 연결 테스트
+- Redis 실제 설치/하드닝
+- 실패 시 자동 rollback 실행
 - `update`, `self-update` 실제 동작
 
 ## GitHub Release 배포 방식
