@@ -1,19 +1,41 @@
 # G7 Installer
 
-Rust based CLI installer for preparing a fresh Ubuntu 24.04 VPS for Gnuboard 7.
+G7 Installer는 새 Ubuntu VPS에 그누보드7 설치 환경을 준비하기 위한 Rust 기반 CLI 설치기입니다.
 
-## Test Install From GitHub
+목표는 서버에 Rust, Cargo, Git clone 없이 GitHub Release 바이너리만 내려받아 `g7` 명령으로 설치를 진행하는 것입니다.
+
+## 빠른 설치
+
+테스트 단계에서는 별도 도메인 없이 GitHub raw 주소로 bootstrap을 실행합니다.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7-installer/main/scripts/bootstrap.sh | sudo bash
+```
+
+설치 후 확인:
+
+```bash
+g7 --version
 g7 doctor
+```
+
+설치 준비 실행:
+
+```bash
 sudo g7 install --domain example.com
 ```
 
-The bootstrap script downloads the latest GitHub Release binary, verifies
-`checksums.txt`, and installs `g7` to `/usr/local/bin/g7`.
+`bootstrap.sh`는 GitHub Release의 최신 바이너리를 다운로드하고, `checksums.txt`로 SHA256 검증 후 `/usr/local/bin/g7`에 설치합니다.
 
-## Current MVP Commands
+## 지원 환경
+
+- OS: Ubuntu 24.04 LTS
+- 권한: `doctor`는 일반 사용자 가능, `install`은 root 또는 sudo 필요
+- 아키텍처:
+  - `x86_64-unknown-linux-musl`
+  - `aarch64-unknown-linux-musl`
+
+## 현재 명령
 
 ```bash
 g7 doctor
@@ -25,46 +47,97 @@ sudo g7 update
 sudo g7 self-update
 ```
 
-Implemented now:
+## 현재 구현된 기능
 
-- `doctor`: checks Ubuntu 24.04, root status, Nginx/Apache, ports 80/443, Nginx config, `/var/www/g7`, installer state, owned files, and Certbot live directory.
-- `plan`: prints a dry-run install contract: gates, packages, files, services, ports, and stop conditions.
-- `install`: MVP prepare phase only. It runs the same preflight gate, requires root, then writes installer state, owned-files metadata, config, log, and `/var/www/g7`.
-- `logs`: prints installer log path.
-- `status`: placeholder status.
+- `g7 doctor`
+  - Ubuntu 24.04 확인
+  - root 권한 여부 확인
+  - Nginx/Apache 실행 상태 확인
+  - 80/443 포트 점유 확인
+  - 기존 Nginx site config 확인
+  - `/var/www/g7` 존재 여부 확인
+  - installer state/owned-files 확인
+  - Certbot live 인증서 디렉터리 확인
 
-Not implemented yet:
+- `g7 plan --domain example.com`
+  - 설치 전 dry-run 계획 출력
+  - preflight gate, 설치 예정 패키지, 파일, 서비스, 포트, 중단 조건 표시
 
-- apt package installation
-- Nginx vhost rendering
-- PHP-FPM/MariaDB provisioning
-- G7 release download and extraction
-- Certbot certificate issue
-- update and self-update execution
+- `sudo g7 install --domain example.com`
+  - 현재는 MVP 준비 단계입니다.
+  - 실제 apt/Nginx/PHP/MariaDB/Certbot 설치 전 단계까지만 수행합니다.
+  - fresh-server gate 통과 후 아래 파일과 디렉터리를 생성합니다.
 
-## Release
-
-Create and push a version tag:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
+```text
+/etc/g7-installer/config.toml
+/var/lib/g7-installer/state.json
+/var/lib/g7-installer/owned-files.json
+/var/log/g7-installer/install.log
+/var/www/g7
 ```
 
-GitHub Actions builds:
+- `g7 logs`
+  - installer log 경로 출력
+
+- `g7 status`
+  - placeholder 상태 출력
+
+## 아직 미구현
+
+- apt 패키지 설치
+- Nginx vhost 렌더링 및 적용
+- PHP-FPM 설정
+- MariaDB/MySQL 설정
+- G7 Release 다운로드 및 압축 해제
+- Certbot 인증서 발급
+- `update`, `self-update` 실제 동작
+
+## GitHub Release 배포 방식
+
+현재 bootstrap은 아래 Release asset을 사용합니다.
 
 - `g7-x86_64-unknown-linux-musl`
 - `g7-aarch64-unknown-linux-musl`
 - `checksums.txt`
 
-For local smoke against the `g7-test` VM:
+현재 테스트 릴리스:
+
+```text
+https://github.com/jiwonpapa/g7-installer/releases/tag/v0.1.0
+```
+
+수동으로 Release asset을 만들 때:
+
+```bash
+cargo build --release --target x86_64-unknown-linux-musl -p g7-cli
+cargo build --release --target aarch64-unknown-linux-musl -p g7-cli
+
+mkdir -p dist
+install -m 0755 target/x86_64-unknown-linux-musl/release/g7 dist/g7-x86_64-unknown-linux-musl
+install -m 0755 target/aarch64-unknown-linux-musl/release/g7 dist/g7-aarch64-unknown-linux-musl
+(cd dist && sha256sum g7-* > checksums.txt)
+```
+
+## 로컬 VM smoke test
+
+`g7-test` VM 기준:
 
 ```bash
 scripts/g7-test-smoke.sh
 ```
 
-To reset the VM during smoke:
+VM reset까지 같이 실행:
 
 ```bash
 G7_SMOKE_RESET=1 scripts/g7-test-smoke.sh
+```
+
+## 개발 검증
+
+커밋 전 기본 검증:
+
+```bash
+cargo fmt --check
+cargo test
+cargo clippy --all-targets -- -D warnings
 ```
