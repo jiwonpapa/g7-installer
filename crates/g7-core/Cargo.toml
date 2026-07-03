@@ -1,0 +1,14 @@
+[package]
+name = "g7-core"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+g7-state = { path = "../g7-state" }
+g7-system = { path = "../g7-system" }
+miette.workspace = true
+thiserror.workspace = true

@@ -1,0 +1,43 @@
+use crate::command::{CommandError, CommandRunner, CommandSpec};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServiceActivity {
+    Active,
+    Inactive,
+    NotFound,
+    Unknown,
+}
+
+pub fn is_active<R: CommandRunner>(
+    runner: &R,
+    service: &str,
+) -> Result<ServiceActivity, CommandError> {
+    let output = runner.run(&CommandSpec::new("systemctl").arg("is-active").arg(service))?;
+
+    match (output.status, output.stdout.trim(), output.stderr.trim()) {
+        (0, "active", _) => Ok(ServiceActivity::Active),
+        (_, "inactive" | "failed" | "deactivating" | "activating", _) => {
+            Ok(ServiceActivity::Inactive)
+        }
+        (_, "unknown", _) => Ok(ServiceActivity::NotFound),
+        (_, _, stderr) if stderr.contains("could not be found") => Ok(ServiceActivity::NotFound),
+        _ => Ok(ServiceActivity::Unknown),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ServiceActivity, is_active};
+    use crate::command::{CommandOutput, FakeCommandRunner};
+
+    #[test]
+    fn detects_active_service() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success("active\n"));
+
+        let activity = is_active(&runner, "nginx")?;
+
+        assert_eq!(activity, ServiceActivity::Active);
+        Ok(())
+    }
+}

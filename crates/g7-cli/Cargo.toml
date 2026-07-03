@@ -1,0 +1,18 @@
+[package]
+name = "g7-cli"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "g7"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+g7-core = { path = "../g7-core" }
+miette.workspace = true
+
