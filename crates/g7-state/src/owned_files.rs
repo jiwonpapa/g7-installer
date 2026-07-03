@@ -24,3 +24,8 @@ pub fn write_owned_files(path: &Path, owned_files: &OwnedFiles) -> io::Result<()
     let payload = serde_json::to_vec_pretty(owned_files).map_err(io::Error::other)?;
     fs::write(path, payload)
 }
+
+pub fn read_owned_files(path: &Path) -> io::Result<OwnedFiles> {
+    let payload = fs::read(path)?;
+    serde_json::from_slice(&payload).map_err(io::Error::other)
+}

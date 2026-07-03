@@ -1,11 +1,12 @@
 use clap::{Parser, Subcommand};
+use dialoguer::{Confirm, Input, Select};
 use g7_core::commands::{
-    DoctorCheckStatus, doctor, install, logs, plan, self_update, status, update,
+    DoctorCheckStatus, doctor, install, logs, plan, reset, self_update, status, update,
 };
-use miette::Result;
+use miette::{Result, miette};
 
 #[derive(Debug, Parser)]
-#[command(name = "g7")]
+#[command(name = "g7inst")]
 #[command(version)]
 #[command(about = "G7 Installer CLI")]
 struct Cli {
@@ -15,6 +16,15 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Run a guided setup flow.
+    Setup {
+        /// Domain that will serve the G7 site.
+        #[arg(long)]
+        domain: Option<String>,
+        /// Use local test mode without public DNS or Let's Encrypt.
+        #[arg(long, default_value_t = false)]
+        local_test: bool,
+    },
     /// Diagnose whether this server can be used for a G7 install.
     Doctor,
     /// Show the installation plan before making changes.
@@ -22,9 +32,18 @@ enum Command {
         /// Domain that will serve the G7 site.
         #[arg(long)]
         domain: String,
+        /// Use local test mode without public DNS or Let's Encrypt.
+        #[arg(long, default_value_t = false)]
+        local_test: bool,
+        /// Web server: nginx or apache.
+        #[arg(long, default_value_t = plan::DEFAULT_WEB_SERVER.to_string())]
+        web_server: String,
         /// PHP-FPM version. Default is 8.5. Use 8.3 for compatibility.
         #[arg(long, default_value_t = plan::DEFAULT_PHP_VERSION.to_string())]
         php_version: String,
+        /// Database engine: mariadb or mysql.
+        #[arg(long, default_value_t = plan::DEFAULT_DATABASE_ENGINE.to_string())]
+        database: String,
         /// Canonical host policy: redirect-to-root, redirect-to-www, include, none.
         #[arg(long, default_value_t = plan::DEFAULT_WWW_MODE.to_string())]
         www_mode: String,
@@ -61,9 +80,18 @@ enum Command {
         /// Domain that will serve the G7 site.
         #[arg(long)]
         domain: String,
+        /// Use local test mode without public DNS or Let's Encrypt.
+        #[arg(long, default_value_t = false)]
+        local_test: bool,
+        /// Web server: nginx or apache.
+        #[arg(long, default_value_t = plan::DEFAULT_WEB_SERVER.to_string())]
+        web_server: String,
         /// PHP-FPM version. Default is 8.5. Use 8.3 for compatibility.
         #[arg(long, default_value_t = plan::DEFAULT_PHP_VERSION.to_string())]
         php_version: String,
+        /// Database engine: mariadb or mysql.
+        #[arg(long, default_value_t = plan::DEFAULT_DATABASE_ENGINE.to_string())]
+        database: String,
         /// Canonical host policy: redirect-to-root, redirect-to-www, include, none.
         #[arg(long, default_value_t = plan::DEFAULT_WWW_MODE.to_string())]
         www_mode: String,
@@ -99,6 +127,15 @@ enum Command {
     Status,
     /// Show installer log location.
     Logs,
+    /// Remove installer-owned files for test VM reset.
+    Reset {
+        /// Confirm removal of installer-owned files.
+        #[arg(long, default_value_t = false)]
+        yes: bool,
+        /// Preview paths without removing files.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
     /// Update the installed G7 application.
     Update,
     /// Update the installer binary.
@@ -109,10 +146,14 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Command::Setup { domain, local_test } => run_setup(domain, local_test)?,
         Command::Doctor => print_doctor(doctor::run()),
         Command::Plan {
             domain,
+            local_test,
+            web_server,
             php_version,
+            database,
             www_mode,
             redis,
             mail_mode,
@@ -127,7 +168,10 @@ fn main() -> Result<()> {
             plan::build_with_options(
                 domain,
                 plan_options(
+                    local_test,
+                    web_server,
                     php_version,
+                    database,
                     www_mode,
                     redis,
                     mail_mode,
@@ -144,7 +188,10 @@ fn main() -> Result<()> {
         ),
         Command::Install {
             domain,
+            local_test,
+            web_server,
             php_version,
+            database,
             www_mode,
             redis,
             mail_mode,
@@ -160,7 +207,10 @@ fn main() -> Result<()> {
                 install::run(
                     domain,
                     plan_options(
+                        local_test,
+                        web_server,
                         php_version,
+                        database,
                         www_mode,
                         redis,
                         mail_mode,
@@ -178,6 +228,9 @@ fn main() -> Result<()> {
         }
         Command::Status => print_status(status::read()),
         Command::Logs => print_logs(logs::location()),
+        Command::Reset { yes, dry_run } => {
+            print_reset(reset::run(yes, dry_run).map_err(miette::Report::new)?);
+        }
         Command::Update => {
             update::run().map_err(miette::Report::new)?;
         }
@@ -191,7 +244,10 @@ fn main() -> Result<()> {
 
 #[allow(clippy::too_many_arguments)]
 fn plan_options(
+    local_test: bool,
+    web_server: String,
     php_version: String,
+    database: String,
     www_mode: String,
     redis: String,
     mail_mode: String,
@@ -204,7 +260,10 @@ fn plan_options(
     dns_check: bool,
 ) -> plan::PlanOptions {
     plan::PlanOptions {
+        local_test,
+        web_server,
         php_version,
+        database_engine: database,
         www_mode,
         redis_mode: redis,
         mail_mode,
@@ -216,6 +275,172 @@ fn plan_options(
         preserve_config,
         dns_check,
     }
+}
+
+fn run_setup(domain_arg: Option<String>, local_test_arg: bool) -> Result<()> {
+    println!("G7 Installer Setup");
+    println!("1) Server check");
+    let doctor_report = doctor::run();
+    print_doctor(doctor_report.clone());
+    println!();
+
+    if !doctor_report.install_allowed {
+        return Err(miette!(
+            "server preflight failed; fix failed checks and run g7inst setup again"
+        ));
+    }
+
+    println!("2) Setup options");
+    let profile_items = [
+        "public domain: DNS + Let's Encrypt",
+        "local test domain: no public DNS, no Let's Encrypt",
+    ];
+    let profile = if local_test_arg {
+        1
+    } else {
+        Select::new()
+            .with_prompt("Install profile")
+            .items(&profile_items)
+            .default(0)
+            .interact()
+            .map_err(|err| miette!("setup prompt failed: {err}"))?
+    };
+    let local_test = profile == 1;
+
+    let default_domain = if local_test {
+        "g7-test.local"
+    } else {
+        "example.com"
+    };
+    let domain = match domain_arg {
+        Some(domain) => domain,
+        None => Input::<String>::new()
+            .with_prompt("Domain")
+            .default(default_domain.to_string())
+            .interact_text()
+            .map_err(|err| miette!("setup prompt failed: {err}"))?,
+    };
+
+    let web_server_items = ["nginx", "apache"];
+    let web_server = select_value("Web server", &web_server_items, 0)?;
+
+    let php_items = ["8.5", "8.3"];
+    let php_version = select_value("PHP-FPM version", &php_items, 0)?;
+
+    let database_items = ["mariadb", "mysql"];
+    let database = select_value("Database", &database_items, 0)?;
+
+    let www_items = ["redirect-to-root", "redirect-to-www", "include", "none"];
+    let www_default = if local_test { 3 } else { 0 };
+    let www_mode = select_value("www policy", &www_items, www_default)?;
+
+    let redis_enabled = Confirm::new()
+        .with_prompt("Install Redis for cache/session/queue?")
+        .default(true)
+        .interact()
+        .map_err(|err| miette!("setup prompt failed: {err}"))?;
+    let redis = if redis_enabled { "enable" } else { "disable" }.to_string();
+
+    let mail_items = ["none", "smtp-relay", "local-postfix"];
+    let mail_mode = select_value("Mail delivery", &mail_items, 0)?;
+    let mut smtp_host = None;
+    let mut smtp_from = None;
+    let mut smtp_port = if mail_mode == "local-postfix" {
+        25
+    } else {
+        plan::DEFAULT_SMTP_PORT
+    };
+    let mut smtp_encryption = plan::DEFAULT_SMTP_ENCRYPTION.to_string();
+
+    if mail_mode == "smtp-relay" {
+        smtp_host = Some(
+            Input::<String>::new()
+                .with_prompt("SMTP host")
+                .interact_text()
+                .map_err(|err| miette!("setup prompt failed: {err}"))?,
+        );
+        smtp_port = Input::<u16>::new()
+            .with_prompt("SMTP port")
+            .default(plan::DEFAULT_SMTP_PORT)
+            .interact_text()
+            .map_err(|err| miette!("setup prompt failed: {err}"))?;
+        smtp_from = Some(
+            Input::<String>::new()
+                .with_prompt("SMTP from address")
+                .interact_text()
+                .map_err(|err| miette!("setup prompt failed: {err}"))?,
+        );
+        let encryption_items = ["starttls", "tls", "none"];
+        smtp_encryption = select_value("SMTP encryption", &encryption_items, 0)?;
+    }
+
+    let options = plan_options(
+        local_test,
+        web_server,
+        php_version,
+        database,
+        www_mode,
+        redis,
+        mail_mode,
+        smtp_host,
+        smtp_port,
+        smtp_from,
+        smtp_encryption,
+        true,
+        true,
+        !local_test,
+    );
+    let setup_plan =
+        plan::build_with_options(domain.clone(), options.clone()).map_err(miette::Report::new)?;
+
+    println!();
+    println!("3) Setup summary");
+    print_setup_summary(&setup_plan);
+
+    let proceed = Confirm::new()
+        .with_prompt("Proceed with install preparation?")
+        .default(false)
+        .interact()
+        .map_err(|err| miette!("setup prompt failed: {err}"))?;
+
+    if !proceed {
+        println!("setup cancelled");
+        return Ok(());
+    }
+
+    println!();
+    println!("4) Install preparation");
+    print_install(install::run(domain, options).map_err(miette::Report::new)?);
+    Ok(())
+}
+
+fn select_value(prompt: &str, items: &[&str], default: usize) -> Result<String> {
+    let selected = Select::new()
+        .with_prompt(prompt)
+        .items(items)
+        .default(default)
+        .interact()
+        .map_err(|err| miette!("setup prompt failed: {err}"))?;
+
+    Ok(items[selected].to_string())
+}
+
+fn print_setup_summary(plan: &plan::InstallPlan) {
+    println!("domain: {}", plan.domain);
+    println!("mode: {}", plan.deployment_mode);
+    println!("web_server: {}", plan.web_server);
+    println!("php_version: {}", plan.php_version);
+    println!("database: {}", plan.database_engine);
+    println!("www_mode: {}", plan.www_mode);
+    println!("redis: {}", plan.redis_mode);
+    println!("mail_mode: {}", plan.mail_mode);
+    println!("dns_check: {}", plan.dns_check_required);
+    println!(
+        "packages: {} item(s), files: {} item(s), services: {} item(s)",
+        plan.packages.len(),
+        plan.files.len(),
+        plan.services.len()
+    );
 }
 
 fn print_doctor(report: doctor::DoctorReport) {
@@ -242,7 +467,10 @@ fn format_plan(plan: &plan::InstallPlan) -> String {
 
     output.push_str("G7 Installer Plan\n");
     output.push_str(&format!("domain: {}\n", plan.domain));
+    output.push_str(&format!("deployment_mode: {}\n", plan.deployment_mode));
+    output.push_str(&format!("web_server: {}\n", plan.web_server));
     output.push_str(&format!("php_version: {}\n", plan.php_version));
+    output.push_str(&format!("database: {}\n", plan.database_engine));
     output.push_str(&format!("www_mode: {}\n", plan.www_mode));
     output.push_str(&format!("redis: {}\n", plan.redis_mode));
     output.push_str(&format!("mail_mode: {}\n", plan.mail_mode));
@@ -313,7 +541,10 @@ fn print_status(status: status::InstallerStatus) {
 fn print_install(report: install::InstallReport) {
     println!("G7 Installer Install");
     println!("domain: {}", report.domain);
+    println!("deployment_mode: {}", report.deployment_mode);
+    println!("web_server: {}", report.web_server);
     println!("php_version: {}", report.php_version);
+    println!("database: {}", report.database_engine);
     println!("www_mode: {}", report.www_mode);
     println!("redis: {}", report.redis_mode);
     println!("mail_mode: {}", report.mail_mode);
@@ -330,6 +561,22 @@ fn print_install(report: install::InstallReport) {
 
 fn print_logs(location: logs::LogLocation) {
     println!("{}", location.path.display());
+}
+
+fn print_reset(report: reset::ResetReport) {
+    println!("G7 Installer Reset");
+    println!("dry_run: {}", report.dry_run);
+    println!("removed:");
+    for path in report.removed {
+        println!("- {path}");
+    }
+
+    if !report.missing.is_empty() {
+        println!("missing:");
+        for path in report.missing {
+            println!("- {path}");
+        }
+    }
 }
 
 fn check_status_label(status: DoctorCheckStatus) -> &'static str {
@@ -356,7 +603,10 @@ mod tests {
         assert!(output.contains("- nginx: Web server and reverse proxy."));
         assert!(output.contains("- /var/www/g7 (create)"));
         assert!(output.contains("- 443/tcp: Inbound HTTPS traffic."));
+        assert!(output.contains("deployment_mode: public"));
+        assert!(output.contains("web_server: nginx"));
         assert!(output.contains("php_version: 8.5"));
+        assert!(output.contains("database: mariadb"));
         assert!(output.contains("redis: enable"));
         assert!(output.contains("rollback: true"));
         assert!(output.contains("- Apache is running."));

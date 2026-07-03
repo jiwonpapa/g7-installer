@@ -99,8 +99,8 @@ G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 ro
 
 - release artifact는 target triple별로 만든다.
 - `checksums.txt`는 release artifact와 함께 배포한다.
-- bootstrap은 latest release 감지, checksum 검증, `/usr/local/bin/g7` 설치만 담당한다.
-- `g7 --version`은 설치기 버전과 build target을 출력한다.
+- bootstrap은 latest release 감지, checksum 검증, `/usr/local/bin/g7inst` 설치만 담당한다.
+- `g7inst --version`은 설치기 버전과 build target을 출력한다.
 - self-update는 현재 바이너리 교체 실패 시 복구 가능해야 한다.
 
 ## 12. 개발 완료 기준

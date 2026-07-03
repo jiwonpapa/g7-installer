@@ -20,12 +20,16 @@ const BACKUP_DIR: &str = "/var/backups/g7-installer";
 const LOG_PATH: &str = "/var/log/g7-installer/install.log";
 const REPORT_PATH: &str = "/var/log/g7-installer/report.json";
 const ROLLBACK_PATH: &str = "/var/lib/g7-installer/rollback.json";
+const LOCAL_HOSTS_PATH: &str = "/etc/g7-installer/local-hosts.txt";
 const WEB_ROOT: &str = "/var/www/g7";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallReport {
     pub domain: String,
+    pub deployment_mode: String,
+    pub web_server: String,
     pub php_version: String,
+    pub database_engine: String,
     pub www_mode: String,
     pub redis_mode: String,
     pub mail_mode: String,
@@ -108,6 +112,16 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         &report_content(&install_plan),
         &mut owned,
     )?;
+    let mut optional_steps = Vec::new();
+    if install_plan.deployment_mode == "local-test" {
+        write_new_file(
+            paths,
+            LOCAL_HOSTS_PATH,
+            &local_hosts_content(&install_plan.domain),
+            &mut owned,
+        )?;
+        optional_steps.push("local-hosts-suggestion-written".to_string());
+    }
 
     let mut owned_file_list = owned.clone();
     owned_file_list.push(STATE_PATH.to_string());
@@ -125,16 +139,17 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         }
     })?;
 
-    let completed_steps = vec![
+    let mut completed_steps = vec![
         "preflight-passed".to_string(),
         "directories-created".to_string(),
         "config-written".to_string(),
         "log-created".to_string(),
         "rollback-prepared".to_string(),
         "problem-report-prepared".to_string(),
-        "owned-files-written".to_string(),
-        "state-written".to_string(),
     ];
+    completed_steps.extend(optional_steps);
+    completed_steps.push("owned-files-written".to_string());
+    completed_steps.push("state-written".to_string());
     let mut state = InstallerState::new(install_id(&install_plan.domain), install_plan.domain);
     state.phase = "prepared".to_string();
     state.completed_steps = completed_steps.clone();
@@ -147,7 +162,10 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
 
     Ok(InstallReport {
         domain: state.domain,
+        deployment_mode: install_plan.deployment_mode,
+        web_server: install_plan.web_server,
         php_version: install_plan.php_version,
+        database_engine: install_plan.database_engine,
         www_mode: install_plan.www_mode,
         redis_mode: install_plan.redis_mode,
         mail_mode: install_plan.mail_mode,
@@ -231,8 +249,11 @@ fn write_new_file(
 fn config_content(plan: &plan::InstallPlan) -> String {
     let mut content = String::new();
     content.push_str(&format!("domain = \"{}\"\n", plan.domain));
+    content.push_str(&format!("deployment_mode = \"{}\"\n", plan.deployment_mode));
     content.push_str("phase = \"prepared\"\n");
+    content.push_str(&format!("web_server = \"{}\"\n", plan.web_server));
     content.push_str(&format!("php_version = \"{}\"\n", plan.php_version));
+    content.push_str(&format!("database = \"{}\"\n", plan.database_engine));
     content.push_str(&format!("www_mode = \"{}\"\n", plan.www_mode));
     content.push_str(&format!("redis = \"{}\"\n", plan.redis_mode));
     content.push_str(&format!("mail_mode = \"{}\"\n", plan.mail_mode));
@@ -270,6 +291,12 @@ fn report_content(plan: &plan::InstallPlan) -> String {
     format!(
         "{{\n  \"version\": 1,\n  \"domain\": \"{}\",\n  \"phase\": \"prepared\",\n  \"problem\": null\n}}\n",
         plan.domain
+    )
+}
+
+fn local_hosts_content(domain: &str) -> String {
+    format!(
+        "# Add this on the test client if {domain} is not resolvable yet:\n127.0.0.1 {domain}\n"
     )
 }
 
@@ -312,12 +339,18 @@ mod tests {
         )?;
 
         assert_eq!(report.domain, "example.com");
+        assert_eq!(report.deployment_mode, "public");
+        assert_eq!(report.web_server, "nginx");
         assert_eq!(report.php_version, "8.5");
+        assert_eq!(report.database_engine, "mariadb");
         assert_eq!(report.redis_mode, "enable");
         assert_eq!(report.phase, "prepared");
         assert!(fs_root.join("etc/g7-installer/config.toml").exists());
         let config = fs::read_to_string(fs_root.join("etc/g7-installer/config.toml"))?;
+        assert!(config.contains("deployment_mode = \"public\""));
+        assert!(config.contains("web_server = \"nginx\""));
         assert!(config.contains("php_version = \"8.5\""));
+        assert!(config.contains("database = \"mariadb\""));
         assert!(config.contains("www_mode = \"redirect-to-root\""));
         assert!(config.contains("redis = \"enable\""));
         assert!(fs_root.join("var/lib/g7-installer/rollback.json").exists());
@@ -379,6 +412,37 @@ mod tests {
         fs::remove_dir_all(fs_root)?;
 
         assert!(matches!(err, Error::InstallBlocked { .. }));
+        Ok(())
+    }
+
+    #[test]
+    fn install_writes_local_hosts_hint_for_local_test()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let os_release_path = write_temp_os_release()?;
+        let fs_root = create_temp_fs_root()?;
+        let probe = clean_root_probe(&os_release_path, &fs_root)?;
+        let paths = InstallPaths::with_root(&fs_root);
+        let options = super::plan::PlanOptions {
+            local_test: true,
+            dns_check: true,
+            www_mode: "none".to_string(),
+            ..super::plan::PlanOptions::default()
+        };
+
+        let report =
+            run_with_probe_and_paths("g7-test.local".to_string(), options, &probe, &paths)?;
+
+        let local_hosts = fs::read_to_string(fs_root.join("etc/g7-installer/local-hosts.txt"))?;
+        assert_eq!(report.deployment_mode, "local-test");
+        assert!(local_hosts.contains("127.0.0.1 g7-test.local"));
+        assert!(
+            report
+                .completed_steps
+                .contains(&"local-hosts-suggestion-written".to_string())
+        );
+
+        fs::remove_file(os_release_path)?;
+        fs::remove_dir_all(fs_root)?;
         Ok(())
     }
 

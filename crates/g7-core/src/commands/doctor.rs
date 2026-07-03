@@ -43,6 +43,7 @@ pub fn run_with_probe<R: CommandRunner>(probe: &SystemProbe<R>) -> DoctorReport 
         port_check(80, probe.tcp_port_status(80)),
         port_check(443, probe.tcp_port_status(443)),
         nginx_config_check(probe),
+        apache_config_check(probe),
         g7_web_root_check(probe),
         installer_state_check(probe),
         g7_owned_files_check(probe),
@@ -142,7 +143,7 @@ fn apache_check(result: Result<ServiceActivity, SystemProbeError>) -> DoctorChec
         Ok(ServiceActivity::Active) => DoctorCheck {
             name: "apache-service",
             status: DoctorCheckStatus::Fail,
-            message: "Apache is running. MVP install supports fresh Nginx servers only."
+            message: "Apache is already running. This installer is for fresh VPS installs."
                 .to_string(),
         },
         Ok(ServiceActivity::Inactive | ServiceActivity::NotFound) => DoctorCheck {
@@ -235,6 +236,45 @@ fn nginx_config_check<R: CommandRunner>(probe: &SystemProbe<R>) -> DoctorCheck {
     }
 }
 
+fn apache_config_check<R: CommandRunner>(probe: &SystemProbe<R>) -> DoctorCheck {
+    let paths = [
+        Path::new("/etc/apache2/sites-enabled"),
+        Path::new("/etc/apache2/conf-enabled"),
+    ];
+    let mut existing = Vec::new();
+
+    for path in paths {
+        match probe.directory_entries(path) {
+            Ok(entries) => existing.extend(entries),
+            Err(err) => {
+                return DoctorCheck {
+                    name: "apache-config",
+                    status: DoctorCheckStatus::Warn,
+                    message: format!("Could not inspect {}: {err}", path.display()),
+                };
+            }
+        }
+    }
+
+    if existing.is_empty() {
+        DoctorCheck {
+            name: "apache-config",
+            status: DoctorCheckStatus::Pass,
+            message: "No existing Apache site config entries found.".to_string(),
+        }
+    } else {
+        DoctorCheck {
+            name: "apache-config",
+            status: DoctorCheckStatus::Fail,
+            message: format!(
+                "Found {} existing Apache config entr{}.",
+                existing.len(),
+                plural_y(existing.len())
+            ),
+        }
+    }
+}
+
 fn g7_web_root_check<R: CommandRunner>(probe: &SystemProbe<R>) -> DoctorCheck {
     if probe.path_exists(Path::new("/var/www/g7")) {
         DoctorCheck {
@@ -277,6 +317,8 @@ fn g7_owned_files_check<R: CommandRunner>(probe: &SystemProbe<R>) -> DoctorCheck
         Path::new("/var/log/g7-installer"),
         Path::new("/etc/nginx/sites-available/g7.conf"),
         Path::new("/etc/nginx/sites-enabled/g7.conf"),
+        Path::new("/etc/apache2/sites-available/g7.conf"),
+        Path::new("/etc/apache2/sites-enabled/g7.conf"),
         Path::new("/etc/systemd/system/g7-queue.service"),
         Path::new("/etc/systemd/system/g7-reverb.service"),
     ];
@@ -424,6 +466,30 @@ mod tests {
 
         assert!(report.checks.iter().any(|check| {
             check.name == "nginx-config" && check.status == DoctorCheckStatus::Fail
+        }));
+        assert!(!report.install_allowed);
+        Ok(())
+    }
+
+    #[test]
+    fn doctor_fails_when_apache_config_exists()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let os_release_path = write_temp_os_release()?;
+        let fs_root = create_temp_fs_root()?;
+        fs::create_dir_all(fs_root.join("etc/apache2/sites-enabled"))?;
+        fs::write(
+            fs_root.join("etc/apache2/sites-enabled/000-default.conf"),
+            "<VirtualHost *:80></VirtualHost>\n",
+        )?;
+        let probe = clean_probe(&os_release_path, &fs_root, "0\n")?;
+
+        let report = run_with_probe(&probe);
+
+        fs::remove_file(os_release_path)?;
+        fs::remove_dir_all(fs_root)?;
+
+        assert!(report.checks.iter().any(|check| {
+            check.name == "apache-config" && check.status == DoctorCheckStatus::Fail
         }));
         assert!(!report.install_allowed);
         Ok(())

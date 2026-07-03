@@ -47,14 +47,16 @@ pub enum Error {
     #[error("install requires root or sudo")]
     #[diagnostic(
         code(g7::install::privilege_required),
-        help("Run the command again with sudo, for example: sudo g7 install --domain example.com")
+        help(
+            "Run the command again with sudo, for example: sudo g7inst install --domain example.com"
+        )
     )]
     PrivilegeRequired,
 
     #[error("install blocked by preflight checks: {checks}")]
     #[diagnostic(
         code(g7::install::blocked),
-        help("Run g7 doctor, resolve the failing checks, and retry on a fresh Ubuntu VPS.")
+        help("Run g7inst doctor, resolve the failing checks, and retry on a fresh Ubuntu VPS.")
     )]
     InstallBlocked { checks: String },
 
@@ -68,4 +70,40 @@ pub enum Error {
         #[source]
         source: std::io::Error,
     },
+
+    #[error("failed to read installer file: {path}")]
+    #[diagnostic(
+        code(g7::install::file_read_failed),
+        help("Check that the installer metadata exists and is readable.")
+    )]
+    FileReadFailed {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to remove installer file: {path}")]
+    #[diagnostic(
+        code(g7::reset::file_remove_failed),
+        help("Check filesystem permissions and retry the reset command.")
+    )]
+    FileRemoveFailed {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("reset requires explicit confirmation")]
+    #[diagnostic(
+        code(g7::reset::confirmation_required),
+        help("Run reset with --yes, or use --dry-run to preview the paths.")
+    )]
+    ResetConfirmationRequired,
+
+    #[error("unsafe reset path refused: {path}")]
+    #[diagnostic(
+        code(g7::reset::unsafe_path),
+        help("Reset only removes paths tracked by installer ownership metadata.")
+    )]
+    UnsafeResetPath { path: String },
 }

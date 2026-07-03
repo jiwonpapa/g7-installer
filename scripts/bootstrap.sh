@@ -4,7 +4,7 @@ set -euo pipefail
 REPO="${G7_INSTALL_REPO:-jiwonpapa/g7-installer}"
 VERSION="${G7_INSTALL_VERSION:-latest}"
 INSTALL_DIR="${G7_INSTALL_DIR:-/usr/local/bin}"
-BIN_NAME="${G7_INSTALL_BIN:-g7}"
+BIN_NAME="${G7_INSTALL_BIN:-g7inst}"
 
 need_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -62,7 +62,7 @@ need_command install
 need_command uname
 
 TARGET="$(detect_target)"
-ASSET="g7-${TARGET}"
+ASSET="g7inst-${TARGET}"
 BASE_URL="$(download_base_url)"
 TMP_DIR="$(mktemp -d)"
 trap cleanup EXIT
@@ -93,5 +93,5 @@ echo "Installed ${BIN_NAME} to ${INSTALL_DIR}/${BIN_NAME}"
 "${INSTALL_DIR}/${BIN_NAME}" --version
 echo
 echo "Next:"
+echo "  sudo ${BIN_NAME} setup"
 echo "  ${BIN_NAME} doctor"
-echo "  sudo ${BIN_NAME} install --domain example.com"
