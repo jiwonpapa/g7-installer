@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>G7inst Web Controller</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body class="min-h-screen bg-zinc-950 text-zinc-100">
+    <main class="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-6 px-5 py-6">
+      <header class="flex flex-col gap-3 border-b border-zinc-800 pb-5 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p class="text-sm font-medium text-cyan-300">G7 Installer</p>
+          <h1 class="mt-1 text-3xl font-semibold tracking-normal text-white">Web Controller</h1>
+        </div>
+        <div class="rounded border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-300">
+          <span class="text-zinc-500">Status</span>
+          <span id="connection-status" class="ml-2 font-medium text-amber-300">starting</span>
+        </div>
+      </header>
+
+      <section class="grid gap-4 lg:grid-cols-[280px_1fr]">
+        <nav class="space-y-2" aria-label="Setup steps">
+          <button class="step-item is-active" data-step="login">1. Server Login</button>
+          <button class="step-item" data-step="check">2. Server Check</button>
+          <button class="step-item" data-step="options">3. Install Options</button>
+          <button class="step-item" data-step="plan">4. Plan Preview</button>
+          <button class="step-item" data-step="install">5. Install Progress</button>
+          <button class="step-item" data-step="report">6. Report</button>
+        </nav>
+
+        <div class="space-y-4">
+          <section class="panel">
+            <div class="flex flex-col gap-1">
+              <h2 class="text-xl font-semibold text-white">초기 연결</h2>
+              <p class="text-sm text-zinc-400">웹 컨트롤러가 서버에서 실행 중입니다. 다음 배치에서 로그인, 점검, 설치 API가 연결됩니다.</p>
+            </div>
+            <dl class="mt-5 grid gap-3 sm:grid-cols-2">
+              <div class="metric">
+                <dt>도메인</dt>
+                <dd id="prefill-domain">loading</dd>
+              </div>
+              <div class="metric">
+                <dt>모드</dt>
+                <dd id="prefill-mode">loading</dd>
+              </div>
+              <div class="metric">
+                <dt>인증</dt>
+                <dd id="auth-mode">loading</dd>
+              </div>
+              <div class="metric">
+                <dt>제어 방식</dt>
+                <dd>Web UI</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="panel">
+            <div class="flex items-center justify-between gap-3">
+              <h2 class="text-xl font-semibold text-white">Live Log</h2>
+              <span class="text-xs uppercase text-zinc-500">bootstrap</span>
+            </div>
+            <pre id="live-log" class="mt-4 min-h-48 overflow-auto rounded bg-black p-4 text-sm leading-6 text-zinc-300">loading web controller...</pre>
+          </section>
+        </div>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

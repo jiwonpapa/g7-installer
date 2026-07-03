@@ -17,10 +17,13 @@ repository = "https://github.com/jiwonpapa/g7-installer"
 rust-version = "1.85"
 
 [workspace.dependencies]
+axum = { version = "0.8", features = ["ws"] }
 clap = { version = "4", features = ["derive"] }
+getrandom = "0.3"
 miette = { version = "7", features = ["fancy"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
+tower-http = { version = "0.6", features = ["trace"] }
 tracing = "0.1"
-

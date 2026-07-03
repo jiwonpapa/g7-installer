@@ -5,17 +5,12 @@
 //! installation default must live in `plan.rs` first.
 
 use clap::{Parser, Subcommand};
-use dialoguer::{Confirm, Input, Select};
 use g7_core::commands::{
     DoctorCheckStatus, doctor, install, logs, plan, reset, self_update, status, update,
 };
-use miette::{Result, miette};
+use miette::Result;
 
-mod tui_setup;
-
-const SETUP_CONTROL_HINT: &str =
-    "Controls: Up/Down move, Enter select/accept, type text when prompted, Ctrl+C cancel.";
-const SELECT_PROMPT_HINT: &str = "Use Up/Down, Enter";
+mod web_setup;
 
 #[derive(Debug, Parser)]
 #[command(name = "g7inst")]
@@ -28,7 +23,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Run a guided setup flow.
+    /// Start the web setup controller.
     Setup {
         /// Domain that will serve the G7 site.
         #[arg(long)]
@@ -36,9 +31,12 @@ enum Command {
         /// Use local test mode without public DNS or Let's Encrypt.
         #[arg(long, default_value_t = false)]
         local_test: bool,
-        /// Use the legacy prompt flow instead of the full-screen TUI.
+        /// Web controller bind address.
+        #[arg(long, default_value = web_setup::DEFAULT_BIND)]
+        bind: String,
+        /// Allow binding the web controller to a non-loopback address.
         #[arg(long, default_value_t = false)]
-        plain: bool,
+        allow_remote: bool,
     },
     /// Diagnose whether this server can be used for a G7 install.
     Doctor,
@@ -187,20 +185,24 @@ enum Command {
     SelfUpdate,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
         Command::Setup {
             domain,
             local_test,
-            plain,
+            bind,
+            allow_remote,
         } => {
-            if plain {
-                run_setup_plain(domain, local_test)?;
-            } else {
-                tui_setup::run(domain, local_test)?;
-            }
+            web_setup::run(web_setup::WebSetupConfig {
+                domain,
+                local_test,
+                bind,
+                allow_remote,
+            })
+            .await?;
         }
         Command::Doctor => print_doctor(doctor::run()),
         Command::Plan {
@@ -360,212 +362,6 @@ pub(crate) fn plan_options(
         preserve_config,
         dns_check,
     }
-}
-
-fn run_setup_plain(domain_arg: Option<String>, local_test_arg: bool) -> Result<()> {
-    println!("G7 Installer Setup");
-    println!("{SETUP_CONTROL_HINT}");
-    println!();
-    println!("1) Server check");
-    let doctor_report = doctor::run();
-    print_doctor(doctor_report.clone());
-    println!();
-
-    if !doctor_report.install_allowed {
-        return Err(miette!(
-            "server preflight failed; fix failed checks and run g7inst setup again"
-        ));
-    }
-
-    println!("2) Setup options");
-    let profile_items = [
-        "public domain: DNS + Let's Encrypt",
-        "local test domain: no public DNS, no Let's Encrypt",
-    ];
-    let profile = if local_test_arg {
-        1
-    } else {
-        Select::new()
-            .with_prompt(select_prompt("Install profile"))
-            .items(&profile_items)
-            .default(0)
-            .interact()
-            .map_err(|err| miette!("setup prompt failed: {err}"))?
-    };
-    let local_test = profile == 1;
-
-    let default_domain = if local_test {
-        "g7-test.local"
-    } else {
-        "example.com"
-    };
-    let domain = match domain_arg {
-        Some(domain) => domain,
-        None => Input::<String>::new()
-            .with_prompt("Domain")
-            .default(default_domain.to_string())
-            .interact_text()
-            .map_err(|err| miette!("setup prompt failed: {err}"))?,
-    };
-
-    let web_server_items = ["nginx", "apache"];
-    let web_server = select_value("Web server", &web_server_items, 0)?;
-
-    let php_items = ["8.5", "8.3"];
-    let php_version = select_value("PHP-FPM version", &php_items, 0)?;
-
-    let database_items = ["mariadb", "mysql"];
-    let database = select_value("Database", &database_items, 0)?;
-
-    let site_user = Input::<String>::new()
-        .with_prompt("Site Linux user")
-        .default(plan::DEFAULT_SITE_USER.to_string())
-        .interact_text()
-        .map_err(|err| miette!("setup prompt failed: {err}"))?;
-
-    let web_root_items = ["public-html", "www", "system", "custom"];
-    let web_root_mode = select_value("Web root mode", &web_root_items, 0)?;
-    let web_root = if web_root_mode == "custom" {
-        Some(
-            Input::<String>::new()
-                .with_prompt("Custom absolute web root")
-                .interact_text()
-                .map_err(|err| miette!("setup prompt failed: {err}"))?,
-        )
-    } else {
-        None
-    };
-
-    let www_items = ["redirect-to-root", "redirect-to-www", "include", "none"];
-    let www_default = if local_test { 3 } else { 0 };
-    let www_mode = select_value("www policy", &www_items, www_default)?;
-
-    let redis_enabled = Confirm::new()
-        .with_prompt("Install Redis for cache/session/queue?")
-        .default(true)
-        .interact()
-        .map_err(|err| miette!("setup prompt failed: {err}"))?;
-    let redis = if redis_enabled { "enable" } else { "disable" }.to_string();
-
-    let mail_items = ["none", "smtp-relay", "local-postfix"];
-    let mail_mode = select_value("Mail delivery", &mail_items, 0)?;
-    let mut smtp_host = None;
-    let mut smtp_from = None;
-    let mut smtp_port = if mail_mode == "local-postfix" {
-        25
-    } else {
-        plan::DEFAULT_SMTP_PORT
-    };
-    let mut smtp_encryption = plan::DEFAULT_SMTP_ENCRYPTION.to_string();
-
-    if mail_mode == "smtp-relay" {
-        smtp_host = Some(
-            Input::<String>::new()
-                .with_prompt("SMTP host")
-                .interact_text()
-                .map_err(|err| miette!("setup prompt failed: {err}"))?,
-        );
-        smtp_port = Input::<u16>::new()
-            .with_prompt("SMTP port")
-            .default(plan::DEFAULT_SMTP_PORT)
-            .interact_text()
-            .map_err(|err| miette!("setup prompt failed: {err}"))?;
-        smtp_from = Some(
-            Input::<String>::new()
-                .with_prompt("SMTP from address")
-                .interact_text()
-                .map_err(|err| miette!("setup prompt failed: {err}"))?,
-        );
-        let encryption_items = ["starttls", "tls", "none"];
-        smtp_encryption = select_value("SMTP encryption", &encryption_items, 0)?;
-    }
-
-    let security_items = ["standard", "hardened", "audit-only"];
-    let security_profile = select_value("Security profile", &security_items, 0)?;
-
-    let ssh_items = ["audit-only", "harden"];
-    let ssh_policy = select_value("SSH policy", &ssh_items, 0)?;
-
-    let options = plan_options(
-        local_test,
-        web_server,
-        php_version,
-        database,
-        site_user,
-        web_root_mode,
-        web_root,
-        www_mode,
-        redis,
-        mail_mode,
-        smtp_host,
-        smtp_port,
-        smtp_from,
-        smtp_encryption,
-        security_profile,
-        ssh_policy,
-        true,
-        true,
-        !local_test,
-    );
-    let setup_plan =
-        plan::build_with_options(domain.clone(), options.clone()).map_err(miette::Report::new)?;
-
-    println!();
-    println!("3) Setup summary");
-    print_setup_summary(&setup_plan);
-
-    let proceed = Confirm::new()
-        .with_prompt("Proceed with install preparation? Enter uses the default")
-        .default(false)
-        .interact()
-        .map_err(|err| miette!("setup prompt failed: {err}"))?;
-
-    if !proceed {
-        println!("setup cancelled");
-        return Ok(());
-    }
-
-    println!();
-    println!("4) Install preparation");
-    print_install(install::run(domain, options).map_err(miette::Report::new)?);
-    Ok(())
-}
-
-fn select_value(prompt: &str, items: &[&str], default: usize) -> Result<String> {
-    let selected = Select::new()
-        .with_prompt(select_prompt(prompt))
-        .items(items)
-        .default(default)
-        .interact()
-        .map_err(|err| miette!("setup prompt failed: {err}"))?;
-
-    Ok(items[selected].to_string())
-}
-
-fn select_prompt(prompt: &str) -> String {
-    format!("{prompt} ({SELECT_PROMPT_HINT})")
-}
-
-fn print_setup_summary(plan: &plan::InstallPlan) {
-    println!("domain: {}", plan.domain);
-    println!("mode: {}", plan.deployment_mode);
-    println!("web_server: {}", plan.web_server);
-    println!("php_version: {}", plan.php_version);
-    println!("database: {}", plan.database_engine);
-    println!("site_user: {}", plan.site_user);
-    println!("web_root: {}", plan.web_root);
-    println!("www_mode: {}", plan.www_mode);
-    println!("redis: {}", plan.redis_mode);
-    println!("mail_mode: {}", plan.mail_mode);
-    println!("security_profile: {}", plan.security_profile);
-    println!("ssh_policy: {}", plan.ssh_policy);
-    println!("dns_check: {}", plan.dns_check_required);
-    println!(
-        "packages: {} item(s), files: {} item(s), services: {} item(s)",
-        plan.packages.len(),
-        plan.files.len(),
-        plan.services.len()
-    );
 }
 
 fn print_doctor(report: doctor::DoctorReport) {

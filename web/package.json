@@ -1,0 +1,11 @@
+{
+  "name": "g7inst-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tailwindcss -i ./input.css -o ./dist/app.css --minify"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  }
+}

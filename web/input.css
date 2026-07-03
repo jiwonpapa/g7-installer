@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .panel {
+    @apply rounded border border-zinc-800 bg-zinc-900/80 p-5 shadow-sm shadow-black/20;
+  }
+
+  .step-item {
+    @apply block w-full rounded border border-zinc-800 bg-zinc-900 px-4 py-3 text-left text-sm font-medium text-zinc-300 transition hover:border-cyan-700 hover:text-white;
+  }
+
+  .step-item.is-active {
+    @apply border-cyan-500 bg-cyan-950/40 text-cyan-100;
+  }
+
+  .metric {
+    @apply rounded border border-zinc-800 bg-zinc-950 p-4;
+  }
+
+  .metric dt {
+    @apply text-xs font-medium uppercase text-zinc-500;
+  }
+
+  .metric dd {
+    @apply mt-2 break-words text-base font-semibold text-zinc-100;
+  }
+}
