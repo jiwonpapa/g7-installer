@@ -6,13 +6,19 @@
 //! The controller must not expose arbitrary shell execution or invent install
 //! defaults that do not exist in `plan.rs`.
 
+use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::Arc;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
+use axum::extract::Query;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -24,12 +30,21 @@ use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tower_http::trace::TraceLayer;
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
 pub const DEFAULT_BIND: &str = "127.0.0.1:7717";
 
 const INDEX_HTML: &str = include_str!("../../../web/index.html");
 const APP_JS: &str = include_str!("../../../web/app.js");
 const APP_CSS: &str = include_str!("../../../web/dist/app.css");
 const REPORT_PATH: &str = "/var/log/g7-installer/report.json";
+const SESSION_COOKIE: &str = "g7inst_session";
+const CSRF_HEADER: &str = "x-g7-csrf";
+const SESSION_TTL: Duration = Duration::from_secs(30 * 60);
+const AUTH_TIMEOUT: Duration = Duration::from_secs(15);
+const NOBODY_UID: u32 = 65_534;
+const NOBODY_GID: u32 = 65_534;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WebSetupConfig {
@@ -46,6 +61,15 @@ struct WebState {
     local_test: bool,
     events: broadcast::Sender<WebEvent>,
     install_running: Arc<AtomicBool>,
+    sessions: Arc<Mutex<HashMap<String, Session>>>,
+}
+
+#[derive(Debug, Clone)]
+struct Session {
+    csrf_token: String,
+    authenticated: bool,
+    username: Option<String>,
+    expires_at: Instant,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -61,12 +85,27 @@ struct BootstrapPayload {
     domain: Option<String>,
     local_test: bool,
     auth: BootstrapAuth,
+    csrf_token: String,
 }
 
 #[derive(Debug, Serialize)]
 struct BootstrapAuth {
     mode: &'static str,
     status: &'static str,
+    username: Option<String>,
+    authenticated: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct LoginRequest {
+    username: String,
+    password: String,
+}
+
+#[derive(Debug, Serialize)]
+struct LoginResponse {
+    authenticated: bool,
+    username: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -224,6 +263,7 @@ pub async fn run(config: WebSetupConfig) -> Result<()> {
         local_test: config.local_test,
         events: broadcast::channel(128).0,
         install_running: Arc::new(AtomicBool::new(false)),
+        sessions: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let listener = TcpListener::bind(bind)
@@ -237,6 +277,8 @@ pub async fn run(config: WebSetupConfig) -> Result<()> {
         .route("/app.js", get(app_js))
         .route("/app.css", get(app_css))
         .route("/api/bootstrap", get(bootstrap))
+        .route("/api/auth/login", post(api_login))
+        .route("/api/auth/logout", post(api_logout))
         .route("/api/events", get(api_events))
         .route("/api/doctor", get(api_doctor))
         .route("/api/plan", post(api_plan))
@@ -298,6 +340,8 @@ fn print_startup(addr: SocketAddr, token: &str) {
     println!("Open: http://{addr}/?token={token}");
     println!("Remote access:");
     println!("ssh -L 7717:127.0.0.1:7717 root@SERVER_IP");
+    println!("If server account password is not set:");
+    println!("sudo passwd root");
     println!("Stop: Ctrl+C");
 }
 
@@ -307,8 +351,27 @@ async fn shutdown_signal() {
     }
 }
 
-async fn index() -> Html<&'static str> {
-    Html(INDEX_HTML)
+async fn index(
+    axum::extract::State(state): axum::extract::State<WebState>,
+    Query(query): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let mut response = Html(INDEX_HTML).into_response();
+
+    if query
+        .get("token")
+        .is_some_and(|token| secure_eq(token, &state.access_token))
+    {
+        match create_session(&state) {
+            Ok(session_id) => {
+                if let Ok(value) = HeaderValue::from_str(&session_cookie(&session_id)) {
+                    response.headers_mut().insert(header::SET_COOKIE, value);
+                }
+            }
+            Err(error) => return error.into_response(),
+        }
+    }
+
+    response
 }
 
 async fn app_js() -> impl IntoResponse {
@@ -327,24 +390,85 @@ async fn app_css() -> impl IntoResponse {
 
 async fn bootstrap(
     axum::extract::State(state): axum::extract::State<WebState>,
-) -> impl IntoResponse {
+    headers: HeaderMap,
+) -> std::result::Result<impl IntoResponse, ApiError> {
+    let session = require_session(&state, &headers)?;
     let payload = BootstrapPayload {
         domain: state.domain,
         local_test: state.local_test,
         auth: BootstrapAuth {
-            mode: "token-pam-planned",
-            status: "bootstrap-only",
+            mode: "server-account",
+            status: if session.authenticated {
+                "authenticated"
+            } else {
+                "token-accepted"
+            },
+            username: session.username.clone(),
+            authenticated: session.authenticated,
         },
+        csrf_token: session.csrf_token,
     };
 
-    (StatusCode::OK, Json(payload))
+    Ok((StatusCode::OK, Json(payload)))
+}
+
+async fn api_login(
+    axum::extract::State(state): axum::extract::State<WebState>,
+    headers: HeaderMap,
+    Json(request): Json<LoginRequest>,
+) -> std::result::Result<impl IntoResponse, ApiError> {
+    let session_id = require_session_id(&headers)?;
+    let session = require_session(&state, &headers)?;
+    require_csrf(&headers, &session)?;
+
+    let username = normalize_login_username(&request.username)?;
+    let password = request.password;
+    let auth_username = username.clone();
+    let auth_result = tokio::task::spawn_blocking(move || {
+        verify_server_account_password(&auth_username, &password)
+    })
+    .await
+    .map_err(|err| ApiError::bad_request(format!("authentication worker failed: {err}")))?;
+    auth_result.map_err(ApiError::unauthorized)?;
+
+    if !account_can_install(&username) {
+        return Err(ApiError::forbidden(
+            "root or sudo-capable server account is required",
+        ));
+    }
+
+    mark_session_authenticated(&state, &session_id, &username)?;
+    emit_log(&state, format!("server account authenticated: {username}"));
+
+    Ok(Json(LoginResponse {
+        authenticated: true,
+        username,
+    }))
+}
+
+async fn api_logout(
+    axum::extract::State(state): axum::extract::State<WebState>,
+    headers: HeaderMap,
+) -> std::result::Result<impl IntoResponse, ApiError> {
+    let session = require_session(&state, &headers)?;
+    require_csrf(&headers, &session)?;
+    let session_id = require_session_id(&headers)?;
+    remove_session(&state, &session_id)?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn api_events(
     ws: WebSocketUpgrade,
     axum::extract::State(state): axum::extract::State<WebState>,
-) -> impl IntoResponse {
+    headers: HeaderMap,
+) -> axum::response::Response {
+    if let Err(error) = require_session(&state, &headers) {
+        return error.into_response();
+    }
+
     ws.on_upgrade(move |socket| event_socket(socket, state.events.subscribe()))
+        .into_response()
 }
 
 async fn event_socket(mut socket: WebSocket, mut events: broadcast::Receiver<WebEvent>) {
@@ -379,7 +503,9 @@ async fn send_event(socket: &mut WebSocket, event: &WebEvent) -> std::result::Re
 
 async fn api_doctor(
     axum::extract::State(state): axum::extract::State<WebState>,
-) -> impl IntoResponse {
+    headers: HeaderMap,
+) -> std::result::Result<impl IntoResponse, ApiError> {
+    require_session(&state, &headers)?;
     emit_log(&state, "running server check");
     let report = doctor_to_api(doctor::run());
     emit_log(
@@ -390,13 +516,16 @@ async fn api_doctor(
         ),
     );
 
-    Json(report)
+    Ok(Json(report))
 }
 
 async fn api_plan(
     axum::extract::State(state): axum::extract::State<WebState>,
+    headers: HeaderMap,
     Json(request): Json<SetupRequest>,
 ) -> std::result::Result<impl IntoResponse, ApiError> {
+    let session = require_authenticated_session(&state, &headers)?;
+    require_csrf(&headers, &session)?;
     emit_log(&state, "building install plan");
     let domain = request.domain.clone();
     let options = options_from_request(request);
@@ -408,8 +537,12 @@ async fn api_plan(
 
 async fn api_install_prepare(
     axum::extract::State(state): axum::extract::State<WebState>,
+    headers: HeaderMap,
     Json(request): Json<SetupRequest>,
 ) -> std::result::Result<impl IntoResponse, ApiError> {
+    let session = require_authenticated_session(&state, &headers)?;
+    require_csrf(&headers, &session)?;
+
     if state.install_running.swap(true, Ordering::SeqCst) {
         emit_log(&state, "install request rejected: already running");
         return Err(ApiError::conflict("install is already running"));
@@ -443,8 +576,12 @@ async fn api_install_prepare(
 
 async fn api_reset(
     axum::extract::State(state): axum::extract::State<WebState>,
+    headers: HeaderMap,
     Json(request): Json<ResetRequest>,
 ) -> std::result::Result<impl IntoResponse, ApiError> {
+    let session = require_authenticated_session(&state, &headers)?;
+    require_csrf(&headers, &session)?;
+
     if state.install_running.load(Ordering::SeqCst) {
         return Err(ApiError::conflict(
             "reset is blocked while install is running",
@@ -462,10 +599,14 @@ async fn api_reset(
     }))
 }
 
-async fn api_status() -> impl IntoResponse {
+async fn api_status(
+    axum::extract::State(state): axum::extract::State<WebState>,
+    headers: HeaderMap,
+) -> std::result::Result<impl IntoResponse, ApiError> {
+    require_authenticated_session(&state, &headers)?;
     let current = status::read();
 
-    Json(StatusApiReport {
+    Ok(Json(StatusApiReport {
         installed: current.installed,
         components: current
             .components
@@ -475,26 +616,31 @@ async fn api_status() -> impl IntoResponse {
                 state: component.state,
             })
             .collect(),
-    })
+    }))
 }
 
-async fn api_report() -> impl IntoResponse {
+async fn api_report(
+    axum::extract::State(state): axum::extract::State<WebState>,
+    headers: HeaderMap,
+) -> std::result::Result<impl IntoResponse, ApiError> {
+    require_authenticated_session(&state, &headers)?;
+
     match fs::read_to_string(REPORT_PATH) {
-        Ok(content) => Json(ReportApiPayload {
+        Ok(content) => Ok(Json(ReportApiPayload {
             exists: true,
             path: REPORT_PATH,
             content,
-        }),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Json(ReportApiPayload {
+        })),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Json(ReportApiPayload {
             exists: false,
             path: REPORT_PATH,
             content: "report file does not exist yet".to_string(),
-        }),
-        Err(err) => Json(ReportApiPayload {
+        })),
+        Err(err) => Ok(Json(ReportApiPayload {
             exists: false,
             path: REPORT_PATH,
             content: format!("failed to read report: {err}"),
-        }),
+        })),
     }
 }
 
@@ -624,11 +770,240 @@ fn install_to_api(report: install::InstallReport) -> InstallApiReport {
     }
 }
 
+fn create_session(state: &WebState) -> std::result::Result<String, ApiError> {
+    let session_id = secure_token().map_err(ApiError::bad_request)?;
+    let csrf_token = secure_token().map_err(ApiError::bad_request)?;
+    let session = Session {
+        csrf_token,
+        authenticated: false,
+        username: None,
+        expires_at: Instant::now() + SESSION_TTL,
+    };
+
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| ApiError::bad_request("session store is unavailable"))?;
+    sessions.insert(session_id.clone(), session);
+
+    Ok(session_id)
+}
+
+fn require_session_id(headers: &HeaderMap) -> std::result::Result<String, ApiError> {
+    let cookie = headers
+        .get(header::COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| ApiError::unauthorized("missing setup session cookie"))?;
+
+    cookie
+        .split(';')
+        .filter_map(|part| part.trim().split_once('='))
+        .find_map(|(name, value)| (name == SESSION_COOKIE).then(|| value.to_string()))
+        .ok_or_else(|| ApiError::unauthorized("missing setup session cookie"))
+}
+
+fn require_session(
+    state: &WebState,
+    headers: &HeaderMap,
+) -> std::result::Result<Session, ApiError> {
+    let session_id = require_session_id(headers)?;
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| ApiError::bad_request("session store is unavailable"))?;
+
+    let now = Instant::now();
+    sessions.retain(|_, session| session.expires_at > now);
+
+    let session = sessions
+        .get_mut(&session_id)
+        .ok_or_else(|| ApiError::unauthorized("setup session expired or invalid"))?;
+    session.expires_at = now + SESSION_TTL;
+
+    Ok(session.clone())
+}
+
+fn require_authenticated_session(
+    state: &WebState,
+    headers: &HeaderMap,
+) -> std::result::Result<Session, ApiError> {
+    let session = require_session(state, headers)?;
+    if session.authenticated {
+        Ok(session)
+    } else {
+        Err(ApiError::unauthorized("server account login is required"))
+    }
+}
+
+fn require_csrf(headers: &HeaderMap, session: &Session) -> std::result::Result<(), ApiError> {
+    let token = headers
+        .get(CSRF_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| ApiError::forbidden("missing CSRF token"))?;
+
+    if secure_eq(token, &session.csrf_token) {
+        Ok(())
+    } else {
+        Err(ApiError::forbidden("invalid CSRF token"))
+    }
+}
+
+fn mark_session_authenticated(
+    state: &WebState,
+    session_id: &str,
+    username: &str,
+) -> std::result::Result<(), ApiError> {
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| ApiError::bad_request("session store is unavailable"))?;
+    let session = sessions
+        .get_mut(session_id)
+        .ok_or_else(|| ApiError::unauthorized("setup session expired or invalid"))?;
+    session.authenticated = true;
+    session.username = Some(username.to_string());
+    session.expires_at = Instant::now() + SESSION_TTL;
+
+    Ok(())
+}
+
+fn remove_session(state: &WebState, session_id: &str) -> std::result::Result<(), ApiError> {
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| ApiError::bad_request("session store is unavailable"))?;
+    sessions.remove(session_id);
+
+    Ok(())
+}
+
+fn session_cookie(session_id: &str) -> String {
+    format!("{SESSION_COOKIE}={session_id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=1800")
+}
+
+fn secure_eq(left: &str, right: &str) -> bool {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    let mut diff = left.len() ^ right.len();
+
+    for index in 0..left.len().max(right.len()) {
+        let a = left.get(index).copied().unwrap_or(0);
+        let b = right.get(index).copied().unwrap_or(0);
+        diff |= usize::from(a ^ b);
+    }
+
+    diff == 0
+}
+
+fn normalize_login_username(username: &str) -> std::result::Result<String, ApiError> {
+    let username = username.trim();
+    let safe = !username.is_empty()
+        && username.len() <= 32
+        && username
+            .chars()
+            .all(|char| char.is_ascii_alphanumeric() || matches!(char, '_' | '-'));
+
+    if safe {
+        Ok(username.to_string())
+    } else {
+        Err(ApiError::bad_request("invalid server account name"))
+    }
+}
+
+#[cfg(unix)]
+fn verify_server_account_password(
+    username: &str,
+    password: &str,
+) -> std::result::Result<(), String> {
+    if password.is_empty() {
+        return Err("server account password is required".to_string());
+    }
+
+    let mut child = Command::new("su")
+        .arg("--login")
+        .arg(username)
+        .arg("--command")
+        .arg("true")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .uid(NOBODY_UID)
+        .gid(NOBODY_GID)
+        .spawn()
+        .map_err(|err| format!("failed to start server account verifier: {err}"))?;
+
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin
+            .write_all(format!("{password}\n").as_bytes())
+            .map_err(|err| format!("failed to send password to verifier: {err}"))?;
+    }
+
+    let deadline = Instant::now() + AUTH_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(_)) => return Err("server account authentication failed".to_string()),
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("server account authentication timed out".to_string());
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(50)),
+            Err(err) => return Err(format!("failed to wait for verifier: {err}")),
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn verify_server_account_password(
+    _username: &str,
+    _password: &str,
+) -> std::result::Result<(), String> {
+    Err("server account authentication is supported on Unix-like VPS targets only".to_string())
+}
+
+fn account_can_install(username: &str) -> bool {
+    username == "root" || user_in_admin_group(username)
+}
+
+fn user_in_admin_group(username: &str) -> bool {
+    let Ok(content) = fs::read_to_string("/etc/group") else {
+        return false;
+    };
+
+    content.lines().any(|line| {
+        let mut parts = line.split(':');
+        let group = parts.next();
+        let _password = parts.next();
+        let _gid = parts.next();
+        let members = parts.next();
+
+        matches!(group, Some("sudo" | "admin"))
+            && members
+                .map(|members| members.split(',').any(|member| member == username))
+                .unwrap_or(false)
+    })
+}
+
 impl ApiError {
     fn bad_request(error: impl std::fmt::Display) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
             message: error.to_string(),
+        }
+    }
+
+    fn unauthorized(error: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            message: error.into(),
+        }
+    }
+
+    fn forbidden(error: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            message: error.into(),
         }
     }
 
@@ -677,7 +1052,10 @@ fn emit_stage(
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_remote_binding_is_explicit, parse_bind, secure_token};
+    use super::{
+        ensure_remote_binding_is_explicit, normalize_login_username, parse_bind, secure_eq,
+        secure_token,
+    };
 
     #[test]
     fn loopback_bind_is_allowed_without_remote_flag()
@@ -702,5 +1080,26 @@ mod tests {
         assert_eq!(token.len(), 64);
         assert!(token.chars().all(|char| char.is_ascii_hexdigit()));
         Ok(())
+    }
+
+    #[test]
+    fn secure_compare_checks_length_and_content() {
+        assert!(secure_eq("abc", "abc"));
+        assert!(!secure_eq("abc", "abcd"));
+        assert!(!secure_eq("abc", "abd"));
+    }
+
+    #[test]
+    fn login_username_accepts_safe_server_account_names() {
+        assert!(matches!(
+            normalize_login_username("root").as_deref(),
+            Ok("root")
+        ));
+        assert!(matches!(
+            normalize_login_username("ubuntu-admin").as_deref(),
+            Ok("ubuntu-admin")
+        ));
+        assert!(normalize_login_username("../root").is_err());
+        assert!(normalize_login_username("").is_err());
     }
 }

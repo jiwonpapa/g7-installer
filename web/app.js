@@ -2,6 +2,8 @@ const state = {
   activeStep: "login",
   bootstrap: null,
   socket: null,
+  csrfToken: null,
+  authenticated: false,
 };
 
 const nodes = {
@@ -184,12 +186,18 @@ async function loadBootstrap() {
 }
 
 async function apiFetch(path, options = {}) {
+  const headers = {
+    "content-type": "application/json",
+    ...(options.headers || {}),
+  };
+  if (state.csrfToken) {
+    headers["x-g7-csrf"] = state.csrfToken;
+  }
+
   const response = await fetch(path, {
     ...options,
-    headers: {
-      "content-type": "application/json",
-      ...(options.headers || {}),
-    },
+    credentials: "same-origin",
+    headers,
   });
 
   const contentType = response.headers.get("content-type") || "";
@@ -246,10 +254,28 @@ function bindEvents() {
     button.addEventListener("click", () => showStep(button.dataset.next));
   });
 
-  document.querySelector("#login-form").addEventListener("submit", (event) => {
+  document.querySelector("#login-form").addEventListener("submit", async (event) => {
     event.preventDefault();
-    log("server account login UI submitted; auth API is pending");
-    showStep("check");
+    const username = document.querySelector("#login-username").value;
+    const passwordInput = document.querySelector("#login-password");
+
+    try {
+      log(`authenticating server account: ${username}`);
+      const response = await apiFetch("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({
+          username,
+          password: passwordInput.value,
+        }),
+      });
+      passwordInput.value = "";
+      state.authenticated = response.authenticated;
+      log(`server account authenticated: ${response.username}`);
+      showStep("check");
+    } catch (error) {
+      passwordInput.value = "";
+      log(error.message);
+    }
   });
 
   document.querySelector("#doctor-button").addEventListener("click", async () => {
@@ -341,6 +367,8 @@ async function boot() {
 
   try {
     state.bootstrap = await loadBootstrap();
+    state.csrfToken = state.bootstrap.csrf_token;
+    state.authenticated = state.bootstrap.auth.authenticated;
     setConnectionStatus("connected", "text-emerald-300");
 
     if (state.bootstrap.domain) {
@@ -348,10 +376,12 @@ async function boot() {
     }
     nodes.mode.value = state.bootstrap.local_test ? "local-test" : "public";
     refreshFormState();
+    window.history.replaceState({}, document.title, window.location.pathname);
     log("web controller bootstrap loaded");
+    log(`auth status: ${state.bootstrap.auth.status}`);
   } catch (error) {
     setConnectionStatus("error", "text-red-300");
-    log(error.message);
+    log(`${error.message}; 터미널에 출력된 token URL로 다시 접속하세요.`);
   }
 }
 

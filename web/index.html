@@ -48,9 +48,9 @@
             <div class="panel-heading">
               <div>
                 <h2>서버 로그인</h2>
-                <p>서버 계정 인증 배치에서 PAM 로그인이 연결됩니다.</p>
+                <p>root 또는 sudo 가능한 서버 계정으로 로그인합니다. 비밀번호가 없다면 터미널에서 sudo passwd root를 실행하세요.</p>
               </div>
-              <span class="badge-warn">pending auth</span>
+              <span class="badge-warn">server account</span>
             </div>
             <form id="login-form" class="mt-5 grid gap-4 sm:grid-cols-2">
               <label class="field">
@@ -63,7 +63,7 @@
               </label>
               <div class="sm:col-span-2 flex flex-wrap items-center gap-2">
                 <button class="btn-primary" type="submit">로그인</button>
-                <button class="btn-secondary" type="button" data-next="check">토큰 상태로 계속</button>
+                <button class="btn-secondary" type="button" data-next="check">점검만 보기</button>
               </div>
             </form>
           </section>
