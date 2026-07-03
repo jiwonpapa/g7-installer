@@ -346,9 +346,7 @@ fn print_startup(addr: SocketAddr, token: &str) {
 }
 
 async fn shutdown_signal() {
-    if tokio::signal::ctrl_c().await.is_err() {
-        return;
-    }
+    let _ = tokio::signal::ctrl_c().await;
 }
 
 async fn index(
