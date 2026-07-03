@@ -27,7 +27,7 @@ G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 ro
 - 서버에는 Rust toolchain을 설치하지 않는다.
 - 배포물은 static binary를 목표로 한다.
 - 코드가 정본 문서다. 설치 정책, 기본값, 보안 기준은 먼저 Rust 코드와 rustdoc 주석에 존재해야 한다.
-- `plan.rs`는 설치 범위, 기본값, 보안 정책, 파일/서비스/포트 계획의 SSOT이다. README/SPEC/TUI는 이를 설명하거나 표시만 한다.
+- `plan.rs`는 설치 범위, 기본값, 보안 정책, 파일/서비스/포트 계획의 SSOT이다. README/SPEC/웹 UI는 이를 설명하거나 표시만 한다.
 - 새 명령, 새 서버 변경, 새 보안 정책을 추가할 때 관련 Rust 모듈 상단에 `//!` module doc을 먼저 추가하거나 갱신한다.
 - `unwrap`, `expect`, `panic`은 금지한다.
 - 실패 가능성이 있는 모든 흐름은 typed error로 표현한다.

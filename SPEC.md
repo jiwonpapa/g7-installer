@@ -59,7 +59,8 @@ cPanel, Plesk, Cafe24 같은 관리형/공유호스팅
 다중 사이트 자동 병합
 운영 DB 마이그레이션
 서버 이전
-GUI/TUI
+장기 운영 웹패널
+다중 서버 관리 UI
 ```
 
 기존 서비스가 감지되면 설치를 중단하고 `doctor` 리포트만 제공합니다.
@@ -125,7 +126,7 @@ sudo g7inst self-update
 | --- | --- | --- |
 | `doctor` | 부분 권장 | 서버 설치 가능 여부 진단, 기본 읽기 전용 |
 | `plan` | 아니오 | 설치 전 변경 계획 출력 |
-| `setup` | 예 | 대화형 설치 준비 |
+| `setup` | 예 | 로컬 웹 컨트롤러 기반 설치 준비 |
 | `install` | 예 | 새 VPS 설치 실행 |
 | `status` | 아니오 | G7/Nginx/PHP/DB/systemd 상태 확인 |
 | `logs` | 아니오 | 설치 로그 출력 |
@@ -252,12 +253,14 @@ Rust 2024 edition
 | `miette` | 사용자 친화적 에러 리포트 |
 | `tracing` | 구조화 로그 |
 | `tracing-appender` | 파일 로그 |
+| `axum` | `setup` 웹 컨트롤러 |
+| `tokio` | async HTTP/WebSocket runtime |
+| `tower-http` | HTTP middleware |
 | `reqwest` | G7 릴리스/체크섬 다운로드 |
 | `sha2` | checksum 검증 |
 | `zip` | 릴리스 ZIP 압축 해제 |
 | `tempfile` | staging 디렉토리 |
 | `indicatif` | 진행률 표시 |
-| `dialoguer` | 대화형 입력 |
 | `which` | 명령 존재 확인 |
 | `fs2` | lock file |
 | `nix` 또는 `rustix` | uid, signal, process 정보 |
