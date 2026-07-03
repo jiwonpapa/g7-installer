@@ -8,7 +8,10 @@
 
 use std::fs;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{StatusCode, header};
 use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
@@ -18,6 +21,7 @@ use getrandom::fill as fill_random;
 use miette::{IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
+use tokio::sync::broadcast;
 use tower_http::trace::TraceLayer;
 
 pub const DEFAULT_BIND: &str = "127.0.0.1:7717";
@@ -40,6 +44,16 @@ struct WebState {
     access_token: String,
     domain: Option<String>,
     local_test: bool,
+    events: broadcast::Sender<WebEvent>,
+    install_running: Arc<AtomicBool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct WebEvent {
+    event_type: &'static str,
+    message: String,
+    stage: Option<&'static str>,
+    status: Option<&'static str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -208,6 +222,8 @@ pub async fn run(config: WebSetupConfig) -> Result<()> {
         access_token: secure_token()?,
         domain: config.domain,
         local_test: config.local_test,
+        events: broadcast::channel(128).0,
+        install_running: Arc::new(AtomicBool::new(false)),
     };
 
     let listener = TcpListener::bind(bind)
@@ -221,6 +237,7 @@ pub async fn run(config: WebSetupConfig) -> Result<()> {
         .route("/app.js", get(app_js))
         .route("/app.css", get(app_css))
         .route("/api/bootstrap", get(bootstrap))
+        .route("/api/events", get(api_events))
         .route("/api/doctor", get(api_doctor))
         .route("/api/plan", post(api_plan))
         .route("/api/install/prepare", post(api_install_prepare))
@@ -323,34 +340,120 @@ async fn bootstrap(
     (StatusCode::OK, Json(payload))
 }
 
-async fn api_doctor() -> impl IntoResponse {
-    Json(doctor_to_api(doctor::run()))
+async fn api_events(
+    ws: WebSocketUpgrade,
+    axum::extract::State(state): axum::extract::State<WebState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| event_socket(socket, state.events.subscribe()))
+}
+
+async fn event_socket(mut socket: WebSocket, mut events: broadcast::Receiver<WebEvent>) {
+    let connected = WebEvent {
+        event_type: "log",
+        message: "event stream connected".to_string(),
+        stage: None,
+        status: None,
+    };
+
+    if send_event(&mut socket, &connected).await.is_err() {
+        return;
+    }
+
+    while let Ok(event) = events.recv().await {
+        if send_event(&mut socket, &event).await.is_err() {
+            break;
+        }
+    }
+}
+
+async fn send_event(socket: &mut WebSocket, event: &WebEvent) -> std::result::Result<(), ()> {
+    let Ok(text) = serde_json::to_string(event) else {
+        return Err(());
+    };
+
+    socket
+        .send(Message::Text(text.into()))
+        .await
+        .map_err(|_| ())
+}
+
+async fn api_doctor(
+    axum::extract::State(state): axum::extract::State<WebState>,
+) -> impl IntoResponse {
+    emit_log(&state, "running server check");
+    let report = doctor_to_api(doctor::run());
+    emit_log(
+        &state,
+        format!(
+            "server check completed: install_allowed={}",
+            report.install_allowed
+        ),
+    );
+
+    Json(report)
 }
 
 async fn api_plan(
+    axum::extract::State(state): axum::extract::State<WebState>,
     Json(request): Json<SetupRequest>,
 ) -> std::result::Result<impl IntoResponse, ApiError> {
+    emit_log(&state, "building install plan");
     let domain = request.domain.clone();
     let options = options_from_request(request);
     let install_plan = plan::build_with_options(domain, options).map_err(ApiError::bad_request)?;
+    emit_log(&state, "install plan ready");
 
     Ok(Json(plan_to_api(install_plan)))
 }
 
 async fn api_install_prepare(
+    axum::extract::State(state): axum::extract::State<WebState>,
     Json(request): Json<SetupRequest>,
 ) -> std::result::Result<impl IntoResponse, ApiError> {
+    if state.install_running.swap(true, Ordering::SeqCst) {
+        emit_log(&state, "install request rejected: already running");
+        return Err(ApiError::conflict("install is already running"));
+    }
+
+    emit_stage(&state, "preflight", "진행", "preflight started");
     let domain = request.domain.clone();
     let options = options_from_request(request);
-    let report = install::run(domain, options).map_err(ApiError::bad_request)?;
+    let result = install::run(domain, options);
+    state.install_running.store(false, Ordering::SeqCst);
 
-    Ok(Json(install_to_api(report)))
+    match result {
+        Ok(report) => {
+            emit_stage(&state, "preflight", "성공", "preflight passed");
+            emit_stage(&state, "config", "성공", "configuration prepared");
+            emit_stage(&state, "report", "성공", "problem report prepared");
+            emit_log(&state, "install preparation completed");
+            Ok(Json(install_to_api(report)))
+        }
+        Err(error) => {
+            emit_stage(
+                &state,
+                "preflight",
+                "실패",
+                format!("install failed: {error}"),
+            );
+            Err(ApiError::bad_request(error))
+        }
+    }
 }
 
 async fn api_reset(
+    axum::extract::State(state): axum::extract::State<WebState>,
     Json(request): Json<ResetRequest>,
 ) -> std::result::Result<impl IntoResponse, ApiError> {
+    if state.install_running.load(Ordering::SeqCst) {
+        return Err(ApiError::conflict(
+            "reset is blocked while install is running",
+        ));
+    }
+
+    emit_log(&state, "running reset");
     let report = reset::run(true, request.dry_run).map_err(ApiError::bad_request)?;
+    emit_log(&state, "reset completed");
 
     Ok(Json(ResetApiReport {
         dry_run: report.dry_run,
@@ -528,6 +631,13 @@ impl ApiError {
             message: error.to_string(),
         }
     }
+
+    fn conflict(error: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            message: error.into(),
+        }
+    }
 }
 
 impl IntoResponse for ApiError {
@@ -540,6 +650,29 @@ impl IntoResponse for ApiError {
         )
             .into_response()
     }
+}
+
+fn emit_log(state: &WebState, message: impl Into<String>) {
+    let _ = state.events.send(WebEvent {
+        event_type: "log",
+        message: message.into(),
+        stage: None,
+        status: None,
+    });
+}
+
+fn emit_stage(
+    state: &WebState,
+    stage: &'static str,
+    status: &'static str,
+    message: impl Into<String>,
+) {
+    let _ = state.events.send(WebEvent {
+        event_type: "stage",
+        message: message.into(),
+        stage: Some(stage),
+        status: Some(status),
+    });
 }
 
 #[cfg(test)]

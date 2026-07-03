@@ -1,6 +1,7 @@
 const state = {
   activeStep: "login",
   bootstrap: null,
+  socket: null,
 };
 
 const nodes = {
@@ -147,6 +148,35 @@ function markStage(stage, status) {
 
   row.dataset.status = status;
   row.querySelector("strong").textContent = status;
+}
+
+function connectEvents() {
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const socket = new WebSocket(`${protocol}://${window.location.host}/api/events`);
+  state.socket = socket;
+
+  socket.addEventListener("open", () => {
+    setConnectionStatus("live", "text-emerald-300");
+  });
+
+  socket.addEventListener("message", (event) => {
+    const payload = JSON.parse(event.data);
+    if (payload.event_type === "log") {
+      log(payload.message);
+    }
+    if (payload.event_type === "stage" && payload.stage && payload.status) {
+      markStage(payload.stage, payload.status);
+      log(payload.message);
+    }
+  });
+
+  socket.addEventListener("close", () => {
+    setConnectionStatus("closed", "text-amber-300");
+  });
+
+  socket.addEventListener("error", () => {
+    setConnectionStatus("event error", "text-red-300");
+  });
 }
 
 async function loadBootstrap() {
@@ -307,6 +337,7 @@ function bindEvents() {
 async function boot() {
   bindEvents();
   refreshFormState();
+  connectEvents();
 
   try {
     state.bootstrap = await loadBootstrap();
