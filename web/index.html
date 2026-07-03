@@ -28,9 +28,13 @@
           <li class="progress-step" data-progress="check">Check</li>
           <li class="progress-step" data-progress="options">Options</li>
           <li class="progress-step" data-progress="plan">Plan</li>
-          <li class="progress-step" data-progress="install">Install</li>
+          <li class="progress-step" data-progress="install">Prepare</li>
           <li class="progress-step" data-progress="report">Report</li>
         </ol>
+      </section>
+
+      <section class="notice-panel">
+        현재 버전은 실제 apt 패키지 설치가 아니라 설치 준비 파일, 계획, 리포트 생성까지 수행합니다.
       </section>
 
       <section class="grid min-h-0 flex-1 gap-4 lg:grid-cols-[260px_1fr_360px]">
@@ -39,7 +43,7 @@
           <button class="step-item" type="button" data-step="check">Server Check</button>
           <button class="step-item" type="button" data-step="options">Install Options</button>
           <button class="step-item" type="button" data-step="plan">Plan Preview</button>
-          <button class="step-item" type="button" data-step="install">Install Progress</button>
+          <button class="step-item" type="button" data-step="install">Prepare Install</button>
           <button class="step-item" type="button" data-step="report">Report</button>
         </nav>
 
@@ -215,18 +219,18 @@
           <section class="view-panel" data-view="install">
             <div class="panel-heading">
               <div>
-                <h2>설치 진행</h2>
-                <p>설치 단계별 진행률과 실패 원인을 표시합니다.</p>
+                <h2>설치 준비 진행</h2>
+                <p>현재 단계는 설치 메타데이터와 리포트 생성입니다. 실제 패키지 설치는 아직 실행하지 않습니다.</p>
               </div>
-              <button id="install-button" class="btn-danger" type="button">설치 시작</button>
+              <button id="install-button" class="btn-danger" type="button">설치 준비 시작</button>
             </div>
             <div class="mt-5 space-y-3" id="install-stages">
               <div class="stage-row" data-stage="preflight"><span>Preflight</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="packages"><span>Packages</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="packages"><span>Packages planned</span><strong>대기</strong></div>
               <div class="stage-row" data-stage="config"><span>Config</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="services"><span>Services</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="ports"><span>Ports</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="http"><span>HTTP Test</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="services"><span>Services planned</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="ports"><span>Ports planned</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="http"><span>HTTP Test planned</span><strong>대기</strong></div>
               <div class="stage-row" data-stage="report"><span>Report</span><strong>대기</strong></div>
             </div>
           </section>
@@ -235,7 +239,7 @@
             <div class="panel-heading">
               <div>
                 <h2>리포트</h2>
-                <p>설치 결과, 검증 상태, 재시도 명령을 확인합니다.</p>
+                <p>설치 준비 결과, 검증 상태, 재시도 명령을 확인합니다.</p>
               </div>
               <div class="flex gap-2">
                 <button id="report-button" class="btn-secondary" type="button">새로고침</button>

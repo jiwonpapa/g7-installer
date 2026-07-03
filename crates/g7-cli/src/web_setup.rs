@@ -43,6 +43,8 @@ const SESSION_COOKIE: &str = "g7inst_session";
 const CSRF_HEADER: &str = "x-g7-csrf";
 const SESSION_TTL: Duration = Duration::from_secs(30 * 60);
 const AUTH_TIMEOUT: Duration = Duration::from_secs(15);
+const AUTH_MAX_FAILURES_BEFORE_LOCK: u32 = 3;
+const AUTH_LOCKOUT: Duration = Duration::from_secs(60);
 const NOBODY_UID: u32 = 65_534;
 const NOBODY_GID: u32 = 65_534;
 
@@ -62,6 +64,7 @@ struct WebState {
     events: broadcast::Sender<WebEvent>,
     install_running: Arc<AtomicBool>,
     sessions: Arc<Mutex<HashMap<String, Session>>>,
+    loopback_bind: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -70,6 +73,8 @@ struct Session {
     authenticated: bool,
     username: Option<String>,
     expires_at: Instant,
+    failed_login_attempts: u32,
+    login_blocked_until: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -264,6 +269,7 @@ pub async fn run(config: WebSetupConfig) -> Result<()> {
         events: broadcast::channel(128).0,
         install_running: Arc::new(AtomicBool::new(false)),
         sessions: Arc::new(Mutex::new(HashMap::new())),
+        loopback_bind: is_loopback(bind.ip()),
     };
 
     let listener = TcpListener::bind(bind)
@@ -418,6 +424,8 @@ async fn api_login(
     let session_id = require_session_id(&headers)?;
     let session = require_session(&state, &headers)?;
     require_csrf(&headers, &session)?;
+    require_loopback_login(&state)?;
+    require_login_allowed(&session)?;
 
     let username = normalize_login_username(&request.username)?;
     let password = request.password;
@@ -427,9 +435,13 @@ async fn api_login(
     })
     .await
     .map_err(|err| ApiError::bad_request(format!("authentication worker failed: {err}")))?;
-    auth_result.map_err(ApiError::unauthorized)?;
+    if let Err(message) = auth_result {
+        record_login_failure(&state, &session_id)?;
+        return Err(ApiError::unauthorized(message));
+    }
 
     if !account_can_install(&username) {
+        record_login_failure(&state, &session_id)?;
         return Err(ApiError::forbidden(
             "root or sudo-capable server account is required",
         ));
@@ -776,6 +788,8 @@ fn create_session(state: &WebState) -> std::result::Result<String, ApiError> {
         authenticated: false,
         username: None,
         expires_at: Instant::now() + SESSION_TTL,
+        failed_login_attempts: 0,
+        login_blocked_until: None,
     };
 
     let mut sessions = state
@@ -861,8 +875,50 @@ fn mark_session_authenticated(
     session.authenticated = true;
     session.username = Some(username.to_string());
     session.expires_at = Instant::now() + SESSION_TTL;
+    session.failed_login_attempts = 0;
+    session.login_blocked_until = None;
 
     Ok(())
+}
+
+fn record_login_failure(state: &WebState, session_id: &str) -> std::result::Result<(), ApiError> {
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| ApiError::bad_request("session store is unavailable"))?;
+    let session = sessions
+        .get_mut(session_id)
+        .ok_or_else(|| ApiError::unauthorized("setup session expired or invalid"))?;
+    session.failed_login_attempts = session.failed_login_attempts.saturating_add(1);
+
+    if session.failed_login_attempts >= AUTH_MAX_FAILURES_BEFORE_LOCK {
+        session.login_blocked_until = Some(Instant::now() + AUTH_LOCKOUT);
+    }
+
+    Ok(())
+}
+
+fn require_login_allowed(session: &Session) -> std::result::Result<(), ApiError> {
+    if session
+        .login_blocked_until
+        .is_some_and(|blocked_until| blocked_until > Instant::now())
+    {
+        Err(ApiError::too_many_requests(
+            "too many failed login attempts; wait 60 seconds and retry",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn require_loopback_login(state: &WebState) -> std::result::Result<(), ApiError> {
+    if state.loopback_bind {
+        return Ok(());
+    }
+
+    Err(ApiError::forbidden(
+        "server account password login is disabled on remote bind; use the default 127.0.0.1 bind with an SSH tunnel",
+    ))
 }
 
 fn remove_session(state: &WebState, session_id: &str) -> std::result::Result<(), ApiError> {
@@ -1011,6 +1067,13 @@ impl ApiError {
             message: error.into(),
         }
     }
+
+    fn too_many_requests(error: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            message: error.into(),
+        }
+    }
 }
 
 impl IntoResponse for ApiError {
@@ -1051,9 +1114,11 @@ fn emit_stage(
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_remote_binding_is_explicit, normalize_login_username, parse_bind, secure_eq,
-        secure_token,
+        AUTH_LOCKOUT, SESSION_TTL, Session, ensure_remote_binding_is_explicit,
+        normalize_login_username, parse_bind, require_login_allowed, secure_eq, secure_token,
     };
+    use axum::http::StatusCode;
+    use std::time::Instant;
 
     #[test]
     fn loopback_bind_is_allowed_without_remote_flag()
@@ -1099,5 +1164,20 @@ mod tests {
         ));
         assert!(normalize_login_username("../root").is_err());
         assert!(normalize_login_username("").is_err());
+    }
+
+    #[test]
+    fn login_lockout_returns_rate_limit_error() {
+        let session = Session {
+            csrf_token: "csrf".to_string(),
+            authenticated: false,
+            username: None,
+            expires_at: Instant::now() + SESSION_TTL,
+            failed_login_attempts: 3,
+            login_blocked_until: Some(Instant::now() + AUTH_LOCKOUT),
+        };
+
+        let error = require_login_allowed(&session).expect_err("lockout should reject login");
+        assert_eq!(error.status, StatusCode::TOO_MANY_REQUESTS);
     }
 }

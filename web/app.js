@@ -28,6 +28,21 @@ const nodes = {
   summaryData: document.querySelector("#summary-data"),
 };
 
+async function withBusy(button, busyText, task) {
+  const originalText = button.textContent;
+  button.disabled = true;
+  if (busyText) {
+    button.textContent = busyText;
+  }
+
+  try {
+    return await task();
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
 function log(message) {
   const timestamp = new Date().toLocaleTimeString();
   nodes.log.textContent += `\n[${timestamp}] ${message}`;
@@ -125,7 +140,7 @@ function renderDraftPlan() {
     `security_profile: ${payload.security_profile}`,
     `ssh_policy: ${payload.ssh_policy}`,
     "",
-    "API 연결은 다음 배치에서 실제 plan 결과로 교체됩니다.",
+    "계획 생성 버튼을 누르면 실제 plan 결과로 교체됩니다.",
   ].join("\n");
 }
 
@@ -140,6 +155,14 @@ function renderDoctor(report) {
     item.title = check.message;
     nodes.doctorResults.append(item);
   });
+}
+
+async function runDoctorCheck() {
+  log("running server check");
+  const report = await apiFetch("/api/doctor");
+  renderDoctor(report);
+  log(`server check completed: install_allowed=${report.install_allowed}`);
+  return report;
 }
 
 function markStage(stage, status) {
@@ -256,104 +279,115 @@ function bindEvents() {
 
   document.querySelector("#login-form").addEventListener("submit", async (event) => {
     event.preventDefault();
+    const button = event.submitter;
     const username = document.querySelector("#login-username").value;
     const passwordInput = document.querySelector("#login-password");
 
-    try {
-      log(`authenticating server account: ${username}`);
-      const response = await apiFetch("/api/auth/login", {
-        method: "POST",
-        body: JSON.stringify({
-          username,
-          password: passwordInput.value,
-        }),
-      });
-      passwordInput.value = "";
-      state.authenticated = response.authenticated;
-      log(`server account authenticated: ${response.username}`);
-      showStep("check");
-    } catch (error) {
-      passwordInput.value = "";
-      log(error.message);
-    }
+    await withBusy(button, "확인 중", async () => {
+      try {
+        log(`authenticating server account: ${username}`);
+        const response = await apiFetch("/api/auth/login", {
+          method: "POST",
+          body: JSON.stringify({
+            username,
+            password: passwordInput.value,
+          }),
+        });
+        passwordInput.value = "";
+        state.authenticated = response.authenticated;
+        log(`server account authenticated: ${response.username}`);
+        showStep("check");
+      } catch (error) {
+        passwordInput.value = "";
+        log(error.message);
+      }
+    });
   });
 
-  document.querySelector("#doctor-button").addEventListener("click", async () => {
-    try {
-      log("running server check");
-      const report = await apiFetch("/api/doctor");
-      renderDoctor(report);
-      log(`server check completed: install_allowed=${report.install_allowed}`);
-    } catch (error) {
-      log(error.message);
-    }
+  document.querySelector("#doctor-button").addEventListener("click", async (event) => {
+    await withBusy(event.currentTarget, "점검 중", async () => {
+      try {
+        await runDoctorCheck();
+      } catch (error) {
+        log(error.message);
+      }
+    });
   });
 
-  document.querySelector("#plan-button").addEventListener("click", async () => {
-    try {
-      log("building install plan");
-      const report = await apiFetch("/api/plan", {
-        method: "POST",
-        body: JSON.stringify(optionPayload()),
-      });
-      nodes.planOutput.textContent = report.text;
-      log(`plan ready: ${report.packages.length} package group(s), ${report.files.length} file(s)`);
-    } catch (error) {
-      nodes.planOutput.textContent = error.message;
-      log(error.message);
-    }
+  document.querySelector("#plan-button").addEventListener("click", async (event) => {
+    await withBusy(event.currentTarget, "생성 중", async () => {
+      try {
+        log("building install plan");
+        const report = await apiFetch("/api/plan", {
+          method: "POST",
+          body: JSON.stringify(optionPayload()),
+        });
+        nodes.planOutput.textContent = report.text;
+        log(`plan ready: ${report.packages.length} package group(s), ${report.files.length} file(s)`);
+      } catch (error) {
+        nodes.planOutput.textContent = error.message;
+        log(error.message);
+      }
+    });
   });
 
-  document.querySelector("#install-button").addEventListener("click", async () => {
+  document.querySelector("#install-button").addEventListener("click", async (event) => {
     ["preflight", "packages", "config", "services", "ports", "http", "report"].forEach((stage) => {
       markStage(stage, "대기");
     });
 
-    try {
-      markStage("preflight", "진행");
-      log("preparing install");
-      const report = await apiFetch("/api/install/prepare", {
-        method: "POST",
-        body: JSON.stringify(optionPayload()),
-      });
-      renderInstallReport(report);
-      showStep("report");
-      log(`install preparation completed: ${report.phase}`);
-    } catch (error) {
-      markStage("preflight", "실패");
-      nodes.reportOutput.textContent = error.message;
-      log(error.message);
-    }
+    await withBusy(event.currentTarget, "준비 중", async () => {
+      try {
+        markStage("preflight", "진행");
+        log("preparing install");
+        const report = await apiFetch("/api/install/prepare", {
+          method: "POST",
+          body: JSON.stringify(optionPayload()),
+        });
+        renderInstallReport(report);
+        showStep("report");
+        log(`install preparation completed: ${report.phase}`);
+      } catch (error) {
+        markStage("preflight", "실패");
+        nodes.reportOutput.textContent = `${error.message}\n\n해결 후 다시 서버 점검을 실행하세요. 테스트 흔적이면 reset을 사용하세요.`;
+        log(error.message);
+      }
+    });
   });
 
-  document.querySelector("#report-button").addEventListener("click", async () => {
-    try {
-      const report = await apiFetch("/api/report");
-      nodes.reportOutput.textContent = report.content;
-      log(`report loaded: ${report.exists ? "exists" : "missing"}`);
-    } catch (error) {
-      nodes.reportOutput.textContent = error.message;
-      log(error.message);
-    }
+  document.querySelector("#report-button").addEventListener("click", async (event) => {
+    await withBusy(event.currentTarget, "새로고침", async () => {
+      try {
+        const report = await apiFetch("/api/report");
+        nodes.reportOutput.textContent = report.content;
+        log(`report loaded: ${report.exists ? "exists" : "missing"}`);
+      } catch (error) {
+        nodes.reportOutput.textContent = error.message;
+        log(error.message);
+      }
+    });
   });
 
-  document.querySelector("#reset-button").addEventListener("click", async () => {
+  document.querySelector("#reset-button").addEventListener("click", async (event) => {
     if (!window.confirm("installer가 만든 파일을 리셋할까요?")) {
       return;
     }
 
-    try {
-      log("running reset");
-      const report = await apiFetch("/api/reset", {
-        method: "POST",
-        body: JSON.stringify({ dry_run: false }),
-      });
-      renderResetReport(report);
-      log("reset completed");
-    } catch (error) {
-      nodes.reportOutput.textContent = error.message;
-      log(error.message);
-    }
+    await withBusy(event.currentTarget, "리셋 중", async () => {
+      try {
+        log("running reset");
+        const report = await apiFetch("/api/reset", {
+          method: "POST",
+          body: JSON.stringify({ dry_run: false }),
+        });
+        renderResetReport(report);
+        log("reset completed");
+        await runDoctorCheck();
+      } catch (error) {
+        nodes.reportOutput.textContent = error.message;
+        log(error.message);
+      }
+    });
   });
 
   nodes.optionsForm.addEventListener("input", refreshFormState);
