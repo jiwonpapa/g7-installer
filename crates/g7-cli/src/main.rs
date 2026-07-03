@@ -5,6 +5,10 @@ use g7_core::commands::{
 };
 use miette::{Result, miette};
 
+const SETUP_CONTROL_HINT: &str =
+    "Controls: Up/Down move, Enter select/accept, type text when prompted, Ctrl+C cancel.";
+const SELECT_PROMPT_HINT: &str = "Use Up/Down, Enter";
+
 #[derive(Debug, Parser)]
 #[command(name = "g7inst")]
 #[command(version)]
@@ -279,6 +283,8 @@ fn plan_options(
 
 fn run_setup(domain_arg: Option<String>, local_test_arg: bool) -> Result<()> {
     println!("G7 Installer Setup");
+    println!("{SETUP_CONTROL_HINT}");
+    println!();
     println!("1) Server check");
     let doctor_report = doctor::run();
     print_doctor(doctor_report.clone());
@@ -299,7 +305,7 @@ fn run_setup(domain_arg: Option<String>, local_test_arg: bool) -> Result<()> {
         1
     } else {
         Select::new()
-            .with_prompt("Install profile")
+            .with_prompt(select_prompt("Install profile"))
             .items(&profile_items)
             .default(0)
             .interact()
@@ -398,7 +404,7 @@ fn run_setup(domain_arg: Option<String>, local_test_arg: bool) -> Result<()> {
     print_setup_summary(&setup_plan);
 
     let proceed = Confirm::new()
-        .with_prompt("Proceed with install preparation?")
+        .with_prompt("Proceed with install preparation? Enter uses the default")
         .default(false)
         .interact()
         .map_err(|err| miette!("setup prompt failed: {err}"))?;
@@ -416,13 +422,17 @@ fn run_setup(domain_arg: Option<String>, local_test_arg: bool) -> Result<()> {
 
 fn select_value(prompt: &str, items: &[&str], default: usize) -> Result<String> {
     let selected = Select::new()
-        .with_prompt(prompt)
+        .with_prompt(select_prompt(prompt))
         .items(items)
         .default(default)
         .interact()
         .map_err(|err| miette!("setup prompt failed: {err}"))?;
 
     Ok(items[selected].to_string())
+}
+
+fn select_prompt(prompt: &str) -> String {
+    format!("{prompt} ({SELECT_PROMPT_HINT})")
 }
 
 fn print_setup_summary(plan: &plan::InstallPlan) {
