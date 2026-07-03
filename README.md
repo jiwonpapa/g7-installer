@@ -102,6 +102,8 @@ scripts/g7-test-smoke.sh
 ssh -t g7-test 'sudo /tmp/g7inst reset --yes'
 ```
 
+`reset --yes`는 `/etc/g7-installer`, `/var/lib/g7-installer`, `/var/log/g7-installer`, `/var/backups/g7-installer`, `/var/www/g7` 같은 설치 준비 흔적을 삭제합니다. 예전 명령어 충돌을 막기 위해 `/usr/local/bin/g7`, `/tmp/g7`도 함께 삭제합니다. 현재 실행 중인 `g7inst` 바이너리는 삭제하지 않으므로 바로 다시 테스트할 수 있습니다.
+
 ### 2. 실제 VPS에서 테스트
 
 GitHub Release에 `g7inst-*` asset이 올라간 뒤에는 서버에서 bootstrap만 실행합니다.
@@ -255,6 +257,8 @@ sudo g7inst self-update
 - `sudo g7inst reset --yes`
   - 테스트 VM 반복 실행용
   - `owned-files.json`에 기록된 installer 소유 파일만 삭제
+  - legacy `/usr/local/bin/g7`, `/tmp/g7`도 삭제
+  - 현재 `g7inst` 바이너리는 유지
   - `--dry-run`으로 삭제 대상 미리보기 가능
 
 ## 아직 미구현
@@ -283,7 +287,7 @@ sudo g7inst self-update
 현재 테스트 릴리스:
 
 ```text
-https://github.com/jiwonpapa/g7-installer/releases/tag/v0.1.0
+https://github.com/jiwonpapa/g7-installer/releases/tag/v0.1.3
 ```
 
 수동으로 Release asset을 만들 때:

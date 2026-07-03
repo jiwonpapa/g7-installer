@@ -127,7 +127,7 @@ enum Command {
     Status,
     /// Show installer log location.
     Logs,
-    /// Remove installer-owned files for test VM reset.
+    /// Remove installer-owned files and legacy g7 binary for test VM reset.
     Reset {
         /// Confirm removal of installer-owned files.
         #[arg(long, default_value_t = false)]

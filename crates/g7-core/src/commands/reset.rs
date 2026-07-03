@@ -6,6 +6,8 @@ use g7_state::owned_files::{OWNED_FILES_PATH, read_owned_files};
 use g7_system::SystemProbe;
 use g7_system::command::CommandRunner;
 
+const LEGACY_INSTALLER_PATHS: [&str; 2] = ["/usr/local/bin/g7", "/tmp/g7"];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResetReport {
     pub dry_run: bool,
@@ -59,13 +61,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
 
     require_root(probe)?;
 
-    let metadata_path = paths.resolve(OWNED_FILES_PATH);
-    let owned = read_owned_files(&metadata_path).map_err(|source| Error::FileReadFailed {
-        path: OWNED_FILES_PATH.to_string(),
-        source,
-    })?;
-
-    let mut files = owned.files;
+    let mut files = reset_file_list(paths)?;
     files.sort_by_key(|path| std::cmp::Reverse(path_depth(path)));
 
     let mut removed = Vec::new();
@@ -113,6 +109,28 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     })
 }
 
+fn reset_file_list(paths: &ResetPaths) -> Result<Vec<String>> {
+    let metadata_path = paths.resolve(OWNED_FILES_PATH);
+    let mut files = match read_owned_files(&metadata_path) {
+        Ok(owned) => owned.files,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(source) => {
+            return Err(Error::FileReadFailed {
+                path: OWNED_FILES_PATH.to_string(),
+                source,
+            });
+        }
+    };
+
+    for path in LEGACY_INSTALLER_PATHS {
+        if !files.iter().any(|owned| owned == path) {
+            files.push(path.to_string());
+        }
+    }
+
+    Ok(files)
+}
+
 fn require_root<R: CommandRunner>(probe: &SystemProbe<R>) -> Result<()> {
     match probe.current_privilege() {
         Ok(g7_system::privilege::Privilege::Root) => Ok(()),
@@ -139,6 +157,8 @@ fn validate_reset_path(path: &str) -> Result<()> {
         "/etc/apache2/sites-enabled/g7.conf",
         "/etc/systemd/system/g7-queue.service",
         "/etc/systemd/system/g7-reverb.service",
+        "/usr/local/bin/g7",
+        "/tmp/g7",
     ];
 
     if allowed
@@ -174,7 +194,9 @@ mod tests {
         let fs_root = create_temp_fs_root()?;
         fs::create_dir_all(fs_root.join("var/lib/g7-installer"))?;
         fs::create_dir_all(fs_root.join("var/www/g7"))?;
+        fs::create_dir_all(fs_root.join("usr/local/bin"))?;
         fs::write(fs_root.join("var/www/g7/test.txt"), "ok")?;
+        fs::write(fs_root.join("usr/local/bin/g7"), "old")?;
 
         let owned = OwnedFiles {
             version: 1,
@@ -193,7 +215,28 @@ mod tests {
             run_with_probe_and_paths(true, false, &probe, &ResetPaths::with_root(&fs_root))?;
 
         assert!(report.removed.contains(&"/var/www/g7".to_string()));
+        assert!(report.removed.contains(&"/usr/local/bin/g7".to_string()));
         assert!(!fs_root.join("var/www/g7").exists());
+        assert!(!fs_root.join("usr/local/bin/g7").exists());
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn reset_can_remove_legacy_g7_without_owned_metadata()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let fs_root = create_temp_fs_root()?;
+        fs::create_dir_all(fs_root.join("usr/local/bin"))?;
+        fs::write(fs_root.join("usr/local/bin/g7"), "old")?;
+
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success("0\n"));
+        let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
+        let report =
+            run_with_probe_and_paths(true, false, &probe, &ResetPaths::with_root(&fs_root))?;
+
+        assert!(report.removed.contains(&"/usr/local/bin/g7".to_string()));
+        assert!(!fs_root.join("usr/local/bin/g7").exists());
         fs::remove_dir_all(fs_root)?;
         Ok(())
     }

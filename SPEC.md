@@ -124,7 +124,7 @@ sudo g7inst self-update
 | `install` | 예 | 새 VPS 설치 실행 |
 | `status` | 아니오 | G7/Nginx/PHP/DB/systemd 상태 확인 |
 | `logs` | 아니오 | 설치 로그 출력 |
-| `reset` | 예 | installer 소유 파일만 삭제하는 테스트 VM 초기화 |
+| `reset` | 예 | installer 소유 파일과 legacy `g7` 바이너리를 삭제하는 테스트 VM 초기화 |
 | `update` | 예 | 설치된 G7 업데이트 |
 | `self-update` | 예 | 설치기 바이너리 업데이트 |
 
