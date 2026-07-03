@@ -126,12 +126,15 @@ function renderDraftPlan() {
   ].join("\n");
 }
 
-function renderDoctorPlaceholder() {
+function renderDoctor(report) {
   nodes.doctorResults.innerHTML = "";
-  ["ubuntu-version", "privilege", "port-80", "port-443", "installer-state"].forEach((name) => {
+
+  report.checks.forEach((check) => {
     const item = document.createElement("div");
     item.className = "result-row";
-    item.innerHTML = `<span>${name}</span><strong>대기</strong>`;
+    item.dataset.status = check.status;
+    item.innerHTML = `<span>${check.name}</span><strong>${check.status}</strong>`;
+    item.title = check.message;
     nodes.doctorResults.append(item);
   });
 }
@@ -147,12 +150,61 @@ function markStage(stage, status) {
 }
 
 async function loadBootstrap() {
-  const response = await fetch("/api/bootstrap");
+  return apiFetch("/api/bootstrap");
+}
+
+async function apiFetch(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      "content-type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const body = contentType.includes("application/json") ? await response.json() : await response.text();
+
   if (!response.ok) {
-    throw new Error(`bootstrap failed: ${response.status}`);
+    const message = typeof body === "object" && body.error ? body.error : `request failed: ${response.status}`;
+    throw new Error(message);
   }
 
-  return response.json();
+  return body;
+}
+
+function renderInstallReport(report) {
+  nodes.reportOutput.textContent = [
+    "Install preparation completed",
+    `domain: ${report.domain}`,
+    `mode: ${report.deployment_mode}`,
+    `web_server: ${report.web_server}`,
+    `php_version: ${report.php_version}`,
+    `database: ${report.database}`,
+    `site_user: ${report.site_user}`,
+    `web_root: ${report.web_root}`,
+    `phase: ${report.phase}`,
+    `state: ${report.state_path}`,
+    `owned_files: ${report.owned_files_path}`,
+    "",
+    "Completed steps:",
+    ...report.completed_steps.map((step) => `- ${step}`),
+  ].join("\n");
+
+  ["preflight", "config", "report"].forEach((stage) => markStage(stage, "성공"));
+}
+
+function renderResetReport(report) {
+  nodes.reportOutput.textContent = [
+    "Reset completed",
+    `dry_run: ${report.dry_run}`,
+    "",
+    "Removed:",
+    ...(report.removed.length ? report.removed.map((path) => `- ${path}`) : ["- none"]),
+    "",
+    "Missing:",
+    ...(report.missing.length ? report.missing.map((path) => `- ${path}`) : ["- none"]),
+  ].join("\n");
 }
 
 function bindEvents() {
@@ -170,31 +222,82 @@ function bindEvents() {
     showStep("check");
   });
 
-  document.querySelector("#doctor-button").addEventListener("click", () => {
-    renderDoctorPlaceholder();
-    log("doctor UI requested; API connection is pending");
+  document.querySelector("#doctor-button").addEventListener("click", async () => {
+    try {
+      log("running server check");
+      const report = await apiFetch("/api/doctor");
+      renderDoctor(report);
+      log(`server check completed: install_allowed=${report.install_allowed}`);
+    } catch (error) {
+      log(error.message);
+    }
   });
 
-  document.querySelector("#plan-button").addEventListener("click", () => {
-    renderDraftPlan();
-    log("draft plan rendered from current options");
+  document.querySelector("#plan-button").addEventListener("click", async () => {
+    try {
+      log("building install plan");
+      const report = await apiFetch("/api/plan", {
+        method: "POST",
+        body: JSON.stringify(optionPayload()),
+      });
+      nodes.planOutput.textContent = report.text;
+      log(`plan ready: ${report.packages.length} package group(s), ${report.files.length} file(s)`);
+    } catch (error) {
+      nodes.planOutput.textContent = error.message;
+      log(error.message);
+    }
   });
 
-  document.querySelector("#install-button").addEventListener("click", () => {
+  document.querySelector("#install-button").addEventListener("click", async () => {
     ["preflight", "packages", "config", "services", "ports", "http", "report"].forEach((stage) => {
       markStage(stage, "대기");
     });
-    markStage("preflight", "준비");
-    log("install start UI requested; install API is pending");
+
+    try {
+      markStage("preflight", "진행");
+      log("preparing install");
+      const report = await apiFetch("/api/install/prepare", {
+        method: "POST",
+        body: JSON.stringify(optionPayload()),
+      });
+      renderInstallReport(report);
+      showStep("report");
+      log(`install preparation completed: ${report.phase}`);
+    } catch (error) {
+      markStage("preflight", "실패");
+      nodes.reportOutput.textContent = error.message;
+      log(error.message);
+    }
   });
 
-  document.querySelector("#report-button").addEventListener("click", () => {
-    nodes.reportOutput.textContent = "리포트 API 연결 대기 중입니다.";
-    log("report refresh requested");
+  document.querySelector("#report-button").addEventListener("click", async () => {
+    try {
+      const report = await apiFetch("/api/report");
+      nodes.reportOutput.textContent = report.content;
+      log(`report loaded: ${report.exists ? "exists" : "missing"}`);
+    } catch (error) {
+      nodes.reportOutput.textContent = error.message;
+      log(error.message);
+    }
   });
 
-  document.querySelector("#reset-button").addEventListener("click", () => {
-    log("reset requested; reset API is pending");
+  document.querySelector("#reset-button").addEventListener("click", async () => {
+    if (!window.confirm("installer가 만든 파일을 리셋할까요?")) {
+      return;
+    }
+
+    try {
+      log("running reset");
+      const report = await apiFetch("/api/reset", {
+        method: "POST",
+        body: JSON.stringify({ dry_run: false }),
+      });
+      renderResetReport(report);
+      log("reset completed");
+    } catch (error) {
+      nodes.reportOutput.textContent = error.message;
+      log(error.message);
+    }
   });
 
   nodes.optionsForm.addEventListener("input", refreshFormState);

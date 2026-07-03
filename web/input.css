@@ -158,15 +158,19 @@
     @apply text-zinc-500;
   }
 
+  .result-row[data-status="pass"] strong,
+  .stage-row[data-status="성공"] strong {
+    @apply text-emerald-300;
+  }
+
+  .result-row[data-status="warn"] strong,
   .stage-row[data-status="진행"] strong,
   .stage-row[data-status="준비"] strong {
     @apply text-amber-300;
   }
 
-  .stage-row[data-status="성공"] strong {
-    @apply text-emerald-300;
-  }
-
+  .result-row[data-status="fail"] strong,
+  .result-row[data-status="pending"] strong,
   .stage-row[data-status="실패"] strong {
     @apply text-red-300;
   }

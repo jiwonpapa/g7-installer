@@ -6,15 +6,17 @@
 //! The controller must not expose arbitrary shell execution or invent install
 //! defaults that do not exist in `plan.rs`.
 
+use std::fs;
 use std::net::{IpAddr, SocketAddr};
 
 use axum::http::{StatusCode, header};
 use axum::response::{Html, IntoResponse};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
+use g7_core::commands::{DoctorCheckStatus, doctor, install, plan, reset, status};
 use getrandom::fill as fill_random;
 use miette::{IntoDiagnostic, Result, miette};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 
@@ -23,6 +25,7 @@ pub const DEFAULT_BIND: &str = "127.0.0.1:7717";
 const INDEX_HTML: &str = include_str!("../../../web/index.html");
 const APP_JS: &str = include_str!("../../../web/app.js");
 const APP_CSS: &str = include_str!("../../../web/dist/app.css");
+const REPORT_PATH: &str = "/var/log/g7-installer/report.json";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WebSetupConfig {
@@ -52,6 +55,151 @@ struct BootstrapAuth {
     status: &'static str,
 }
 
+#[derive(Debug, Deserialize)]
+struct SetupRequest {
+    domain: String,
+    local_test: bool,
+    web_server: String,
+    php_version: String,
+    database: String,
+    site_user: String,
+    web_root_mode: String,
+    web_root: Option<String>,
+    www_mode: String,
+    redis: String,
+    mail_mode: String,
+    smtp_host: Option<String>,
+    smtp_port: u16,
+    smtp_from: Option<String>,
+    smtp_encryption: String,
+    security_profile: String,
+    ssh_policy: String,
+    rollback: bool,
+    preserve_config: bool,
+    dns_check: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResetRequest {
+    #[serde(default)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ApiErrorBody {
+    error: String,
+}
+
+#[derive(Debug)]
+struct ApiError {
+    status: StatusCode,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorApiReport {
+    install_allowed: bool,
+    checks: Vec<DoctorApiCheck>,
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorApiCheck {
+    name: &'static str,
+    status: &'static str,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PlanApiReport {
+    text: String,
+    domain: String,
+    deployment_mode: String,
+    web_server: String,
+    php_version: String,
+    database: String,
+    site_user: String,
+    web_root: String,
+    packages: Vec<NameDescription>,
+    files: Vec<FilePlan>,
+    services: Vec<ServicePlan>,
+    ports: Vec<PortPlan>,
+    security_checks: Vec<SecurityCheckPlan>,
+    stop_conditions: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct NameDescription {
+    name: String,
+    description: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct FilePlan {
+    path: String,
+    action: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct ServicePlan {
+    name: String,
+    action: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct PortPlan {
+    port: u16,
+    protocol: &'static str,
+    purpose: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct SecurityCheckPlan {
+    name: &'static str,
+    level: &'static str,
+    description: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct InstallApiReport {
+    domain: String,
+    deployment_mode: String,
+    web_server: String,
+    php_version: String,
+    database: String,
+    site_user: String,
+    web_root: String,
+    phase: String,
+    state_path: String,
+    owned_files_path: String,
+    completed_steps: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ResetApiReport {
+    dry_run: bool,
+    removed: Vec<String>,
+    missing: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct StatusApiReport {
+    installed: bool,
+    components: Vec<ComponentApiStatus>,
+}
+
+#[derive(Debug, Serialize)]
+struct ComponentApiStatus {
+    name: &'static str,
+    state: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct ReportApiPayload {
+    exists: bool,
+    path: &'static str,
+    content: String,
+}
+
 pub async fn run(config: WebSetupConfig) -> Result<()> {
     let bind = parse_bind(&config.bind)?;
     ensure_remote_binding_is_explicit(bind, config.allow_remote)?;
@@ -73,6 +221,12 @@ pub async fn run(config: WebSetupConfig) -> Result<()> {
         .route("/app.js", get(app_js))
         .route("/app.css", get(app_css))
         .route("/api/bootstrap", get(bootstrap))
+        .route("/api/doctor", get(api_doctor))
+        .route("/api/plan", post(api_plan))
+        .route("/api/install/prepare", post(api_install_prepare))
+        .route("/api/reset", post(api_reset))
+        .route("/api/status", get(api_status))
+        .route("/api/report", get(api_report))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
@@ -167,6 +321,225 @@ async fn bootstrap(
     };
 
     (StatusCode::OK, Json(payload))
+}
+
+async fn api_doctor() -> impl IntoResponse {
+    Json(doctor_to_api(doctor::run()))
+}
+
+async fn api_plan(
+    Json(request): Json<SetupRequest>,
+) -> std::result::Result<impl IntoResponse, ApiError> {
+    let domain = request.domain.clone();
+    let options = options_from_request(request);
+    let install_plan = plan::build_with_options(domain, options).map_err(ApiError::bad_request)?;
+
+    Ok(Json(plan_to_api(install_plan)))
+}
+
+async fn api_install_prepare(
+    Json(request): Json<SetupRequest>,
+) -> std::result::Result<impl IntoResponse, ApiError> {
+    let domain = request.domain.clone();
+    let options = options_from_request(request);
+    let report = install::run(domain, options).map_err(ApiError::bad_request)?;
+
+    Ok(Json(install_to_api(report)))
+}
+
+async fn api_reset(
+    Json(request): Json<ResetRequest>,
+) -> std::result::Result<impl IntoResponse, ApiError> {
+    let report = reset::run(true, request.dry_run).map_err(ApiError::bad_request)?;
+
+    Ok(Json(ResetApiReport {
+        dry_run: report.dry_run,
+        removed: report.removed,
+        missing: report.missing,
+    }))
+}
+
+async fn api_status() -> impl IntoResponse {
+    let current = status::read();
+
+    Json(StatusApiReport {
+        installed: current.installed,
+        components: current
+            .components
+            .into_iter()
+            .map(|component| ComponentApiStatus {
+                name: component.name,
+                state: component.state,
+            })
+            .collect(),
+    })
+}
+
+async fn api_report() -> impl IntoResponse {
+    match fs::read_to_string(REPORT_PATH) {
+        Ok(content) => Json(ReportApiPayload {
+            exists: true,
+            path: REPORT_PATH,
+            content,
+        }),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Json(ReportApiPayload {
+            exists: false,
+            path: REPORT_PATH,
+            content: "report file does not exist yet".to_string(),
+        }),
+        Err(err) => Json(ReportApiPayload {
+            exists: false,
+            path: REPORT_PATH,
+            content: format!("failed to read report: {err}"),
+        }),
+    }
+}
+
+fn options_from_request(request: SetupRequest) -> plan::PlanOptions {
+    crate::plan_options(
+        request.local_test,
+        request.web_server,
+        request.php_version,
+        request.database,
+        request.site_user,
+        request.web_root_mode,
+        request.web_root.filter(|value| !value.trim().is_empty()),
+        request.www_mode,
+        request.redis,
+        request.mail_mode,
+        request.smtp_host.filter(|value| !value.trim().is_empty()),
+        request.smtp_port,
+        request.smtp_from.filter(|value| !value.trim().is_empty()),
+        request.smtp_encryption,
+        request.security_profile,
+        request.ssh_policy,
+        request.rollback,
+        request.preserve_config,
+        request.dns_check,
+    )
+}
+
+fn doctor_to_api(report: doctor::DoctorReport) -> DoctorApiReport {
+    DoctorApiReport {
+        install_allowed: report.install_allowed,
+        checks: report
+            .checks
+            .into_iter()
+            .map(|check| DoctorApiCheck {
+                name: check.name,
+                status: doctor_status_label(check.status),
+                message: check.message,
+            })
+            .collect(),
+    }
+}
+
+fn doctor_status_label(status: DoctorCheckStatus) -> &'static str {
+    match status {
+        DoctorCheckStatus::Pass => "pass",
+        DoctorCheckStatus::Warn => "warn",
+        DoctorCheckStatus::Fail => "fail",
+        DoctorCheckStatus::Pending => "pending",
+    }
+}
+
+fn plan_to_api(install_plan: plan::InstallPlan) -> PlanApiReport {
+    let text = crate::format_plan(&install_plan);
+
+    PlanApiReport {
+        text,
+        domain: install_plan.domain,
+        deployment_mode: install_plan.deployment_mode,
+        web_server: install_plan.web_server,
+        php_version: install_plan.php_version,
+        database: install_plan.database_engine,
+        site_user: install_plan.site_user,
+        web_root: install_plan.web_root,
+        packages: install_plan
+            .packages
+            .into_iter()
+            .map(|package| NameDescription {
+                name: package.name,
+                description: package.description,
+            })
+            .collect(),
+        files: install_plan
+            .files
+            .into_iter()
+            .map(|file| FilePlan {
+                path: file.path,
+                action: file.action,
+            })
+            .collect(),
+        services: install_plan
+            .services
+            .into_iter()
+            .map(|service| ServicePlan {
+                name: service.name,
+                action: service.action,
+            })
+            .collect(),
+        ports: install_plan
+            .ports
+            .into_iter()
+            .map(|port| PortPlan {
+                port: port.port,
+                protocol: port.protocol,
+                purpose: port.purpose,
+            })
+            .collect(),
+        security_checks: install_plan
+            .security_checks
+            .into_iter()
+            .map(|check| SecurityCheckPlan {
+                name: check.name,
+                level: check.level,
+                description: check.description,
+            })
+            .collect(),
+        stop_conditions: install_plan
+            .stop_conditions
+            .into_iter()
+            .map(|condition| condition.reason)
+            .collect(),
+    }
+}
+
+fn install_to_api(report: install::InstallReport) -> InstallApiReport {
+    InstallApiReport {
+        domain: report.domain,
+        deployment_mode: report.deployment_mode,
+        web_server: report.web_server,
+        php_version: report.php_version,
+        database: report.database_engine,
+        site_user: report.site_user,
+        web_root: report.web_root,
+        phase: report.phase,
+        state_path: report.state_path.display().to_string(),
+        owned_files_path: report.owned_files_path.display().to_string(),
+        completed_steps: report.completed_steps,
+    }
+}
+
+impl ApiError {
+    fn bad_request(error: impl std::fmt::Display) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            message: error.to_string(),
+        }
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> axum::response::Response {
+        (
+            self.status,
+            Json(ApiErrorBody {
+                error: self.message,
+            }),
+        )
+            .into_response()
+    }
 }
 
 #[cfg(test)]

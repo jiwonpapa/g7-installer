@@ -383,7 +383,7 @@ fn print_plan(plan: plan::InstallPlan) {
     print!("{}", format_plan(&plan));
 }
 
-fn format_plan(plan: &plan::InstallPlan) -> String {
+pub(crate) fn format_plan(plan: &plan::InstallPlan) -> String {
     let mut output = String::new();
 
     output.push_str("G7 Installer Plan\n");
