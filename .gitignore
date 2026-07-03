@@ -1,5 +1,6 @@
 # Rust build artifacts
 /target/
+/dist/
 
 # Local environment and secrets
 .env
@@ -24,4 +25,3 @@
 .vscode/
 *.swp
 *.swo
-
