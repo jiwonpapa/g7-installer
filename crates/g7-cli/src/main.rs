@@ -5,6 +5,8 @@ use g7_core::commands::{
 };
 use miette::{Result, miette};
 
+mod tui_setup;
+
 const SETUP_CONTROL_HINT: &str =
     "Controls: Up/Down move, Enter select/accept, type text when prompted, Ctrl+C cancel.";
 const SELECT_PROMPT_HINT: &str = "Use Up/Down, Enter";
@@ -28,6 +30,9 @@ enum Command {
         /// Use local test mode without public DNS or Let's Encrypt.
         #[arg(long, default_value_t = false)]
         local_test: bool,
+        /// Use the legacy prompt flow instead of the full-screen TUI.
+        #[arg(long, default_value_t = false)]
+        plain: bool,
     },
     /// Diagnose whether this server can be used for a G7 install.
     Doctor,
@@ -150,7 +155,17 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Setup { domain, local_test } => run_setup(domain, local_test)?,
+        Command::Setup {
+            domain,
+            local_test,
+            plain,
+        } => {
+            if plain {
+                run_setup_plain(domain, local_test)?;
+            } else {
+                tui_setup::run(domain, local_test)?;
+            }
+        }
         Command::Doctor => print_doctor(doctor::run()),
         Command::Plan {
             domain,
@@ -247,7 +262,7 @@ fn main() -> Result<()> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn plan_options(
+pub(crate) fn plan_options(
     local_test: bool,
     web_server: String,
     php_version: String,
@@ -281,7 +296,7 @@ fn plan_options(
     }
 }
 
-fn run_setup(domain_arg: Option<String>, local_test_arg: bool) -> Result<()> {
+fn run_setup_plain(domain_arg: Option<String>, local_test_arg: bool) -> Result<()> {
     println!("G7 Installer Setup");
     println!("{SETUP_CONTROL_HINT}");
     println!();

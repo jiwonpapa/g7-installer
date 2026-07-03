@@ -90,13 +90,20 @@ VM 안에서 대화형 세팅을 시작합니다.
 ssh -t g7-test 'chmod +x /tmp/g7inst && sudo /tmp/g7inst setup --local-test --domain g7-test.local'
 ```
 
-대화형 화면 조작:
+기본 `setup`은 풀스크린 TUI로 실행됩니다. 기존 문답식 프롬프트가 필요하면 `--plain`을 붙입니다.
+
+```bash
+sudo g7inst setup --plain --local-test --domain g7-test.local
+```
+
+TUI 화면 조작:
 
 ```text
 Up/Down: 선택지 이동
-Enter: 선택 또는 기본값 적용
+Left/Right: 선택값 변경
+Enter: 선택 또는 Prepare install 실행
 문자 입력: 도메인, SMTP host/from 입력
-Ctrl+C: 취소
+q, Esc, Ctrl+C: 종료
 ```
 
 자동화 방식으로 한 번에 확인하려면:
@@ -213,9 +220,10 @@ sudo g7inst self-update
 ## 현재 구현된 기능
 
 - `g7inst setup`
-  - 대화형 설치 준비 흐름
-  - `dialoguer` 기반 선택 UI
-  - 화면에 Up/Down, Enter, Ctrl+C 조작법 안내
+  - 풀스크린 TUI 기반 설치 준비 흐름
+  - `ratatui` + `crossterm` 기반 화면 UI
+  - `--plain` 사용 시 기존 `dialoguer` 기반 선택 UI
+  - 화면에 Up/Down, Left/Right, Enter, q/Esc/Ctrl+C 조작법 안내
   - 서버 상태 체크 후 도메인, 웹서버, PHP, DB, Redis, 메일 선택
   - 요약 확인 후 `install` 준비 단계 실행
 
@@ -298,7 +306,7 @@ sudo g7inst self-update
 현재 테스트 릴리스:
 
 ```text
-https://github.com/jiwonpapa/g7-installer/releases/tag/v0.1.4
+https://github.com/jiwonpapa/g7-installer/releases/tag/v0.1.5
 ```
 
 수동으로 Release asset을 만들 때:

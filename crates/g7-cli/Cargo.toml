@@ -1,6 +1,6 @@
 [package]
 name = "g7-cli"
-version = "0.1.4"
+version = "0.1.5"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -13,6 +13,8 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
+crossterm = "0.28"
 dialoguer = "0.11"
 g7-core = { path = "../g7-core" }
 miette.workspace = true
+ratatui = "0.29"
