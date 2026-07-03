@@ -2,17 +2,126 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    font-family:
+      Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  input,
+  select {
+    @apply min-h-11 rounded border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none transition;
+  }
+
+  input:focus,
+  select:focus {
+    @apply border-cyan-500 ring-2 ring-cyan-500/20;
+  }
+
+  input:disabled,
+  select:disabled {
+    @apply cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600;
+  }
+}
+
 @layer components {
-  .panel {
+  .app-header {
+    @apply flex flex-col gap-4 border-b border-zinc-800 pb-5 sm:flex-row sm:items-end sm:justify-between;
+  }
+
+  .status-pill {
+    @apply inline-flex min-h-10 items-center gap-2 rounded border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-300;
+  }
+
+  .progress-shell {
+    @apply rounded border border-zinc-800 bg-zinc-900/80 p-3;
+  }
+
+  .progress-list {
+    @apply grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6;
+  }
+
+  .progress-step {
+    @apply rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-center text-xs font-semibold uppercase text-zinc-500;
+  }
+
+  .progress-step.is-active {
+    @apply border-cyan-500 bg-cyan-950/50 text-cyan-100;
+  }
+
+  .side-nav {
+    @apply flex gap-2 overflow-auto lg:block lg:space-y-2 lg:overflow-visible;
+  }
+
+  .side-panel {
+    @apply space-y-4;
+  }
+
+  .panel,
+  .view-panel {
     @apply rounded border border-zinc-800 bg-zinc-900/80 p-5 shadow-sm shadow-black/20;
   }
 
+  .view-panel {
+    @apply hidden;
+  }
+
+  .view-panel.is-visible {
+    @apply block;
+  }
+
+  .panel-heading {
+    @apply flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between;
+  }
+
+  .panel-heading h2 {
+    @apply text-xl font-semibold text-white;
+  }
+
+  .panel-heading p {
+    @apply mt-1 text-sm text-zinc-400;
+  }
+
   .step-item {
-    @apply block w-full rounded border border-zinc-800 bg-zinc-900 px-4 py-3 text-left text-sm font-medium text-zinc-300 transition hover:border-cyan-700 hover:text-white;
+    @apply block min-w-40 rounded border border-zinc-800 bg-zinc-900 px-4 py-3 text-left text-sm font-medium text-zinc-300 transition hover:border-cyan-700 hover:text-white lg:w-full;
   }
 
   .step-item.is-active {
     @apply border-cyan-500 bg-cyan-950/40 text-cyan-100;
+  }
+
+  .field {
+    @apply grid gap-2;
+  }
+
+  .field span {
+    @apply text-sm font-medium text-zinc-300;
+  }
+
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger {
+    @apply inline-flex min-h-10 items-center justify-center rounded px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply bg-cyan-500 text-zinc-950 hover:bg-cyan-400;
+  }
+
+  .btn-secondary {
+    @apply border border-zinc-700 bg-zinc-900 text-zinc-200 hover:border-zinc-500 hover:bg-zinc-800;
+  }
+
+  .btn-danger {
+    @apply bg-red-500 text-white hover:bg-red-400;
+  }
+
+  .badge-warn {
+    @apply inline-flex min-h-8 items-center rounded border border-amber-500/40 bg-amber-500/10 px-3 text-xs font-semibold uppercase text-amber-200;
   }
 
   .metric {
@@ -25,5 +134,40 @@
 
   .metric dd {
     @apply mt-2 break-words text-base font-semibold text-zinc-100;
+  }
+
+  .code-box {
+    @apply max-h-[520px] min-h-80 overflow-auto rounded border border-zinc-800 bg-black p-4 text-sm leading-6 text-zinc-300;
+  }
+
+  .empty-state {
+    @apply rounded border border-dashed border-zinc-700 p-6 text-center text-sm text-zinc-500;
+  }
+
+  .result-list {
+    @apply grid gap-2;
+  }
+
+  .result-row,
+  .stage-row {
+    @apply flex min-h-12 items-center justify-between gap-3 rounded border border-zinc-800 bg-zinc-950 px-4 text-sm text-zinc-300;
+  }
+
+  .result-row strong,
+  .stage-row strong {
+    @apply text-zinc-500;
+  }
+
+  .stage-row[data-status="진행"] strong,
+  .stage-row[data-status="준비"] strong {
+    @apply text-amber-300;
+  }
+
+  .stage-row[data-status="성공"] strong {
+    @apply text-emerald-300;
+  }
+
+  .stage-row[data-status="실패"] strong {
+    @apply text-red-300;
   }
 }
