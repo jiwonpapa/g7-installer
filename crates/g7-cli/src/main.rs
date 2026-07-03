@@ -1,3 +1,9 @@
+//! `g7inst` command-line surface.
+//!
+//! CLI flags and output are adapters over the canonical policy in
+//! `g7_core::commands::plan`. Do not add CLI-only defaults here; every server
+//! installation default must live in `plan.rs` first.
+
 use clap::{Parser, Subcommand};
 use dialoguer::{Confirm, Input, Select};
 use g7_core::commands::{
@@ -53,6 +59,15 @@ enum Command {
         /// Database engine: mariadb or mysql.
         #[arg(long, default_value_t = plan::DEFAULT_DATABASE_ENGINE.to_string())]
         database: String,
+        /// Linux account that owns the G7 site files.
+        #[arg(long, default_value_t = plan::DEFAULT_SITE_USER.to_string())]
+        site_user: String,
+        /// Web root mode: public-html, www, system, or custom.
+        #[arg(long, default_value_t = plan::DEFAULT_WEB_ROOT_MODE.to_string())]
+        web_root_mode: String,
+        /// Custom absolute web root. Implies --web-root-mode custom.
+        #[arg(long)]
+        web_root: Option<String>,
         /// Canonical host policy: redirect-to-root, redirect-to-www, include, none.
         #[arg(long, default_value_t = plan::DEFAULT_WWW_MODE.to_string())]
         www_mode: String,
@@ -74,6 +89,12 @@ enum Command {
         /// SMTP encryption: none, starttls, tls.
         #[arg(long, default_value_t = plan::DEFAULT_SMTP_ENCRYPTION.to_string())]
         smtp_encryption: String,
+        /// Security profile: audit-only, standard, or hardened.
+        #[arg(long, default_value_t = plan::DEFAULT_SECURITY_PROFILE.to_string())]
+        security_profile: String,
+        /// SSH policy: audit-only or harden.
+        #[arg(long, default_value_t = plan::DEFAULT_SSH_POLICY.to_string())]
+        ssh_policy: String,
         /// Enable rollback tracking.
         #[arg(long, default_value_t = true)]
         rollback: bool,
@@ -101,6 +122,15 @@ enum Command {
         /// Database engine: mariadb or mysql.
         #[arg(long, default_value_t = plan::DEFAULT_DATABASE_ENGINE.to_string())]
         database: String,
+        /// Linux account that owns the G7 site files.
+        #[arg(long, default_value_t = plan::DEFAULT_SITE_USER.to_string())]
+        site_user: String,
+        /// Web root mode: public-html, www, system, or custom.
+        #[arg(long, default_value_t = plan::DEFAULT_WEB_ROOT_MODE.to_string())]
+        web_root_mode: String,
+        /// Custom absolute web root. Implies --web-root-mode custom.
+        #[arg(long)]
+        web_root: Option<String>,
         /// Canonical host policy: redirect-to-root, redirect-to-www, include, none.
         #[arg(long, default_value_t = plan::DEFAULT_WWW_MODE.to_string())]
         www_mode: String,
@@ -122,6 +152,12 @@ enum Command {
         /// SMTP encryption: none, starttls, tls.
         #[arg(long, default_value_t = plan::DEFAULT_SMTP_ENCRYPTION.to_string())]
         smtp_encryption: String,
+        /// Security profile: audit-only, standard, or hardened.
+        #[arg(long, default_value_t = plan::DEFAULT_SECURITY_PROFILE.to_string())]
+        security_profile: String,
+        /// SSH policy: audit-only or harden.
+        #[arg(long, default_value_t = plan::DEFAULT_SSH_POLICY.to_string())]
+        ssh_policy: String,
         /// Enable rollback tracking.
         #[arg(long, default_value_t = true)]
         rollback: bool,
@@ -173,6 +209,9 @@ fn main() -> Result<()> {
             web_server,
             php_version,
             database,
+            site_user,
+            web_root_mode,
+            web_root,
             www_mode,
             redis,
             mail_mode,
@@ -180,6 +219,8 @@ fn main() -> Result<()> {
             smtp_port,
             smtp_from,
             smtp_encryption,
+            security_profile,
+            ssh_policy,
             rollback,
             preserve_config,
             dns_check,
@@ -191,6 +232,9 @@ fn main() -> Result<()> {
                     web_server,
                     php_version,
                     database,
+                    site_user,
+                    web_root_mode,
+                    web_root,
                     www_mode,
                     redis,
                     mail_mode,
@@ -198,6 +242,8 @@ fn main() -> Result<()> {
                     smtp_port,
                     smtp_from,
                     smtp_encryption,
+                    security_profile,
+                    ssh_policy,
                     rollback,
                     preserve_config,
                     dns_check,
@@ -211,6 +257,9 @@ fn main() -> Result<()> {
             web_server,
             php_version,
             database,
+            site_user,
+            web_root_mode,
+            web_root,
             www_mode,
             redis,
             mail_mode,
@@ -218,6 +267,8 @@ fn main() -> Result<()> {
             smtp_port,
             smtp_from,
             smtp_encryption,
+            security_profile,
+            ssh_policy,
             rollback,
             preserve_config,
             dns_check,
@@ -230,6 +281,9 @@ fn main() -> Result<()> {
                         web_server,
                         php_version,
                         database,
+                        site_user,
+                        web_root_mode,
+                        web_root,
                         www_mode,
                         redis,
                         mail_mode,
@@ -237,6 +291,8 @@ fn main() -> Result<()> {
                         smtp_port,
                         smtp_from,
                         smtp_encryption,
+                        security_profile,
+                        ssh_policy,
                         rollback,
                         preserve_config,
                         dns_check,
@@ -267,6 +323,9 @@ pub(crate) fn plan_options(
     web_server: String,
     php_version: String,
     database: String,
+    site_user: String,
+    web_root_mode: String,
+    web_root: Option<String>,
     www_mode: String,
     redis: String,
     mail_mode: String,
@@ -274,6 +333,8 @@ pub(crate) fn plan_options(
     smtp_port: u16,
     smtp_from: Option<String>,
     smtp_encryption: String,
+    security_profile: String,
+    ssh_policy: String,
     rollback: bool,
     preserve_config: bool,
     dns_check: bool,
@@ -283,6 +344,9 @@ pub(crate) fn plan_options(
         web_server,
         php_version,
         database_engine: database,
+        site_user,
+        web_root_mode,
+        custom_web_root: web_root,
         www_mode,
         redis_mode: redis,
         mail_mode,
@@ -290,6 +354,8 @@ pub(crate) fn plan_options(
         smtp_port,
         smtp_from,
         smtp_encryption,
+        security_profile,
+        ssh_policy,
         rollback,
         preserve_config,
         dns_check,
@@ -351,6 +417,25 @@ fn run_setup_plain(domain_arg: Option<String>, local_test_arg: bool) -> Result<(
     let database_items = ["mariadb", "mysql"];
     let database = select_value("Database", &database_items, 0)?;
 
+    let site_user = Input::<String>::new()
+        .with_prompt("Site Linux user")
+        .default(plan::DEFAULT_SITE_USER.to_string())
+        .interact_text()
+        .map_err(|err| miette!("setup prompt failed: {err}"))?;
+
+    let web_root_items = ["public-html", "www", "system", "custom"];
+    let web_root_mode = select_value("Web root mode", &web_root_items, 0)?;
+    let web_root = if web_root_mode == "custom" {
+        Some(
+            Input::<String>::new()
+                .with_prompt("Custom absolute web root")
+                .interact_text()
+                .map_err(|err| miette!("setup prompt failed: {err}"))?,
+        )
+    } else {
+        None
+    };
+
     let www_items = ["redirect-to-root", "redirect-to-www", "include", "none"];
     let www_default = if local_test { 3 } else { 0 };
     let www_mode = select_value("www policy", &www_items, www_default)?;
@@ -395,11 +480,20 @@ fn run_setup_plain(domain_arg: Option<String>, local_test_arg: bool) -> Result<(
         smtp_encryption = select_value("SMTP encryption", &encryption_items, 0)?;
     }
 
+    let security_items = ["standard", "hardened", "audit-only"];
+    let security_profile = select_value("Security profile", &security_items, 0)?;
+
+    let ssh_items = ["audit-only", "harden"];
+    let ssh_policy = select_value("SSH policy", &ssh_items, 0)?;
+
     let options = plan_options(
         local_test,
         web_server,
         php_version,
         database,
+        site_user,
+        web_root_mode,
+        web_root,
         www_mode,
         redis,
         mail_mode,
@@ -407,6 +501,8 @@ fn run_setup_plain(domain_arg: Option<String>, local_test_arg: bool) -> Result<(
         smtp_port,
         smtp_from,
         smtp_encryption,
+        security_profile,
+        ssh_policy,
         true,
         true,
         !local_test,
@@ -456,9 +552,13 @@ fn print_setup_summary(plan: &plan::InstallPlan) {
     println!("web_server: {}", plan.web_server);
     println!("php_version: {}", plan.php_version);
     println!("database: {}", plan.database_engine);
+    println!("site_user: {}", plan.site_user);
+    println!("web_root: {}", plan.web_root);
     println!("www_mode: {}", plan.www_mode);
     println!("redis: {}", plan.redis_mode);
     println!("mail_mode: {}", plan.mail_mode);
+    println!("security_profile: {}", plan.security_profile);
+    println!("ssh_policy: {}", plan.ssh_policy);
     println!("dns_check: {}", plan.dns_check_required);
     println!(
         "packages: {} item(s), files: {} item(s), services: {} item(s)",
@@ -496,6 +596,15 @@ fn format_plan(plan: &plan::InstallPlan) -> String {
     output.push_str(&format!("web_server: {}\n", plan.web_server));
     output.push_str(&format!("php_version: {}\n", plan.php_version));
     output.push_str(&format!("database: {}\n", plan.database_engine));
+    output.push_str(&format!("site_user: {}\n", plan.site_user));
+    output.push_str(&format!("web_root_mode: {}\n", plan.web_root_mode));
+    output.push_str(&format!("web_root: {}\n", plan.web_root));
+    output.push_str(&format!("database_name: {}\n", plan.database_name));
+    output.push_str(&format!("database_user: {}\n", plan.database_user));
+    output.push_str(&format!(
+        "database_password_policy: {}\n",
+        plan.database_password_policy
+    ));
     output.push_str(&format!("www_mode: {}\n", plan.www_mode));
     output.push_str(&format!("redis: {}\n", plan.redis_mode));
     output.push_str(&format!("mail_mode: {}\n", plan.mail_mode));
@@ -514,6 +623,8 @@ fn format_plan(plan: &plan::InstallPlan) -> String {
     output.push_str(&format!("rollback: {}\n", plan.rollback_enabled));
     output.push_str(&format!("preserve_config: {}\n", plan.preserve_config));
     output.push_str(&format!("dns_check: {}\n", plan.dns_check_required));
+    output.push_str(&format!("security_profile: {}\n", plan.security_profile));
+    output.push_str(&format!("ssh_policy: {}\n", plan.ssh_policy));
     output.push_str(&format!("mode: {}\n", plan.mode));
     output.push_str(&format!("fresh_server_only: {}\n", plan.fresh_server_only));
     output.push_str(&format!("changes_made: {}\n\n", plan.changes_made));
@@ -546,6 +657,14 @@ fn format_plan(plan: &plan::InstallPlan) -> String {
         ));
     }
 
+    output.push_str("\nSecurity checks:\n");
+    for check in &plan.security_checks {
+        output.push_str(&format!(
+            "- {} [{}]: {}\n",
+            check.name, check.level, check.description
+        ));
+    }
+
     output.push_str("\nInstall stops if:\n");
     for condition in &plan.stop_conditions {
         output.push_str(&format!("- {}\n", condition.reason));
@@ -570,9 +689,14 @@ fn print_install(report: install::InstallReport) {
     println!("web_server: {}", report.web_server);
     println!("php_version: {}", report.php_version);
     println!("database: {}", report.database_engine);
+    println!("site_user: {}", report.site_user);
+    println!("web_root_mode: {}", report.web_root_mode);
+    println!("web_root: {}", report.web_root);
     println!("www_mode: {}", report.www_mode);
     println!("redis: {}", report.redis_mode);
     println!("mail_mode: {}", report.mail_mode);
+    println!("security_profile: {}", report.security_profile);
+    println!("ssh_policy: {}", report.ssh_policy);
     println!("phase: {}", report.phase);
     println!("state: {}", report.state_path.display());
     println!("owned_files: {}", report.owned_files_path.display());
@@ -626,8 +750,13 @@ mod tests {
         assert!(output.contains("mode: dry-run"));
         assert!(output.contains("changes_made: false"));
         assert!(output.contains("- nginx: Web server and reverse proxy."));
-        assert!(output.contains("- /var/www/g7 (create)"));
+        assert!(output.contains("site_user: g7"));
+        assert!(output.contains("web_root: /home/g7/public_html"));
+        assert!(output.contains("database_password_policy: generate-random-store-root-only"));
+        assert!(output.contains("- /home/g7/public_html (planned app web root;"));
+        assert!(output.contains("- redis-local-only [apply]:"));
         assert!(output.contains("- 443/tcp: Inbound HTTPS traffic."));
+        assert!(output.contains("- 3306/tcp: Localhost-only SQL database."));
         assert!(output.contains("deployment_mode: public"));
         assert!(output.contains("web_server: nginx"));
         assert!(output.contains("php_version: 8.5"));

@@ -102,6 +102,9 @@ sudo g7inst self-update
 --web-server nginx|apache
 --php-version 8.5|8.3
 --database mariadb|mysql
+--site-user g7
+--web-root-mode public-html|www|system|custom
+--web-root /absolute/path
 --www-mode redirect-to-root|redirect-to-www|include|none
 --redis enable|disable
 --mail-mode none|smtp-relay|local-postfix
@@ -109,6 +112,8 @@ sudo g7inst self-update
 --smtp-port 587
 --smtp-from no-reply@example.com
 --smtp-encryption none|starttls|tls
+--security-profile audit-only|standard|hardened
+--ssh-policy audit-only|harden
 --rollback true|false
 --preserve-config true|false
 --dns-check true|false
@@ -148,10 +153,10 @@ sudo g7inst self-update
 14. PHP-FPM 및 필수 PHP 확장 설치
 15. Redis 설치 및 localhost-only hardening
 16. 선택 DB 설치
-17. DB 및 DB 사용자 생성
+17. DB 및 DB 사용자 생성, 앱 DB 비밀번호 랜덤 생성
 18. G7 릴리스 다운로드
 19. checksum 검증
-20. `/var/www/g7` 배치
+20. 선택한 웹루트(`/home/<site-user>/public_html`, `/home/<site-user>/www`, `/var/www/<domain>`, custom)에 배치
 21. `.env` 생성 또는 G7 웹 인스톨러 연결 준비
 22. 메일 발송 설정 반영
 23. 파일 권한 설정
@@ -160,7 +165,7 @@ sudo g7inst self-update
 26. Certbot 자동갱신 timer 확인
 27. queue worker, scheduler, reverb 선택 설정
 28. 서비스 재시작
-29. HTTP/HTTPS/mail/Redis smoke test
+29. HTTP/HTTPS/mail/Redis/DB localhost bind smoke test
 30. 설치 결과 출력
 
 ## 6. fresh server 검사
@@ -170,7 +175,8 @@ sudo g7inst self-update
 - `/etc/nginx/sites-enabled/*` 또는 `/etc/apache2/sites-enabled/*`에 기존 사이트 설정 존재
 - 선택하지 않은 웹서버가 실행 중
 - 80 또는 443 포트가 기존 프로세스에 의해 점유됨
-- `/var/www/g7` 존재
+- 선택한 웹루트가 비어 있지 않거나 선택 계정 소유가 아님
+- legacy `/var/www/g7` 테스트 경로가 installer 소유권 없이 존재
 - `/etc/g7-installer/owned-files.json` 없이 G7 관련 파일이 존재
 - 기존 Certbot 인증서가 동일 도메인으로 존재하지만 installer 소유가 아님
 - `/etc/g7-installer/state.json` 기준으로 다른 설치가 진행 중
@@ -178,6 +184,8 @@ sudo g7inst self-update
 - 요청한 www host가 VPS 공인 IP와 불일치
 - SMTP outbound 포트가 차단됨
 - Redis가 외부 공개 bind로 설정됨
+- DB가 외부 인터페이스에서 접근 가능함
+- SSH hardening이 현재 접속 세션을 끊을 위험이 있음
 
 중단 메시지는 사용자가 이해할 수 있어야 합니다.
 
@@ -207,8 +215,8 @@ g7inst doctor
 /var/log/g7-installer/install.log
 /var/log/g7-installer/report.json
 /var/backups/g7-installer
-/var/www/g7
-/var/www/g7/.env
+/home/<site-user>/public_html
+/home/<site-user>/public_html/.env
 /etc/nginx/sites-available/g7.conf
 /etc/nginx/sites-enabled/g7.conf
 /etc/apache2/sites-available/g7.conf
@@ -354,8 +362,11 @@ installer 소유 파일만 자동 수정
 
 - root 권한은 `install`, `update`, `self-update`에서만 요구합니다.
 - SSH 비밀번호를 저장하지 않습니다.
+- SSH 설정은 기본 `audit-only`입니다. 포트 변경과 hardening은 현재 접속 세션 보존 검증 후에만 수행합니다.
 - DB root 비밀번호를 로그에 남기지 않습니다.
+- 앱 DB 비밀번호는 기본값을 두지 않고 랜덤 생성합니다.
 - `.env` 내용은 로그에 남기지 않습니다.
+- Redis와 DB는 localhost/unix socket 전용으로 구성하고 외부 공개를 금지합니다.
 - 다운로드 파일은 checksum 검증 후 사용합니다.
 - bootstrap은 바이너리 서명 또는 checksum 검증을 필수로 합니다.
 - `curl | sudo bash`는 공개 bootstrap 코드와 checksum 검증으로 신뢰를 보완합니다.

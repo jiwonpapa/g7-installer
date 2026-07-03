@@ -318,7 +318,7 @@ checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "g7-cli"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "clap",
  "crossterm",
@@ -330,7 +330,7 @@ dependencies = [
 
 [[package]]
 name = "g7-core"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "g7-state",
  "g7-system",
@@ -340,15 +340,15 @@ dependencies = [
 
 [[package]]
 name = "g7-release"
-version = "0.1.6"
+version = "0.1.7"
 
 [[package]]
 name = "g7-render"
-version = "0.1.6"
+version = "0.1.7"
 
 [[package]]
 name = "g7-state"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -356,7 +356,7 @@ dependencies = [
 
 [[package]]
 name = "g7-system"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "thiserror 2.0.18",
 ]

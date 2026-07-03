@@ -1,3 +1,13 @@
+//! Prepared install phase for G7 Installer.
+//!
+//! This module persists the canonical plan into state/config/report files. It
+//! must not silently perform server changes that are not represented in
+//! `plan.rs`, `state.json`, and `owned-files.json`.
+//!
+//! Current phase rule: v0.1.x prepares installer metadata only. App web-root
+//! creation, package installation, database creation, Redis hardening, and SSH
+//! changes belong to later phases after explicit verification routines exist.
+
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -21,7 +31,6 @@ const LOG_PATH: &str = "/var/log/g7-installer/install.log";
 const REPORT_PATH: &str = "/var/log/g7-installer/report.json";
 const ROLLBACK_PATH: &str = "/var/lib/g7-installer/rollback.json";
 const LOCAL_HOSTS_PATH: &str = "/etc/g7-installer/local-hosts.txt";
-const WEB_ROOT: &str = "/var/www/g7";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallReport {
@@ -30,9 +39,14 @@ pub struct InstallReport {
     pub web_server: String,
     pub php_version: String,
     pub database_engine: String,
+    pub site_user: String,
+    pub web_root_mode: String,
+    pub web_root: String,
     pub www_mode: String,
     pub redis_mode: String,
     pub mail_mode: String,
+    pub security_profile: String,
+    pub ssh_policy: String,
     pub phase: String,
     pub state_path: PathBuf,
     pub owned_files_path: PathBuf,
@@ -96,7 +110,6 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     create_owned_dir(paths, LIB_DIR, &mut owned)?;
     create_owned_dir(paths, LOG_DIR, &mut owned)?;
     create_owned_dir(paths, BACKUP_DIR, &mut owned)?;
-    create_owned_dir(paths, WEB_ROOT, &mut owned)?;
 
     write_new_file(
         paths,
@@ -166,9 +179,14 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         web_server: install_plan.web_server,
         php_version: install_plan.php_version,
         database_engine: install_plan.database_engine,
+        site_user: install_plan.site_user,
+        web_root_mode: install_plan.web_root_mode,
+        web_root: install_plan.web_root,
         www_mode: install_plan.www_mode,
         redis_mode: install_plan.redis_mode,
         mail_mode: install_plan.mail_mode,
+        security_profile: install_plan.security_profile,
+        ssh_policy: install_plan.ssh_policy,
         phase: state.phase,
         state_path,
         owned_files_path,
@@ -254,9 +272,23 @@ fn config_content(plan: &plan::InstallPlan) -> String {
     content.push_str(&format!("web_server = \"{}\"\n", plan.web_server));
     content.push_str(&format!("php_version = \"{}\"\n", plan.php_version));
     content.push_str(&format!("database = \"{}\"\n", plan.database_engine));
+    content.push_str(&format!("database_name = \"{}\"\n", plan.database_name));
+    content.push_str(&format!("database_user = \"{}\"\n", plan.database_user));
+    content.push_str(&format!(
+        "database_password_policy = \"{}\"\n",
+        plan.database_password_policy
+    ));
+    content.push_str(&format!("site_user = \"{}\"\n", plan.site_user));
+    content.push_str(&format!("web_root_mode = \"{}\"\n", plan.web_root_mode));
+    content.push_str(&format!("web_root = \"{}\"\n", plan.web_root));
     content.push_str(&format!("www_mode = \"{}\"\n", plan.www_mode));
     content.push_str(&format!("redis = \"{}\"\n", plan.redis_mode));
     content.push_str(&format!("mail_mode = \"{}\"\n", plan.mail_mode));
+    content.push_str(&format!(
+        "security_profile = \"{}\"\n",
+        plan.security_profile
+    ));
+    content.push_str(&format!("ssh_policy = \"{}\"\n", plan.ssh_policy));
     content.push_str(&format!("rollback = {}\n", plan.rollback_enabled));
     content.push_str(&format!("preserve_config = {}\n", plan.preserve_config));
     content.push_str(&format!("dns_check = {}\n", plan.dns_check_required));
@@ -289,8 +321,8 @@ fn rollback_content(owned: &[String]) -> String {
 
 fn report_content(plan: &plan::InstallPlan) -> String {
     format!(
-        "{{\n  \"version\": 1,\n  \"domain\": \"{}\",\n  \"phase\": \"prepared\",\n  \"problem\": null\n}}\n",
-        plan.domain
+        "{{\n  \"version\": 1,\n  \"domain\": \"{}\",\n  \"phase\": \"prepared\",\n  \"site_user\": \"{}\",\n  \"web_root\": \"{}\",\n  \"security_profile\": \"{}\",\n  \"ssh_policy\": \"{}\",\n  \"problem\": null\n}}\n",
+        plan.domain, plan.site_user, plan.web_root, plan.security_profile, plan.ssh_policy
     )
 }
 
@@ -343,7 +375,12 @@ mod tests {
         assert_eq!(report.web_server, "nginx");
         assert_eq!(report.php_version, "8.5");
         assert_eq!(report.database_engine, "mariadb");
+        assert_eq!(report.site_user, "g7");
+        assert_eq!(report.web_root_mode, "public-html");
+        assert_eq!(report.web_root, "/home/g7/public_html");
         assert_eq!(report.redis_mode, "enable");
+        assert_eq!(report.security_profile, "standard");
+        assert_eq!(report.ssh_policy, "audit-only");
         assert_eq!(report.phase, "prepared");
         assert!(fs_root.join("etc/g7-installer/config.toml").exists());
         let config = fs::read_to_string(fs_root.join("etc/g7-installer/config.toml"))?;
@@ -351,14 +388,24 @@ mod tests {
         assert!(config.contains("web_server = \"nginx\""));
         assert!(config.contains("php_version = \"8.5\""));
         assert!(config.contains("database = \"mariadb\""));
+        assert!(config.contains("database_password_policy = \"generate-random-store-root-only\""));
+        assert!(config.contains("site_user = \"g7\""));
+        assert!(config.contains("web_root = \"/home/g7/public_html\""));
         assert!(config.contains("www_mode = \"redirect-to-root\""));
         assert!(config.contains("redis = \"enable\""));
+        assert!(config.contains("security_profile = \"standard\""));
+        assert!(config.contains("ssh_policy = \"audit-only\""));
         assert!(fs_root.join("var/lib/g7-installer/rollback.json").exists());
         assert!(fs_root.join("var/log/g7-installer/report.json").exists());
         assert!(fs_root.join("var/backups/g7-installer").exists());
         assert!(fs_root.join(strip_root(STATE_PATH)).exists());
         assert!(fs_root.join(strip_root(OWNED_FILES_PATH)).exists());
-        assert!(report.owned_files.contains(&"/var/www/g7".to_string()));
+        assert!(!fs_root.join("home/g7/public_html").exists());
+        assert!(
+            !report
+                .owned_files
+                .contains(&"/home/g7/public_html".to_string())
+        );
 
         fs::remove_file(os_release_path)?;
         fs::remove_dir_all(fs_root)?;

@@ -1,3 +1,12 @@
+//! Canonical install policy for G7 Installer.
+//!
+//! This module is the source of truth for what the installer intends to manage.
+//! CLI prompts, TUI fields, generated config, README examples, and release notes
+//! must follow this plan instead of inventing separate defaults.
+//!
+//! Scope rule: plan may describe future server changes, but `install` must only
+//! execute the subset that is implemented and tracked in state/owned-files.
+
 use crate::{Error, Result};
 use g7_state::owned_files::OWNED_FILES_PATH;
 use g7_state::state::STATE_PATH;
@@ -6,18 +15,25 @@ use g7_system::php::{DEFAULT_FPM_VERSION, SUPPORTED_FPM_VERSIONS};
 pub const DEFAULT_PHP_VERSION: &str = DEFAULT_FPM_VERSION;
 pub const DEFAULT_WEB_SERVER: &str = "nginx";
 pub const DEFAULT_DATABASE_ENGINE: &str = "mariadb";
+pub const DEFAULT_SITE_USER: &str = "g7";
+pub const DEFAULT_WEB_ROOT_MODE: &str = "public-html";
 pub const DEFAULT_WWW_MODE: &str = "redirect-to-root";
 pub const DEFAULT_REDIS_MODE: &str = "enable";
 pub const DEFAULT_MAIL_MODE: &str = "none";
 pub const DEFAULT_SMTP_PORT: u16 = 587;
 pub const DEFAULT_SMTP_ENCRYPTION: &str = "starttls";
+pub const DEFAULT_SECURITY_PROFILE: &str = "standard";
+pub const DEFAULT_SSH_POLICY: &str = "audit-only";
 
 const SUPPORTED_WEB_SERVERS: [&str; 2] = ["nginx", "apache"];
 const SUPPORTED_DATABASE_ENGINES: [&str; 2] = ["mariadb", "mysql"];
+const SUPPORTED_WEB_ROOT_MODES: [&str; 4] = ["public-html", "www", "system", "custom"];
 const SUPPORTED_WWW_MODES: [&str; 4] = ["redirect-to-root", "redirect-to-www", "include", "none"];
 const SUPPORTED_REDIS_MODES: [&str; 2] = ["enable", "disable"];
 const SUPPORTED_MAIL_MODES: [&str; 3] = ["none", "smtp-relay", "local-postfix"];
 const SUPPORTED_SMTP_ENCRYPTION: [&str; 3] = ["none", "starttls", "tls"];
+const SUPPORTED_SECURITY_PROFILES: [&str; 3] = ["audit-only", "standard", "hardened"];
+const SUPPORTED_SSH_POLICIES: [&str; 2] = ["audit-only", "harden"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallPlan {
@@ -26,6 +42,9 @@ pub struct InstallPlan {
     pub web_server: String,
     pub php_version: String,
     pub database_engine: String,
+    pub site_user: String,
+    pub web_root_mode: String,
+    pub web_root: String,
     pub www_mode: String,
     pub redis_mode: String,
     pub mail_mode: String,
@@ -33,6 +52,11 @@ pub struct InstallPlan {
     pub smtp_port: Option<u16>,
     pub smtp_from: Option<String>,
     pub smtp_encryption: Option<String>,
+    pub security_profile: String,
+    pub ssh_policy: String,
+    pub database_name: String,
+    pub database_user: String,
+    pub database_password_policy: &'static str,
     pub rollback_enabled: bool,
     pub preserve_config: bool,
     pub dns_check_required: bool,
@@ -44,6 +68,7 @@ pub struct InstallPlan {
     pub files: Vec<PlanFile>,
     pub services: Vec<PlanService>,
     pub ports: Vec<PlanPort>,
+    pub security_checks: Vec<PlanSecurityCheck>,
     pub stop_conditions: Vec<PlanStopCondition>,
 }
 
@@ -61,8 +86,17 @@ pub struct PlanPackage {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanFile {
-    pub path: &'static str,
+    pub path: String,
     pub action: &'static str,
+}
+
+impl PlanFile {
+    fn new(path: impl Into<String>, action: &'static str) -> Self {
+        Self {
+            path: path.into(),
+            action,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,8 +113,23 @@ pub struct PlanPort {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanSecurityCheck {
+    pub name: &'static str,
+    pub level: &'static str,
+    pub description: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanStopCondition {
-    pub reason: &'static str,
+    pub reason: String,
+}
+
+impl PlanStopCondition {
+    fn new(reason: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +138,9 @@ pub struct PlanOptions {
     pub web_server: String,
     pub php_version: String,
     pub database_engine: String,
+    pub site_user: String,
+    pub web_root_mode: String,
+    pub custom_web_root: Option<String>,
     pub www_mode: String,
     pub redis_mode: String,
     pub mail_mode: String,
@@ -96,6 +148,8 @@ pub struct PlanOptions {
     pub smtp_port: u16,
     pub smtp_from: Option<String>,
     pub smtp_encryption: String,
+    pub security_profile: String,
+    pub ssh_policy: String,
     pub rollback: bool,
     pub preserve_config: bool,
     pub dns_check: bool,
@@ -108,6 +162,9 @@ impl Default for PlanOptions {
             web_server: DEFAULT_WEB_SERVER.to_string(),
             php_version: DEFAULT_PHP_VERSION.to_string(),
             database_engine: DEFAULT_DATABASE_ENGINE.to_string(),
+            site_user: DEFAULT_SITE_USER.to_string(),
+            web_root_mode: DEFAULT_WEB_ROOT_MODE.to_string(),
+            custom_web_root: None,
             www_mode: DEFAULT_WWW_MODE.to_string(),
             redis_mode: DEFAULT_REDIS_MODE.to_string(),
             mail_mode: DEFAULT_MAIL_MODE.to_string(),
@@ -115,6 +172,8 @@ impl Default for PlanOptions {
             smtp_port: DEFAULT_SMTP_PORT,
             smtp_from: None,
             smtp_encryption: DEFAULT_SMTP_ENCRYPTION.to_string(),
+            security_profile: DEFAULT_SECURITY_PROFILE.to_string(),
+            ssh_policy: DEFAULT_SSH_POLICY.to_string(),
             rollback: true,
             preserve_config: true,
             dns_check: true,
@@ -136,6 +195,14 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         options.database_engine,
         &SUPPORTED_DATABASE_ENGINES,
     )?;
+    let site_user = normalize_site_user(options.site_user)?;
+    let web_root_mode = normalize_web_root_mode(options.web_root_mode, &options.custom_web_root)?;
+    let web_root = web_root_for(
+        &domain,
+        &site_user,
+        &web_root_mode,
+        options.custom_web_root.as_deref(),
+    )?;
     let www_mode = normalize_supported_option("www-mode", options.www_mode, &SUPPORTED_WWW_MODES)?;
     let redis_mode =
         normalize_supported_option("redis", options.redis_mode, &SUPPORTED_REDIS_MODES)?;
@@ -146,12 +213,21 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         options.smtp_encryption,
         &SUPPORTED_SMTP_ENCRYPTION,
     )?;
+    let security_profile = normalize_supported_option(
+        "security-profile",
+        options.security_profile,
+        &SUPPORTED_SECURITY_PROFILES,
+    )?;
+    let ssh_policy =
+        normalize_supported_option("ssh-policy", options.ssh_policy, &SUPPORTED_SSH_POLICIES)?;
     validate_mail_options(
         &mail_mode,
         options.smtp_host.as_deref(),
         options.smtp_from.as_deref(),
     )?;
     let smtp_port = smtp_port_for_mode(&mail_mode, options.smtp_port);
+    let database_name = database_name_for_domain(&domain);
+    let database_user = database_user_for_site_user(&site_user);
 
     let dns_check_required = options.dns_check && !options.local_test;
     let deployment_mode = if options.local_test {
@@ -168,7 +244,13 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         &mail_mode,
         options.local_test,
     );
-    let files = files(&web_server, &redis_mode, &mail_mode, options.local_test);
+    let files = files(
+        &web_server,
+        &web_root,
+        &redis_mode,
+        &mail_mode,
+        options.local_test,
+    );
     let services = services(
         &web_server,
         &php_version,
@@ -178,7 +260,14 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         options.local_test,
     );
     let ports = ports(&redis_mode, &mail_mode, smtp_port, options.local_test);
-    let stop_conditions = stop_conditions(&web_server, options.local_test);
+    let security_checks = security_checks(
+        &redis_mode,
+        &database_engine,
+        &security_profile,
+        &ssh_policy,
+        options.local_test,
+    );
+    let stop_conditions = stop_conditions(&web_server, &web_root, options.local_test);
 
     Ok(InstallPlan {
         domain,
@@ -186,6 +275,9 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         web_server,
         php_version: php_version.clone(),
         database_engine,
+        site_user,
+        web_root_mode,
+        web_root,
         www_mode,
         redis_mode,
         mail_mode: mail_mode.clone(),
@@ -193,6 +285,11 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         smtp_port: smtp_port_for_plan(&mail_mode, smtp_port),
         smtp_from: options.smtp_from,
         smtp_encryption: smtp_encryption_for_plan(&mail_mode, smtp_encryption),
+        security_profile,
+        ssh_policy,
+        database_name,
+        database_user,
+        database_password_policy: "generate-random-store-root-only",
         rollback_enabled: options.rollback,
         preserve_config: options.preserve_config,
         dns_check_required,
@@ -204,6 +301,7 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         files,
         services,
         ports,
+        security_checks,
         stop_conditions,
     })
 }
@@ -221,6 +319,14 @@ fn preflight_gates(local_test: bool) -> Vec<PlanGate> {
         PlanGate {
             name: "fresh-server",
             description: "Abort if existing web services or unowned G7 paths are detected.",
+        },
+        PlanGate {
+            name: "site-account",
+            description: "Verify or create the selected site account before placing app files.",
+        },
+        PlanGate {
+            name: "web-root",
+            description: "Use the selected site account public_html/www/custom root; do not assume /var/www/g7.",
         },
         PlanGate {
             name: "network",
@@ -252,6 +358,10 @@ fn preflight_gates(local_test: bool) -> Vec<PlanGate> {
         PlanGate {
             name: "mail-outbound",
             description: "Check selected SMTP outbound port before writing mail settings.",
+        },
+        PlanGate {
+            name: "server-security",
+            description: "Audit Redis, database, firewall, SSH, PHP, and file permissions before applying changes.",
         },
         PlanGate {
             name: "rollback",
@@ -348,75 +458,66 @@ fn packages(
     packages
 }
 
-fn files(web_server: &str, redis_mode: &str, mail_mode: &str, local_test: bool) -> Vec<PlanFile> {
+fn files(
+    web_server: &str,
+    web_root: &str,
+    redis_mode: &str,
+    mail_mode: &str,
+    local_test: bool,
+) -> Vec<PlanFile> {
     let mut files = vec![
-        PlanFile {
-            path: "/etc/g7-installer/config.toml",
-            action: "create",
-        },
-        PlanFile {
-            path: STATE_PATH,
-            action: "create/update",
-        },
-        PlanFile {
-            path: OWNED_FILES_PATH,
-            action: "create/update",
-        },
-        PlanFile {
-            path: "/var/lib/g7-installer/rollback.json",
-            action: "create/update",
-        },
-        PlanFile {
-            path: "/var/backups/g7-installer",
-            action: "create for preserved config snapshots",
-        },
-        PlanFile {
-            path: "/var/log/g7-installer/install.log",
-            action: "create/append",
-        },
-        PlanFile {
-            path: "/var/log/g7-installer/report.json",
-            action: "create/update problem report",
-        },
-        PlanFile {
-            path: "/var/www/g7",
-            action: "create",
-        },
-        PlanFile {
-            path: "/var/www/g7/.env",
-            action: "create with DB/cache/mail settings",
-        },
+        PlanFile::new("/etc/g7-installer/config.toml", "create"),
+        PlanFile::new(STATE_PATH, "create/update"),
+        PlanFile::new(OWNED_FILES_PATH, "create/update"),
+        PlanFile::new("/var/lib/g7-installer/rollback.json", "create/update"),
+        PlanFile::new(
+            "/var/backups/g7-installer",
+            "create for preserved config snapshots",
+        ),
+        PlanFile::new("/var/log/g7-installer/install.log", "create/append"),
+        PlanFile::new(
+            "/var/log/g7-installer/report.json",
+            "create/update problem report",
+        ),
+        PlanFile::new(
+            web_root,
+            "planned app web root; create or verify in install phase",
+        ),
+        PlanFile::new(
+            format!("{web_root}/.env"),
+            "create with DB/cache/mail settings using root-only secret handling",
+        ),
         web_server_available_file(web_server),
         web_server_enabled_file(web_server),
-        PlanFile {
-            path: "/etc/systemd/system/g7-queue.service",
-            action: "create when worker is enabled",
-        },
-        PlanFile {
-            path: "/etc/systemd/system/g7-reverb.service",
-            action: "create when realtime server is enabled",
-        },
+        PlanFile::new(
+            "/etc/systemd/system/g7-queue.service",
+            "create when worker is enabled",
+        ),
+        PlanFile::new(
+            "/etc/systemd/system/g7-reverb.service",
+            "create when realtime server is enabled",
+        ),
     ];
 
     if redis_mode == "enable" {
-        files.push(PlanFile {
-            path: "/etc/g7-installer/redis.conf",
-            action: "create Redis hardening overlay",
-        });
+        files.push(PlanFile::new(
+            "/etc/g7-installer/redis.conf",
+            "create Redis hardening overlay",
+        ));
     }
 
     if local_test {
-        files.push(PlanFile {
-            path: "/etc/g7-installer/local-hosts.txt",
-            action: "write local hosts entry suggestion",
-        });
+        files.push(PlanFile::new(
+            "/etc/g7-installer/local-hosts.txt",
+            "write local hosts entry suggestion",
+        ));
     }
 
     if mail_mode != "none" {
-        files.push(PlanFile {
-            path: "/etc/g7-installer/mail.toml",
-            action: "create SMTP delivery settings without secrets",
-        });
+        files.push(PlanFile::new(
+            "/etc/g7-installer/mail.toml",
+            "create SMTP delivery settings without secrets",
+        ));
     }
 
     files
@@ -441,7 +542,7 @@ fn services(
         },
         PlanService {
             name: database_service(database_engine).to_string(),
-            action: "enable and start",
+            action: "bind locally, create app database/user, enable and start",
         },
         PlanService {
             name: "g7-queue.service".to_string(),
@@ -496,6 +597,12 @@ fn ports(redis_mode: &str, mail_mode: &str, smtp_port: u16, local_test: bool) ->
         });
     }
 
+    ports.push(PlanPort {
+        port: 3306,
+        protocol: "tcp",
+        purpose: "Localhost-only SQL database. Must not be open to the public internet.",
+    });
+
     if redis_mode == "enable" {
         ports.push(PlanPort {
             port: 6379,
@@ -515,7 +622,82 @@ fn ports(redis_mode: &str, mail_mode: &str, smtp_port: u16, local_test: bool) ->
     ports
 }
 
-fn stop_conditions(web_server: &str, local_test: bool) -> Vec<PlanStopCondition> {
+fn security_checks(
+    redis_mode: &str,
+    database_engine: &str,
+    security_profile: &str,
+    ssh_policy: &str,
+    local_test: bool,
+) -> Vec<PlanSecurityCheck> {
+    let mut checks = vec![
+        PlanSecurityCheck {
+            name: "filesystem-permissions",
+            level: "apply",
+            description: "Site files owned by the site account; web server gets read access; writable directories stay limited.",
+        },
+        PlanSecurityCheck {
+            name: "database-credentials",
+            level: "apply",
+            description: "Generate a random app DB password; never use a default password or print secrets to stdout/logs.",
+        },
+        PlanSecurityCheck {
+            name: "database-bind",
+            level: "apply",
+            description: if database_engine == "mysql" {
+                "Keep MySQL bound to localhost/unix socket and create a least-privilege G7 app user."
+            } else {
+                "Keep MariaDB bound to localhost/unix socket and create a least-privilege G7 app user."
+            },
+        },
+        PlanSecurityCheck {
+            name: "ssh-config",
+            level: if ssh_policy == "harden" {
+                "apply"
+            } else {
+                "audit"
+            },
+            description: if ssh_policy == "harden" {
+                "Harden sshd after preserving the active SSH port; do not lock out the current session."
+            } else {
+                "Audit SSH port, root login, and password authentication; do not change SSH automatically."
+            },
+        },
+        PlanSecurityCheck {
+            name: "firewall",
+            level: if security_profile == "hardened" {
+                "apply"
+            } else {
+                "audit"
+            },
+            description: "Allow the active SSH port plus 80/443; keep database and Redis ports closed externally.",
+        },
+        PlanSecurityCheck {
+            name: "php-runtime",
+            level: "apply",
+            description: "Apply PHP-FPM pool limits, opcache settings, upload limits, and per-site runtime isolation.",
+        },
+    ];
+
+    if redis_mode == "enable" {
+        checks.push(PlanSecurityCheck {
+            name: "redis-local-only",
+            level: "apply",
+            description: "Bind Redis to 127.0.0.1/::1 or unix socket, keep protected-mode enabled, and never expose 6379 publicly.",
+        });
+    }
+
+    if !local_test {
+        checks.push(PlanSecurityCheck {
+            name: "tls-headers",
+            level: "apply",
+            description: "Issue HTTPS certificates and apply sane TLS/security headers after domain ownership checks pass.",
+        });
+    }
+
+    checks
+}
+
+fn stop_conditions(web_server: &str, web_root: &str, local_test: bool) -> Vec<PlanStopCondition> {
     let other_web_server = if web_server == "nginx" {
         "Apache is running."
     } else {
@@ -534,42 +716,31 @@ fn stop_conditions(web_server: &str, local_test: bool) -> Vec<PlanStopCondition>
     };
 
     let mut conditions = vec![
-        PlanStopCondition {
-            reason: other_web_server,
-        },
-        PlanStopCondition {
-            reason: selected_web_config,
-        },
-        PlanStopCondition {
-            reason: port_stop_condition,
-        },
-        PlanStopCondition {
-            reason: "/var/www/g7 already exists.",
-        },
-        PlanStopCondition {
-            reason: "G7-related paths exist without owned-files metadata.",
-        },
-        PlanStopCondition {
-            reason: "A previous installer state exists for another install.",
-        },
-        PlanStopCondition {
-            reason: "Selected SMTP outbound port cannot be reached.",
-        },
-        PlanStopCondition {
-            reason: "Redis is configured to bind publicly.",
-        },
+        PlanStopCondition::new(other_web_server),
+        PlanStopCondition::new(selected_web_config),
+        PlanStopCondition::new(port_stop_condition),
+        PlanStopCondition::new(format!(
+            "{web_root} exists but is not empty or not owned by the selected site account."
+        )),
+        PlanStopCondition::new("/var/www/g7 legacy test root exists without installer ownership."),
+        PlanStopCondition::new("G7-related paths exist without owned-files metadata."),
+        PlanStopCondition::new("A previous installer state exists for another install."),
+        PlanStopCondition::new("Selected SMTP outbound port cannot be reached."),
+        PlanStopCondition::new("Redis is configured to bind publicly."),
+        PlanStopCondition::new("Database is reachable from a non-local interface."),
+        PlanStopCondition::new("SSH hardening would risk locking out the active session."),
     ];
 
     if !local_test {
-        conditions.push(PlanStopCondition {
-            reason: "Domain A/AAAA records do not match this VPS public IP.",
-        });
-        conditions.push(PlanStopCondition {
-            reason: "Requested www host does not resolve to this VPS public IP.",
-        });
-        conditions.push(PlanStopCondition {
-            reason: "Existing Let's Encrypt certificate conflicts with installer ownership.",
-        });
+        conditions.push(PlanStopCondition::new(
+            "Domain A/AAAA records do not match this VPS public IP.",
+        ));
+        conditions.push(PlanStopCondition::new(
+            "Requested www host does not resolve to this VPS public IP.",
+        ));
+        conditions.push(PlanStopCondition::new(
+            "Existing Let's Encrypt certificate conflicts with installer ownership.",
+        ));
     }
 
     conditions
@@ -617,29 +788,17 @@ fn database_service(database_engine: &str) -> &'static str {
 
 fn web_server_available_file(web_server: &str) -> PlanFile {
     if web_server == "apache" {
-        PlanFile {
-            path: "/etc/apache2/sites-available/g7.conf",
-            action: "create",
-        }
+        PlanFile::new("/etc/apache2/sites-available/g7.conf", "create")
     } else {
-        PlanFile {
-            path: "/etc/nginx/sites-available/g7.conf",
-            action: "create",
-        }
+        PlanFile::new("/etc/nginx/sites-available/g7.conf", "create")
     }
 }
 
 fn web_server_enabled_file(web_server: &str) -> PlanFile {
     if web_server == "apache" {
-        PlanFile {
-            path: "/etc/apache2/sites-enabled/g7.conf",
-            action: "create symlink",
-        }
+        PlanFile::new("/etc/apache2/sites-enabled/g7.conf", "create symlink")
     } else {
-        PlanFile {
-            path: "/etc/nginx/sites-enabled/g7.conf",
-            action: "create symlink",
-        }
+        PlanFile::new("/etc/nginx/sites-enabled/g7.conf", "create symlink")
     }
 }
 
@@ -678,6 +837,108 @@ fn normalize_php_version(version: String) -> Result<String> {
             supported: SUPPORTED_FPM_VERSIONS.join(", "),
         })
     }
+}
+
+fn normalize_site_user(site_user: String) -> Result<String> {
+    let site_user = site_user.trim().to_string();
+
+    if site_user.is_empty() {
+        return Err(Error::MissingInput { field: "site-user" });
+    }
+
+    let valid = site_user
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+        && !site_user.starts_with('-');
+
+    if valid {
+        Ok(site_user)
+    } else {
+        Err(Error::InvalidOption {
+            field: "site-user",
+            value: site_user,
+            supported: "Linux account name using letters, digits, underscore, or dash".to_string(),
+        })
+    }
+}
+
+fn normalize_web_root_mode(mode: String, custom_web_root: &Option<String>) -> Result<String> {
+    let mode = if custom_web_root.is_some() && mode == DEFAULT_WEB_ROOT_MODE {
+        "custom".to_string()
+    } else {
+        mode
+    };
+
+    normalize_supported_option("web-root-mode", mode, &SUPPORTED_WEB_ROOT_MODES)
+}
+
+fn web_root_for(
+    domain: &str,
+    site_user: &str,
+    mode: &str,
+    custom_web_root: Option<&str>,
+) -> Result<String> {
+    match mode {
+        "public-html" => Ok(format!("/home/{site_user}/public_html")),
+        "www" => Ok(format!("/home/{site_user}/www")),
+        "system" => Ok(format!("/var/www/{domain}")),
+        "custom" => match custom_web_root {
+            Some(path) => normalize_custom_web_root(path),
+            None => Err(Error::MissingInput { field: "web-root" }),
+        },
+        _ => Err(Error::InvalidOption {
+            field: "web-root-mode",
+            value: mode.to_string(),
+            supported: SUPPORTED_WEB_ROOT_MODES.join(", "),
+        }),
+    }
+}
+
+fn normalize_custom_web_root(path: &str) -> Result<String> {
+    let path = path.trim().trim_end_matches('/').to_string();
+
+    if path.is_empty() {
+        return Err(Error::MissingInput { field: "web-root" });
+    }
+
+    if !path.starts_with('/')
+        || path == "/"
+        || path.contains('\n')
+        || path.contains('\r')
+        || path.contains('"')
+        || path.split('/').any(|segment| segment == "..")
+    {
+        return Err(Error::InvalidOption {
+            field: "web-root",
+            value: path,
+            supported: "absolute path without quotes, newlines, or parent traversal".to_string(),
+        });
+    }
+
+    Ok(path)
+}
+
+fn database_name_for_domain(domain: &str) -> String {
+    let mut name = String::from("g7_");
+    for ch in domain.chars() {
+        if ch.is_ascii_alphanumeric() {
+            name.push(ch);
+        } else {
+            name.push('_');
+        }
+    }
+    name.truncate(48);
+    name.trim_end_matches('_').to_string()
+}
+
+fn database_user_for_site_user(site_user: &str) -> String {
+    let mut user = if site_user == DEFAULT_SITE_USER {
+        "g7_app".to_string()
+    } else {
+        format!("g7_{site_user}")
+    };
+    user.truncate(32);
+    user
 }
 
 fn normalize_supported_option(
@@ -790,6 +1051,11 @@ mod tests {
         assert_eq!(plan.web_server, "nginx");
         assert_eq!(plan.php_version, "8.5");
         assert_eq!(plan.database_engine, "mariadb");
+        assert_eq!(plan.site_user, "g7");
+        assert_eq!(plan.web_root_mode, "public-html");
+        assert_eq!(plan.web_root, "/home/g7/public_html");
+        assert_eq!(plan.security_profile, "standard");
+        assert_eq!(plan.ssh_policy, "audit-only");
         assert_eq!(plan.www_mode, "redirect-to-root");
         assert_eq!(plan.redis_mode, "enable");
         assert_eq!(plan.mail_mode, "none");
@@ -814,7 +1080,11 @@ mod tests {
                 .iter()
                 .any(|service| service.name == "certbot.timer")
         );
-        assert!(plan.files.iter().any(|file| file.path == "/var/www/g7"));
+        assert!(
+            plan.files
+                .iter()
+                .any(|file| file.path == "/home/g7/public_html")
+        );
         assert!(plan.services.iter().any(|service| service.name == "nginx"));
         assert!(
             plan.services
@@ -822,7 +1092,18 @@ mod tests {
                 .any(|service| service.name == "mariadb")
         );
         assert!(plan.ports.iter().any(|port| port.port == 443));
+        assert!(plan.ports.iter().any(|port| port.port == 3306));
         assert!(plan.ports.iter().any(|port| port.port == 6379));
+        assert!(
+            plan.security_checks
+                .iter()
+                .any(|check| check.name == "database-credentials")
+        );
+        assert!(
+            plan.security_checks
+                .iter()
+                .any(|check| check.name == "ssh-config" && check.level == "audit")
+        );
         assert!(
             plan.stop_conditions
                 .iter()

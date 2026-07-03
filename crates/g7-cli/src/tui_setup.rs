@@ -1,3 +1,9 @@
+//! Full-screen setup UI for `g7inst setup`.
+//!
+//! The TUI is only a front-end over `g7_core::commands::plan`. Defaults and
+//! server policy must be read from the core plan model, not redefined as a
+//! separate product truth.
+
 use std::io::{self, Stdout};
 use std::time::Duration;
 
@@ -22,9 +28,12 @@ type TuiTerminal = Terminal<CrosstermBackend<Stdout>>;
 const WEB_SERVERS: [&str; 2] = ["nginx", "apache"];
 const PHP_VERSIONS: [&str; 2] = ["8.5", "8.3"];
 const DATABASES: [&str; 2] = ["mariadb", "mysql"];
+const WEB_ROOT_MODES: [&str; 4] = ["public-html", "www", "system", "custom"];
 const WWW_MODES: [&str; 4] = ["redirect-to-root", "redirect-to-www", "include", "none"];
 const MAIL_MODES: [&str; 3] = ["none", "smtp-relay", "local-postfix"];
 const ENCRYPTION_MODES: [&str; 3] = ["starttls", "tls", "none"];
+const SECURITY_PROFILES: [&str; 3] = ["standard", "hardened", "audit-only"];
+const SSH_POLICIES: [&str; 2] = ["audit-only", "harden"];
 
 pub fn run(domain_arg: Option<String>, local_test_arg: bool) -> Result<()> {
     let mut terminal = enter_terminal()?;
@@ -91,6 +100,9 @@ struct SetupApp {
     web_server: usize,
     php_version: usize,
     database: usize,
+    site_user: String,
+    web_root_mode: usize,
+    custom_web_root: String,
     www_mode: usize,
     redis_enabled: bool,
     mail_mode: usize,
@@ -98,6 +110,8 @@ struct SetupApp {
     smtp_port: String,
     smtp_from: String,
     smtp_encryption: usize,
+    security_profile: usize,
+    ssh_policy: usize,
     doctor_report: doctor::DoctorReport,
     logs: Vec<String>,
     install_report: Option<install::InstallReport>,
@@ -130,6 +144,9 @@ impl SetupApp {
             web_server: 0,
             php_version: 0,
             database: 0,
+            site_user: plan::DEFAULT_SITE_USER.to_string(),
+            web_root_mode: 0,
+            custom_web_root: String::new(),
             www_mode: if local_test_arg { 3 } else { 0 },
             redis_enabled: true,
             mail_mode: 0,
@@ -137,6 +154,8 @@ impl SetupApp {
             smtp_port: plan::DEFAULT_SMTP_PORT.to_string(),
             smtp_from: String::new(),
             smtp_encryption: 0,
+            security_profile: 0,
+            ssh_policy: 0,
             doctor_report,
             logs,
             install_report: None,
@@ -151,10 +170,16 @@ impl SetupApp {
             Field::WebServer,
             Field::PhpVersion,
             Field::Database,
+            Field::SiteUser,
+            Field::WebRootMode,
             Field::WwwMode,
             Field::Redis,
             Field::MailMode,
         ];
+
+        if self.web_root_mode_value() == "custom" {
+            fields.push(Field::CustomWebRoot);
+        }
 
         if self.mail_value() == "smtp-relay" {
             fields.extend([
@@ -165,7 +190,12 @@ impl SetupApp {
             ]);
         }
 
-        fields.extend([Field::Prepare, Field::Quit]);
+        fields.extend([
+            Field::SecurityProfile,
+            Field::SshPolicy,
+            Field::Prepare,
+            Field::Quit,
+        ]);
         fields
     }
 
@@ -210,6 +240,9 @@ impl SetupApp {
             Field::WebServer => adjust_index(&mut self.web_server, WEB_SERVERS.len(), delta),
             Field::PhpVersion => adjust_index(&mut self.php_version, PHP_VERSIONS.len(), delta),
             Field::Database => adjust_index(&mut self.database, DATABASES.len(), delta),
+            Field::WebRootMode => {
+                adjust_index(&mut self.web_root_mode, WEB_ROOT_MODES.len(), delta)
+            }
             Field::WwwMode => adjust_index(&mut self.www_mode, WWW_MODES.len(), delta),
             Field::Redis => self.redis_enabled = !self.redis_enabled,
             Field::MailMode => {
@@ -220,6 +253,12 @@ impl SetupApp {
             }
             Field::SmtpEncryption => {
                 adjust_index(&mut self.smtp_encryption, ENCRYPTION_MODES.len(), delta);
+            }
+            Field::SecurityProfile => {
+                adjust_index(&mut self.security_profile, SECURITY_PROFILES.len(), delta);
+            }
+            Field::SshPolicy => {
+                adjust_index(&mut self.ssh_policy, SSH_POLICIES.len(), delta);
             }
             _ => {}
         }
@@ -237,6 +276,8 @@ impl SetupApp {
     fn push_text(&mut self, ch: char) {
         match self.focused_field() {
             Field::Domain => self.domain.push(ch),
+            Field::SiteUser => self.site_user.push(ch),
+            Field::CustomWebRoot => self.custom_web_root.push(ch),
             Field::SmtpHost => self.smtp_host.push(ch),
             Field::SmtpPort if ch.is_ascii_digit() => self.smtp_port.push(ch),
             Field::SmtpFrom => self.smtp_from.push(ch),
@@ -248,6 +289,12 @@ impl SetupApp {
         match self.focused_field() {
             Field::Domain => {
                 self.domain.pop();
+            }
+            Field::SiteUser => {
+                self.site_user.pop();
+            }
+            Field::CustomWebRoot => {
+                self.custom_web_root.pop();
             }
             Field::SmtpHost => {
                 self.smtp_host.pop();
@@ -294,6 +341,13 @@ impl SetupApp {
             self.web_server_value().to_string(),
             self.php_version_value().to_string(),
             self.database_value().to_string(),
+            self.site_user.clone(),
+            self.web_root_mode_value().to_string(),
+            if self.custom_web_root.is_empty() {
+                None
+            } else {
+                Some(self.custom_web_root.clone())
+            },
             self.www_mode_value().to_string(),
             self.redis_value().to_string(),
             self.mail_value().to_string(),
@@ -309,6 +363,8 @@ impl SetupApp {
                 Some(self.smtp_from.clone())
             },
             self.smtp_encryption_value().to_string(),
+            self.security_profile_value().to_string(),
+            self.ssh_policy_value().to_string(),
             true,
             true,
             !self.local_test,
@@ -353,6 +409,10 @@ impl SetupApp {
         DATABASES[self.database]
     }
 
+    fn web_root_mode_value(&self) -> &'static str {
+        WEB_ROOT_MODES[self.web_root_mode]
+    }
+
     fn www_mode_value(&self) -> &'static str {
         WWW_MODES[self.www_mode]
     }
@@ -372,6 +432,14 @@ impl SetupApp {
     fn smtp_encryption_value(&self) -> &'static str {
         ENCRYPTION_MODES[self.smtp_encryption]
     }
+
+    fn security_profile_value(&self) -> &'static str {
+        SECURITY_PROFILES[self.security_profile]
+    }
+
+    fn ssh_policy_value(&self) -> &'static str {
+        SSH_POLICIES[self.ssh_policy]
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -381,6 +449,9 @@ enum Field {
     WebServer,
     PhpVersion,
     Database,
+    SiteUser,
+    WebRootMode,
+    CustomWebRoot,
     WwwMode,
     Redis,
     MailMode,
@@ -388,6 +459,8 @@ enum Field {
     SmtpPort,
     SmtpFrom,
     SmtpEncryption,
+    SecurityProfile,
+    SshPolicy,
     Prepare,
     Quit,
 }
@@ -400,6 +473,9 @@ impl Field {
             Self::WebServer => "Web server",
             Self::PhpVersion => "PHP-FPM",
             Self::Database => "Database",
+            Self::SiteUser => "Site user",
+            Self::WebRootMode => "Web root",
+            Self::CustomWebRoot => "Custom root",
             Self::WwwMode => "www policy",
             Self::Redis => "Redis",
             Self::MailMode => "Mail",
@@ -407,6 +483,8 @@ impl Field {
             Self::SmtpPort => "SMTP port",
             Self::SmtpFrom => "SMTP from",
             Self::SmtpEncryption => "SMTP encryption",
+            Self::SecurityProfile => "Security",
+            Self::SshPolicy => "SSH policy",
             Self::Prepare => "Prepare install",
             Self::Quit => "Quit",
         }
@@ -415,7 +493,12 @@ impl Field {
     fn is_text(self) -> bool {
         matches!(
             self,
-            Self::Domain | Self::SmtpHost | Self::SmtpPort | Self::SmtpFrom
+            Self::Domain
+                | Self::SiteUser
+                | Self::CustomWebRoot
+                | Self::SmtpHost
+                | Self::SmtpPort
+                | Self::SmtpFrom
         )
     }
 }
@@ -538,6 +621,9 @@ fn field_value(field: Field, app: &SetupApp) -> String {
         Field::WebServer => app.web_server_value().to_string(),
         Field::PhpVersion => app.php_version_value().to_string(),
         Field::Database => app.database_value().to_string(),
+        Field::SiteUser => app.site_user.clone(),
+        Field::WebRootMode => app.web_root_mode_value().to_string(),
+        Field::CustomWebRoot => app.custom_web_root.clone(),
         Field::WwwMode => app.www_mode_value().to_string(),
         Field::Redis => app.redis_value().to_string(),
         Field::MailMode => app.mail_value().to_string(),
@@ -545,6 +631,8 @@ fn field_value(field: Field, app: &SetupApp) -> String {
         Field::SmtpPort => app.smtp_port.clone(),
         Field::SmtpFrom => app.smtp_from.clone(),
         Field::SmtpEncryption => app.smtp_encryption_value().to_string(),
+        Field::SecurityProfile => app.security_profile_value().to_string(),
+        Field::SshPolicy => app.ssh_policy_value().to_string(),
         Field::Prepare => {
             if app.install_report.is_some() {
                 "already prepared; reset to rerun".to_string()

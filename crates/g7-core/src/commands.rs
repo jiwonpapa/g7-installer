@@ -1,3 +1,9 @@
+//! Core command modules.
+//!
+//! Each command module must document its safety boundary at the top of the
+//! file. `plan` defines intended server state, while mutating commands must
+//! only perform tracked changes that can be reported and reset safely.
+
 pub mod doctor;
 pub mod install;
 pub mod logs;

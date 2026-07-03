@@ -1,3 +1,9 @@
+//! Server preflight checks for G7 Installer.
+//!
+//! Doctor checks are the executable contract for whether a host is safe to
+//! modify. Checks should report precise failure names because setup/install TUI
+//! logs and user recovery instructions depend on those names.
+
 use std::path::{Path, PathBuf};
 
 use g7_state::owned_files::OWNED_FILES_PATH;
