@@ -263,6 +263,16 @@ impl SetupApp {
     }
 
     fn prepare_install(&mut self) {
+        if let Some(report) = &self.install_report {
+            self.logs.push(
+                "already prepared; exit setup or run `sudo g7inst reset --yes` before retrying"
+                    .to_string(),
+            );
+            self.logs
+                .push(format!("state: {}", report.state_path.display()));
+            return;
+        }
+
         self.logs.push("preparing install...".to_string());
         if !self.doctor_report.install_allowed {
             self.logs
@@ -535,7 +545,13 @@ fn field_value(field: Field, app: &SetupApp) -> String {
         Field::SmtpPort => app.smtp_port.clone(),
         Field::SmtpFrom => app.smtp_from.clone(),
         Field::SmtpEncryption => app.smtp_encryption_value().to_string(),
-        Field::Prepare => "Enter to run prepared install".to_string(),
+        Field::Prepare => {
+            if app.install_report.is_some() {
+                "already prepared; reset to rerun".to_string()
+            } else {
+                "Enter to prepare install".to_string()
+            }
+        }
         Field::Quit => "Enter to exit".to_string(),
     }
 }
