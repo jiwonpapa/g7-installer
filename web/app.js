@@ -49,6 +49,30 @@ function log(message) {
   nodes.log.scrollTop = nodes.log.scrollHeight;
 }
 
+function formatError(error) {
+  const lines = [error?.message || String(error)];
+
+  if (error?.hint) {
+    lines.push("", `Hint: ${error.hint}`);
+  }
+
+  if (Array.isArray(error?.details) && error.details.length > 0) {
+    lines.push("", "Details:", ...error.details.map((detail) => `- ${detail}`));
+  }
+
+  return lines.join("\n");
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[char]);
+}
+
 function setConnectionStatus(label, colorClass) {
   nodes.status.textContent = label;
   nodes.status.className = `font-medium ${colorClass}`;
@@ -151,8 +175,13 @@ function renderDoctor(report) {
     const item = document.createElement("div");
     item.className = "result-row";
     item.dataset.status = check.status;
-    item.innerHTML = `<span>${check.name}</span><strong>${check.status}</strong>`;
-    item.title = check.message;
+    item.innerHTML = `
+      <div class="result-copy">
+        <span>${escapeHtml(check.name)}</span>
+        <p>${escapeHtml(check.message)}</p>
+      </div>
+      <strong>${escapeHtml(check.status)}</strong>
+    `;
     nodes.doctorResults.append(item);
   });
 }
@@ -185,7 +214,14 @@ function connectEvents() {
   });
 
   socket.addEventListener("message", (event) => {
-    const payload = JSON.parse(event.data);
+    let payload;
+    try {
+      payload = JSON.parse(event.data);
+    } catch (_error) {
+      log("invalid event payload received");
+      return;
+    }
+
     if (payload.event_type === "log") {
       log(payload.message);
     }
@@ -217,18 +253,43 @@ async function apiFetch(path, options = {}) {
     headers["x-g7-csrf"] = state.csrfToken;
   }
 
-  const response = await fetch(path, {
-    ...options,
-    credentials: "same-origin",
-    headers,
-  });
+  let response;
+  try {
+    response = await fetch(path, {
+      ...options,
+      credentials: "same-origin",
+      headers,
+    });
+  } catch (cause) {
+    const error = new Error("setup controller request failed");
+    error.hint = "서버 프로세스가 실행 중인지 확인하고 브라우저를 새로고침하세요.";
+    error.details = [cause?.message || String(cause)];
+    error.retryable = true;
+    throw error;
+  }
 
   const contentType = response.headers.get("content-type") || "";
-  const body = contentType.includes("application/json") ? await response.json() : await response.text();
+  let body;
+  try {
+    body = contentType.includes("application/json") ? await response.json() : await response.text();
+  } catch (cause) {
+    const error = new Error("setup controller response could not be parsed");
+    error.hint = "웹 컨트롤러를 재시작한 뒤 같은 작업을 다시 실행하세요.";
+    error.details = [cause?.message || String(cause)];
+    error.retryable = true;
+    throw error;
+  }
 
   if (!response.ok) {
-    const message = typeof body === "object" && body.error ? body.error : `request failed: ${response.status}`;
-    throw new Error(message);
+    const message = body && typeof body === "object" && body.error ? body.error : `request failed: ${response.status}`;
+    const error = new Error(message);
+    error.status = response.status;
+    if (body && typeof body === "object") {
+      error.hint = body.hint || null;
+      error.details = Array.isArray(body.details) ? body.details : [];
+      error.retryable = Boolean(body.retryable);
+    }
+    throw error;
   }
 
   return body;
@@ -299,7 +360,7 @@ function bindEvents() {
         showStep("check");
       } catch (error) {
         passwordInput.value = "";
-        log(error.message);
+        log(formatError(error));
       }
     });
   });
@@ -309,7 +370,7 @@ function bindEvents() {
       try {
         await runDoctorCheck();
       } catch (error) {
-        log(error.message);
+        log(formatError(error));
       }
     });
   });
@@ -325,8 +386,8 @@ function bindEvents() {
         nodes.planOutput.textContent = report.text;
         log(`plan ready: ${report.packages.length} package group(s), ${report.files.length} file(s)`);
       } catch (error) {
-        nodes.planOutput.textContent = error.message;
-        log(error.message);
+        nodes.planOutput.textContent = formatError(error);
+        log(formatError(error));
       }
     });
   });
@@ -349,8 +410,8 @@ function bindEvents() {
         log(`install preparation completed: ${report.phase}`);
       } catch (error) {
         markStage("preflight", "실패");
-        nodes.reportOutput.textContent = `${error.message}\n\n해결 후 다시 서버 점검을 실행하세요. 테스트 흔적이면 reset을 사용하세요.`;
-        log(error.message);
+        nodes.reportOutput.textContent = `${formatError(error)}\n\n해결 후 다시 서버 점검을 실행하세요. 테스트 흔적이면 reset을 사용하세요.`;
+        log(formatError(error));
       }
     });
   });
@@ -362,8 +423,8 @@ function bindEvents() {
         nodes.reportOutput.textContent = report.content;
         log(`report loaded: ${report.exists ? "exists" : "missing"}`);
       } catch (error) {
-        nodes.reportOutput.textContent = error.message;
-        log(error.message);
+        nodes.reportOutput.textContent = formatError(error);
+        log(formatError(error));
       }
     });
   });
@@ -384,8 +445,8 @@ function bindEvents() {
         log("reset completed");
         await runDoctorCheck();
       } catch (error) {
-        nodes.reportOutput.textContent = error.message;
-        log(error.message);
+        nodes.reportOutput.textContent = formatError(error);
+        log(formatError(error));
       }
     });
   });
@@ -415,7 +476,7 @@ async function boot() {
     log(`auth status: ${state.bootstrap.auth.status}`);
   } catch (error) {
     setConnectionStatus("error", "text-red-300");
-    log(`${error.message}; 터미널에 출력된 token URL로 다시 접속하세요.`);
+    log(`${formatError(error)}\n터미널에 출력된 token URL로 다시 접속하세요.`);
   }
 }
 

@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -146,12 +146,18 @@ struct ResetRequest {
 #[derive(Debug, Serialize)]
 struct ApiErrorBody {
     error: String,
+    hint: Option<String>,
+    details: Vec<String>,
+    retryable: bool,
 }
 
 #[derive(Debug)]
 struct ApiError {
     status: StatusCode,
     message: String,
+    hint: Option<String>,
+    details: Vec<String>,
+    retryable: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -342,13 +348,27 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 fn print_startup(addr: SocketAddr, token: &str) {
+    let browser_addr = browser_addr_for(addr);
+    let port = addr.port();
+
     println!("G7inst Web Controller");
-    println!("Open: http://{addr}/?token={token}");
+    println!("Open: http://{browser_addr}/?token={token}");
     println!("Remote access:");
-    println!("ssh -L 7717:127.0.0.1:7717 root@SERVER_IP");
+    println!("ssh -L {port}:127.0.0.1:{port} root@SERVER_IP");
+    if !is_loopback(addr.ip()) {
+        println!("Remote bind is enabled; server account password login is disabled.");
+    }
     println!("If server account password is not set:");
     println!("sudo passwd root");
     println!("Stop: Ctrl+C");
+}
+
+fn browser_addr_for(addr: SocketAddr) -> SocketAddr {
+    if addr.ip().is_unspecified() {
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), addr.port())
+    } else {
+        addr
+    }
 }
 
 async fn shutdown_signal() {
@@ -539,7 +559,14 @@ async fn api_plan(
     emit_log(&state, "building install plan");
     let domain = request.domain.clone();
     let options = options_from_request(request);
-    let install_plan = plan::build_with_options(domain, options).map_err(ApiError::bad_request)?;
+    let install_plan = match plan::build_with_options(domain, options) {
+        Ok(install_plan) => install_plan,
+        Err(error) => {
+            emit_log(&state, format!("plan failed: {error}"));
+            return Err(ApiError::bad_request(error)
+                .with_hint("설치 옵션 값을 확인한 뒤 다시 계획을 생성하세요."));
+        }
+    };
     emit_log(&state, "install plan ready");
 
     Ok(Json(plan_to_api(install_plan)))
@@ -573,13 +600,18 @@ async fn api_install_prepare(
             Ok(Json(install_to_api(report)))
         }
         Err(error) => {
+            let details = failed_doctor_details(doctor::run());
             emit_stage(
                 &state,
                 "preflight",
                 "실패",
                 format!("install failed: {error}"),
             );
-            Err(ApiError::bad_request(error))
+            Err(ApiError::bad_request(error)
+                .with_hint(
+                    "서버 점검 실패 항목을 해결하거나 테스트 흔적이면 reset 후 다시 시도하세요.",
+                )
+                .with_details(details))
         }
     }
 }
@@ -599,7 +631,14 @@ async fn api_reset(
     }
 
     emit_log(&state, "running reset");
-    let report = reset::run(true, request.dry_run).map_err(ApiError::bad_request)?;
+    let report = match reset::run(true, request.dry_run) {
+        Ok(report) => report,
+        Err(error) => {
+            emit_log(&state, format!("reset failed: {error}"));
+            return Err(ApiError::bad_request(error)
+                .with_hint("root 권한과 installer owned-files 상태를 확인하세요."));
+        }
+    };
     emit_log(&state, "reset completed");
 
     Ok(Json(ResetApiReport {
@@ -700,6 +739,27 @@ fn doctor_status_label(status: DoctorCheckStatus) -> &'static str {
         DoctorCheckStatus::Fail => "fail",
         DoctorCheckStatus::Pending => "pending",
     }
+}
+
+fn failed_doctor_details(report: doctor::DoctorReport) -> Vec<String> {
+    report
+        .checks
+        .into_iter()
+        .filter(|check| {
+            matches!(
+                check.status,
+                DoctorCheckStatus::Fail | DoctorCheckStatus::Pending
+            )
+        })
+        .map(|check| {
+            format!(
+                "[{}] {} - {}",
+                doctor_status_label(check.status),
+                check.name,
+                check.message
+            )
+        })
+        .collect()
 }
 
 fn plan_to_api(install_plan: plan::InstallPlan) -> PlanApiReport {
@@ -1044,6 +1104,9 @@ impl ApiError {
         Self {
             status: StatusCode::BAD_REQUEST,
             message: error.to_string(),
+            hint: None,
+            details: Vec::new(),
+            retryable: true,
         }
     }
 
@@ -1051,6 +1114,12 @@ impl ApiError {
         Self {
             status: StatusCode::UNAUTHORIZED,
             message: error.into(),
+            hint: Some(
+                "서버 계정으로 로그인하거나 터미널에 출력된 token URL로 다시 접속하세요."
+                    .to_string(),
+            ),
+            details: Vec::new(),
+            retryable: true,
         }
     }
 
@@ -1058,6 +1127,12 @@ impl ApiError {
         Self {
             status: StatusCode::FORBIDDEN,
             message: error.into(),
+            hint: Some(
+                "권한 또는 접속 방식을 확인하세요. 원격 VPS는 SSH 터널 접속을 권장합니다."
+                    .to_string(),
+            ),
+            details: Vec::new(),
+            retryable: true,
         }
     }
 
@@ -1065,6 +1140,9 @@ impl ApiError {
         Self {
             status: StatusCode::CONFLICT,
             message: error.into(),
+            hint: Some("현재 작업이 끝난 뒤 다시 시도하세요.".to_string()),
+            details: Vec::new(),
+            retryable: true,
         }
     }
 
@@ -1072,7 +1150,20 @@ impl ApiError {
         Self {
             status: StatusCode::TOO_MANY_REQUESTS,
             message: error.into(),
+            hint: Some("잠시 기다린 뒤 다시 로그인하세요. 비밀번호가 없다면 sudo passwd root를 먼저 실행하세요.".to_string()),
+            details: Vec::new(),
+            retryable: true,
         }
+    }
+
+    fn with_hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = Some(hint.into());
+        self
+    }
+
+    fn with_details(mut self, details: Vec<String>) -> Self {
+        self.details = details;
+        self
     }
 }
 
@@ -1082,6 +1173,9 @@ impl IntoResponse for ApiError {
             self.status,
             Json(ApiErrorBody {
                 error: self.message,
+                hint: self.hint,
+                details: self.details,
+                retryable: self.retryable,
             }),
         )
             .into_response()
@@ -1114,10 +1208,13 @@ fn emit_stage(
 #[cfg(test)]
 mod tests {
     use super::{
-        AUTH_LOCKOUT, SESSION_TTL, Session, ensure_remote_binding_is_explicit,
-        normalize_login_username, parse_bind, require_login_allowed, secure_eq, secure_token,
+        AUTH_LOCKOUT, DoctorCheckStatus, SESSION_TTL, Session, browser_addr_for,
+        ensure_remote_binding_is_explicit, failed_doctor_details, normalize_login_username,
+        parse_bind, require_login_allowed, secure_eq, secure_token,
     };
     use axum::http::StatusCode;
+    use g7_core::commands::doctor::{DoctorCheck, DoctorReport};
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::time::Instant;
 
     #[test]
@@ -1179,5 +1276,48 @@ mod tests {
 
         let error = require_login_allowed(&session).expect_err("lockout should reject login");
         assert_eq!(error.status, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[test]
+    fn browser_url_uses_loopback_for_unspecified_bind() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 7717);
+        let browser = browser_addr_for(addr);
+
+        assert_eq!(browser.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_eq!(browser.port(), 7717);
+    }
+
+    #[test]
+    fn failed_doctor_details_lists_blocking_checks_only() {
+        let report = DoctorReport {
+            install_allowed: false,
+            checks: vec![
+                DoctorCheck {
+                    name: "ok",
+                    status: DoctorCheckStatus::Pass,
+                    message: "ready".to_string(),
+                },
+                DoctorCheck {
+                    name: "warn",
+                    status: DoctorCheckStatus::Warn,
+                    message: "inspect manually".to_string(),
+                },
+                DoctorCheck {
+                    name: "fail",
+                    status: DoctorCheckStatus::Fail,
+                    message: "blocked".to_string(),
+                },
+                DoctorCheck {
+                    name: "pending",
+                    status: DoctorCheckStatus::Pending,
+                    message: "waiting".to_string(),
+                },
+            ],
+        };
+
+        assert_eq!(
+            failed_doctor_details(report),
+            vec!["[fail] fail - blocked", "[pending] pending - waiting"]
+        );
     }
 }

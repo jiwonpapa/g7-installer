@@ -159,7 +159,19 @@
 
   .result-row strong,
   .stage-row strong {
-    @apply text-zinc-500;
+    @apply shrink-0 text-zinc-500;
+  }
+
+  .result-copy {
+    @apply min-w-0 py-3;
+  }
+
+  .result-copy span {
+    @apply block break-words font-medium text-zinc-100;
+  }
+
+  .result-copy p {
+    @apply mt-1 break-words text-xs leading-5 text-zinc-500;
   }
 
   .result-row[data-status="pass"] strong,
