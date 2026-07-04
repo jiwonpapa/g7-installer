@@ -16,8 +16,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use axum::extract::Query;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::{ConnectInfo, Query};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
@@ -64,6 +64,7 @@ struct WebState {
     events: broadcast::Sender<WebEvent>,
     install_running: Arc<AtomicBool>,
     sessions: Arc<Mutex<HashMap<String, Session>>>,
+    allowed_client_ip: Arc<Mutex<Option<IpAddr>>>,
     loopback_bind: bool,
 }
 
@@ -72,6 +73,7 @@ struct Session {
     csrf_token: String,
     authenticated: bool,
     username: Option<String>,
+    client_ip: IpAddr,
     expires_at: Instant,
     failed_login_attempts: u32,
     login_blocked_until: Option<Instant>,
@@ -99,6 +101,7 @@ struct BootstrapAuth {
     status: &'static str,
     username: Option<String>,
     authenticated: bool,
+    client_ip: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -275,6 +278,7 @@ pub async fn run(config: WebSetupConfig) -> Result<()> {
         events: broadcast::channel(128).0,
         install_running: Arc::new(AtomicBool::new(false)),
         sessions: Arc::new(Mutex::new(HashMap::new())),
+        allowed_client_ip: Arc::new(Mutex::new(None)),
         loopback_bind: is_loopback(bind.ip()),
     };
 
@@ -301,10 +305,13 @@ pub async fn run(config: WebSetupConfig) -> Result<()> {
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .map_err(|err| miette!("web setup controller failed: {err}"))
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .map_err(|err| miette!("web setup controller failed: {err}"))
 }
 
 fn parse_bind(bind: &str) -> Result<SocketAddr> {
@@ -353,6 +360,7 @@ fn print_startup(addr: SocketAddr, token: &str) {
 
     println!("G7inst Web Controller");
     println!("Open: http://{browser_addr}/?token={token}");
+    println!("Access lock: first valid token client IP only");
     println!("Remote access:");
     println!("ssh -L {port}:127.0.0.1:{port} root@SERVER_IP");
     if !is_loopback(addr.ip()) {
@@ -377,15 +385,17 @@ async fn shutdown_signal() {
 
 async fn index(
     axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Query(query): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     let mut response = Html(INDEX_HTML).into_response();
+    let client_ip = peer.ip();
 
     if query
         .get("token")
         .is_some_and(|token| secure_eq(token, &state.access_token))
     {
-        match create_session(&state) {
+        match create_session(&state, client_ip) {
             Ok(session_id) => {
                 if let Ok(value) = HeaderValue::from_str(&session_cookie(&session_id)) {
                     response.headers_mut().insert(header::SET_COOKIE, value);
@@ -393,30 +403,43 @@ async fn index(
             }
             Err(error) => return error.into_response(),
         }
+    } else if let Err(error) = require_allowed_client_ip(&state, client_ip) {
+        return error.into_response();
     }
 
     response
 }
 
-async fn app_js() -> impl IntoResponse {
-    (
+async fn app_js(
+    axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+) -> std::result::Result<impl IntoResponse, ApiError> {
+    require_allowed_client_ip(&state, peer.ip())?;
+
+    Ok((
         [(
             header::CONTENT_TYPE,
             "application/javascript; charset=utf-8",
         )],
         APP_JS,
-    )
+    ))
 }
 
-async fn app_css() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], APP_CSS)
+async fn app_css(
+    axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+) -> std::result::Result<impl IntoResponse, ApiError> {
+    require_allowed_client_ip(&state, peer.ip())?;
+
+    Ok(([(header::CONTENT_TYPE, "text/css; charset=utf-8")], APP_CSS))
 }
 
 async fn bootstrap(
     axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> std::result::Result<impl IntoResponse, ApiError> {
-    let session = require_session(&state, &headers)?;
+    let session = require_session(&state, &headers, peer.ip())?;
     let payload = BootstrapPayload {
         domain: state.domain,
         local_test: state.local_test,
@@ -429,6 +452,7 @@ async fn bootstrap(
             },
             username: session.username.clone(),
             authenticated: session.authenticated,
+            client_ip: session.client_ip.to_string(),
         },
         csrf_token: session.csrf_token,
     };
@@ -438,11 +462,12 @@ async fn bootstrap(
 
 async fn api_login(
     axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(request): Json<LoginRequest>,
 ) -> std::result::Result<impl IntoResponse, ApiError> {
     let session_id = require_session_id(&headers)?;
-    let session = require_session(&state, &headers)?;
+    let session = require_session(&state, &headers, peer.ip())?;
     require_csrf(&headers, &session)?;
     require_loopback_login(&state)?;
     require_login_allowed(&session)?;
@@ -478,9 +503,10 @@ async fn api_login(
 
 async fn api_logout(
     axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> std::result::Result<impl IntoResponse, ApiError> {
-    let session = require_session(&state, &headers)?;
+    let session = require_session(&state, &headers, peer.ip())?;
     require_csrf(&headers, &session)?;
     let session_id = require_session_id(&headers)?;
     remove_session(&state, &session_id)?;
@@ -491,9 +517,10 @@ async fn api_logout(
 async fn api_events(
     ws: WebSocketUpgrade,
     axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> axum::response::Response {
-    if let Err(error) = require_session(&state, &headers) {
+    if let Err(error) = require_session(&state, &headers, peer.ip()) {
         return error.into_response();
     }
 
@@ -533,9 +560,10 @@ async fn send_event(socket: &mut WebSocket, event: &WebEvent) -> std::result::Re
 
 async fn api_doctor(
     axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> std::result::Result<impl IntoResponse, ApiError> {
-    require_session(&state, &headers)?;
+    require_session(&state, &headers, peer.ip())?;
     emit_log(&state, "running server check");
     let report = doctor_to_api(doctor::run());
     emit_log(
@@ -551,10 +579,11 @@ async fn api_doctor(
 
 async fn api_plan(
     axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(request): Json<SetupRequest>,
 ) -> std::result::Result<impl IntoResponse, ApiError> {
-    let session = require_authenticated_session(&state, &headers)?;
+    let session = require_authenticated_session(&state, &headers, peer.ip())?;
     require_csrf(&headers, &session)?;
     emit_log(&state, "building install plan");
     let domain = request.domain.clone();
@@ -574,10 +603,11 @@ async fn api_plan(
 
 async fn api_install_prepare(
     axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(request): Json<SetupRequest>,
 ) -> std::result::Result<impl IntoResponse, ApiError> {
-    let session = require_authenticated_session(&state, &headers)?;
+    let session = require_authenticated_session(&state, &headers, peer.ip())?;
     require_csrf(&headers, &session)?;
 
     if state.install_running.swap(true, Ordering::SeqCst) {
@@ -618,10 +648,11 @@ async fn api_install_prepare(
 
 async fn api_reset(
     axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(request): Json<ResetRequest>,
 ) -> std::result::Result<impl IntoResponse, ApiError> {
-    let session = require_authenticated_session(&state, &headers)?;
+    let session = require_authenticated_session(&state, &headers, peer.ip())?;
     require_csrf(&headers, &session)?;
 
     if state.install_running.load(Ordering::SeqCst) {
@@ -650,9 +681,10 @@ async fn api_reset(
 
 async fn api_status(
     axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> std::result::Result<impl IntoResponse, ApiError> {
-    require_authenticated_session(&state, &headers)?;
+    require_authenticated_session(&state, &headers, peer.ip())?;
     let current = status::read();
 
     Ok(Json(StatusApiReport {
@@ -670,9 +702,10 @@ async fn api_status(
 
 async fn api_report(
     axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> std::result::Result<impl IntoResponse, ApiError> {
-    require_authenticated_session(&state, &headers)?;
+    require_authenticated_session(&state, &headers, peer.ip())?;
 
     match fs::read_to_string(REPORT_PATH) {
         Ok(content) => Ok(Json(ReportApiPayload {
@@ -840,13 +873,15 @@ fn install_to_api(report: install::InstallReport) -> InstallApiReport {
     }
 }
 
-fn create_session(state: &WebState) -> std::result::Result<String, ApiError> {
+fn create_session(state: &WebState, client_ip: IpAddr) -> std::result::Result<String, ApiError> {
+    lock_client_ip(state, client_ip)?;
     let session_id = secure_token().map_err(ApiError::bad_request)?;
     let csrf_token = secure_token().map_err(ApiError::bad_request)?;
     let session = Session {
         csrf_token,
         authenticated: false,
         username: None,
+        client_ip,
         expires_at: Instant::now() + SESSION_TTL,
         failed_login_attempts: 0,
         login_blocked_until: None,
@@ -859,6 +894,54 @@ fn create_session(state: &WebState) -> std::result::Result<String, ApiError> {
     sessions.insert(session_id.clone(), session);
 
     Ok(session_id)
+}
+
+fn lock_client_ip(state: &WebState, client_ip: IpAddr) -> std::result::Result<(), ApiError> {
+    let mut allowed = state
+        .allowed_client_ip
+        .lock()
+        .map_err(|_| ApiError::bad_request("client IP lock is unavailable"))?;
+
+    match *allowed {
+        Some(allowed_ip) if allowed_ip == client_ip => Ok(()),
+        Some(allowed_ip) => Err(client_ip_forbidden(allowed_ip, client_ip)),
+        None => {
+            *allowed = Some(client_ip);
+            emit_log(
+                state,
+                format!("setup access locked to client IP: {client_ip}"),
+            );
+            Ok(())
+        }
+    }
+}
+
+fn require_allowed_client_ip(
+    state: &WebState,
+    client_ip: IpAddr,
+) -> std::result::Result<(), ApiError> {
+    let allowed = state
+        .allowed_client_ip
+        .lock()
+        .map_err(|_| ApiError::bad_request("client IP lock is unavailable"))?;
+
+    match *allowed {
+        Some(allowed_ip) if allowed_ip != client_ip => {
+            Err(client_ip_forbidden(allowed_ip, client_ip))
+        }
+        _ => Ok(()),
+    }
+}
+
+fn client_ip_forbidden(allowed_ip: IpAddr, client_ip: IpAddr) -> ApiError {
+    ApiError::forbidden("setup controller is locked to the first valid token client IP")
+        .with_hint(
+            "터미널의 token URL을 처음 연 같은 SSH 터널 또는 같은 클라이언트에서 접속하세요.",
+        )
+        .with_details(vec![
+            format!("allowed_client_ip: {allowed_ip}"),
+            format!("request_client_ip: {client_ip}"),
+        ])
 }
 
 fn require_session_id(headers: &HeaderMap) -> std::result::Result<String, ApiError> {
@@ -877,7 +960,9 @@ fn require_session_id(headers: &HeaderMap) -> std::result::Result<String, ApiErr
 fn require_session(
     state: &WebState,
     headers: &HeaderMap,
+    client_ip: IpAddr,
 ) -> std::result::Result<Session, ApiError> {
+    require_allowed_client_ip(state, client_ip)?;
     let session_id = require_session_id(headers)?;
     let mut sessions = state
         .sessions
@@ -890,6 +975,9 @@ fn require_session(
     let session = sessions
         .get_mut(&session_id)
         .ok_or_else(|| ApiError::unauthorized("setup session expired or invalid"))?;
+    if session.client_ip != client_ip {
+        return Err(client_ip_forbidden(session.client_ip, client_ip));
+    }
     session.expires_at = now + SESSION_TTL;
 
     Ok(session.clone())
@@ -898,8 +986,9 @@ fn require_session(
 fn require_authenticated_session(
     state: &WebState,
     headers: &HeaderMap,
+    client_ip: IpAddr,
 ) -> std::result::Result<Session, ApiError> {
-    let session = require_session(state, headers)?;
+    let session = require_session(state, headers, client_ip)?;
     if session.authenticated {
         Ok(session)
     } else {
@@ -1208,14 +1297,32 @@ fn emit_stage(
 #[cfg(test)]
 mod tests {
     use super::{
-        AUTH_LOCKOUT, DoctorCheckStatus, SESSION_TTL, Session, browser_addr_for,
-        ensure_remote_binding_is_explicit, failed_doctor_details, normalize_login_username,
-        parse_bind, require_login_allowed, secure_eq, secure_token,
+        AUTH_LOCKOUT, DoctorCheckStatus, SESSION_TTL, Session, WebState, browser_addr_for,
+        ensure_remote_binding_is_explicit, failed_doctor_details, lock_client_ip,
+        normalize_login_username, parse_bind, require_allowed_client_ip, require_login_allowed,
+        secure_eq, secure_token,
     };
     use axum::http::StatusCode;
     use g7_core::commands::doctor::{DoctorCheck, DoctorReport};
+    use std::collections::HashMap;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex};
     use std::time::Instant;
+    use tokio::sync::broadcast;
+
+    fn test_state() -> WebState {
+        WebState {
+            access_token: "token".to_string(),
+            domain: None,
+            local_test: true,
+            events: broadcast::channel(16).0,
+            install_running: Arc::new(AtomicBool::new(false)),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            allowed_client_ip: Arc::new(Mutex::new(None)),
+            loopback_bind: true,
+        }
+    }
 
     #[test]
     fn loopback_bind_is_allowed_without_remote_flag()
@@ -1269,6 +1376,7 @@ mod tests {
             csrf_token: "csrf".to_string(),
             authenticated: false,
             username: None,
+            client_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
             expires_at: Instant::now() + SESSION_TTL,
             failed_login_attempts: 3,
             login_blocked_until: Some(Instant::now() + AUTH_LOCKOUT),
@@ -1318,6 +1426,35 @@ mod tests {
         assert_eq!(
             failed_doctor_details(report),
             vec!["[fail] fail - blocked", "[pending] pending - waiting"]
+        );
+    }
+
+    #[test]
+    fn client_ip_lock_allows_first_token_ip() {
+        let state = test_state();
+        let client_ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+
+        lock_client_ip(&state, client_ip).expect("first token IP should lock access");
+        require_allowed_client_ip(&state, client_ip).expect("same client IP should be allowed");
+    }
+
+    #[test]
+    fn client_ip_lock_rejects_different_ip() {
+        let state = test_state();
+        let allowed_ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        let other_ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5));
+
+        lock_client_ip(&state, allowed_ip).expect("first token IP should lock access");
+        let error = require_allowed_client_ip(&state, other_ip)
+            .expect_err("different client IP should be rejected");
+
+        assert_eq!(error.status, StatusCode::FORBIDDEN);
+        assert_eq!(
+            error.details,
+            vec![
+                "allowed_client_ip: 127.0.0.1",
+                "request_client_ip: 10.0.0.5"
+            ]
         );
     }
 }

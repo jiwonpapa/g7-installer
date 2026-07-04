@@ -474,6 +474,9 @@ async function boot() {
     window.history.replaceState({}, document.title, window.location.pathname);
     log("web controller bootstrap loaded");
     log(`auth status: ${state.bootstrap.auth.status}`);
+    if (state.bootstrap.auth.client_ip) {
+      log(`client IP locked: ${state.bootstrap.auth.client_ip}`);
+    }
   } catch (error) {
     setConnectionStatus("error", "text-red-300");
     log(`${formatError(error)}\n터미널에 출력된 token URL로 다시 접속하세요.`);
