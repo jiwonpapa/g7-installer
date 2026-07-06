@@ -18,16 +18,52 @@
 }
 
 @layer components {
+  .app-shell {
+    @apply bg-base-200;
+  }
+
   .app-header {
-    @apply flex flex-col gap-4 border-b border-base-300 pb-5 sm:flex-row sm:items-end sm:justify-between;
+    @apply sticky top-0 z-30 flex flex-col gap-4 rounded-lg border border-base-300 bg-base-100/95 px-4 py-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between;
+  }
+
+  .command-bar {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  .icon {
+    @apply h-4 w-4 shrink-0;
+  }
+
+  .icon-button {
+    @apply inline-flex min-h-10 items-center gap-2 rounded-md px-3 font-semibold;
+  }
+
+  .icon-button .btn-label {
+    @apply leading-none;
+  }
+
+  .icon-button[data-icon-only="true"] {
+    @apply w-10 px-0;
+  }
+
+  .icon-button[data-icon-only="true"] .btn-label {
+    @apply sr-only;
   }
 
   .status-pill {
-    @apply inline-flex min-h-10 items-center gap-2 rounded-lg border border-base-300 bg-base-100 px-3 text-sm;
+    @apply inline-flex min-h-10 items-center gap-2 rounded-md border border-base-300 bg-base-200 px-3 text-sm;
   }
 
   .wizard-progress {
-    @apply rounded-lg border border-base-300 bg-base-100 px-3 py-4;
+    @apply rounded-lg border border-base-300 bg-base-100 px-3 py-4 shadow-sm;
+  }
+
+  .step-copy {
+    @apply inline-flex items-center gap-2 text-xs font-semibold sm:flex-col sm:gap-1;
+  }
+
+  .step-copy .icon {
+    @apply h-4 w-4;
   }
 
   .view-panel {
@@ -39,7 +75,7 @@
   }
 
   .section-heading {
-    @apply flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between;
+    @apply flex flex-col gap-3 border-b border-base-300 pb-4 sm:flex-row sm:items-start sm:justify-between;
   }
 
   .section-heading h2 {
@@ -112,7 +148,7 @@
   }
 
   .metric {
-    @apply rounded-lg border border-base-300 bg-base-200 p-4;
+    @apply rounded-md border border-base-300 bg-base-200 p-4;
   }
 
   .metric dt {
@@ -124,7 +160,7 @@
   }
 
   .code-box {
-    @apply max-h-[520px] min-h-72 overflow-auto rounded-lg border border-base-300 bg-base-200 p-4 text-sm leading-6;
+    @apply max-h-[520px] min-h-72 overflow-auto rounded-md border border-base-300 bg-base-200 p-4 text-sm leading-6;
   }
 
   .log-box {
@@ -132,11 +168,11 @@
   }
 
   .empty-state {
-    @apply rounded-lg border border-dashed border-base-300 p-6 text-center text-sm text-base-content/50;
+    @apply rounded-md border border-dashed border-base-300 p-6 text-center text-sm text-base-content/50;
   }
 
   .guidance-panel {
-    @apply rounded-lg border border-info/30 bg-info/10 p-4 text-sm leading-6 text-base-content;
+    @apply rounded-md border border-info/30 bg-info/10 p-4 text-sm leading-6 text-base-content;
   }
 
   .guidance-panel h3 {
@@ -152,7 +188,7 @@
   }
 
   .action-help-grid div {
-    @apply rounded-lg border border-base-300 bg-base-200 p-4 text-sm;
+    @apply rounded-md border border-base-300 bg-base-200 p-4 text-sm;
   }
 
   .action-help-grid strong {
@@ -164,7 +200,7 @@
   }
 
   .recovery-panel {
-    @apply grid gap-4 rounded-lg border border-warning/40 bg-warning/10 p-4;
+    @apply grid gap-4 rounded-md border border-warning/40 bg-warning/10 p-4;
   }
 
   .recovery-panel[hidden] {
@@ -192,7 +228,7 @@
   }
 
   .report-card {
-    @apply rounded-lg border border-base-300 bg-base-100 p-4 text-sm leading-6 shadow-sm;
+    @apply rounded-md border border-base-300 bg-base-100 p-4 text-sm leading-6 shadow-sm;
   }
 
   .report-card h3 {
@@ -220,7 +256,7 @@
   }
 
   .package-progress-row {
-    @apply grid gap-3 rounded-lg border border-base-300 bg-base-100 p-4 text-sm md:grid-cols-[minmax(0,1fr)_12rem];
+    @apply grid gap-3 rounded-md border border-base-300 bg-base-100 p-4 text-sm md:grid-cols-[minmax(0,1fr)_12rem];
   }
 
   .package-progress-row span {
@@ -245,7 +281,7 @@
 
   .result-row,
   .stage-row {
-    @apply flex min-h-14 items-center justify-between gap-3 rounded-lg border border-base-300 bg-base-100 px-4 text-sm;
+    @apply flex min-h-14 items-center justify-between gap-3 rounded-md border border-base-300 bg-base-100 px-4 text-sm;
   }
 
   .result-row strong,

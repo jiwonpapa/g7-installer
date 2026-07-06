@@ -8,20 +8,20 @@
     <link rel="stylesheet" href="/app.css?v=__G7INST_ASSET_VERSION__" />
   </head>
   <body class="min-h-screen bg-base-200 text-base-content">
-    <main class="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-5 px-4 py-5 sm:px-6">
+    <main class="app-shell mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-5 px-4 py-5 sm:px-6">
       <header class="app-header">
         <div>
           <p class="text-sm font-semibold text-primary">G7 Installer</p>
           <h1 class="mt-1 text-2xl font-semibold tracking-normal sm:text-3xl">G7 설치 마법사</h1>
           <p class="mt-2 text-sm text-base-content/60">서버 점검부터 패키지 설치 리포트까지 단계별로 진행합니다.</p>
         </div>
-        <div class="flex flex-wrap items-center gap-2">
+        <div class="command-bar">
           <span class="status-pill">
             <span class="text-base-content/50">연결</span>
             <span id="connection-status" class="badge badge-warning">시작 중</span>
           </span>
-          <button id="theme-toggle" class="btn btn-sm btn-outline" type="button">다크 모드</button>
-          <button id="shutdown-button" class="btn btn-sm btn-ghost" type="button" disabled>종료</button>
+          <button id="theme-toggle" class="btn btn-sm btn-outline icon-button" type="button" data-icon="moon" title="다크 모드">다크 모드</button>
+          <button id="shutdown-button" class="btn btn-sm btn-ghost icon-button" type="button" data-icon="power" title="컨트롤러 종료" disabled>종료</button>
         </div>
       </header>
 
@@ -31,12 +31,12 @@
 
       <nav class="wizard-progress" aria-label="설치 단계">
         <ul class="steps steps-vertical w-full sm:steps-horizontal">
-          <li class="step step-primary" data-progress="login">서버 로그인</li>
-          <li class="step" data-progress="check">서버 점검</li>
-          <li class="step" data-progress="options">설치 방식</li>
-          <li class="step" data-progress="plan">사양 확정</li>
-          <li class="step" data-progress="install">패키지 설치</li>
-          <li class="step" data-progress="report">결과</li>
+          <li class="step step-primary" data-progress="login"><span class="step-copy" data-ui-icon="log-in">서버 로그인</span></li>
+          <li class="step" data-progress="check"><span class="step-copy" data-ui-icon="shield-check">서버 점검</span></li>
+          <li class="step" data-progress="options"><span class="step-copy" data-ui-icon="sliders-horizontal">설치 방식</span></li>
+          <li class="step" data-progress="plan"><span class="step-copy" data-ui-icon="clipboard-list">사양 확정</span></li>
+          <li class="step" data-progress="install"><span class="step-copy" data-ui-icon="package-plus">패키지 설치</span></li>
+          <li class="step" data-progress="report"><span class="step-copy" data-ui-icon="file-check">결과</span></li>
         </ul>
       </nav>
 
@@ -76,8 +76,8 @@
                 <input id="login-password" class="input input-bordered w-full" type="password" autocomplete="current-password" placeholder="서버 계정 비밀번호" />
               </label>
               <div class="wizard-actions sm:col-span-2">
-                <button class="btn btn-primary" type="submit">로그인하고 계속</button>
-                <button class="btn btn-ghost" type="button" data-next="check">로그인 없이 점검만 보기</button>
+                <button class="btn btn-primary icon-button" type="submit" data-icon="log-in">로그인하고 계속</button>
+                <button class="btn btn-ghost icon-button" type="button" data-icon="scan-line" data-next="check">로그인 없이 점검만 보기</button>
               </div>
             </form>
           </section>
@@ -89,7 +89,7 @@
                 <h2>서버 상태 점검</h2>
                 <p>신규 Ubuntu 서버만 안전하게 세팅할 수 있으므로 기존 웹서비스, 포트, 설치 흔적을 먼저 확인합니다.</p>
               </div>
-              <button id="doctor-button" class="btn btn-primary" type="button">점검 실행</button>
+              <button id="doctor-button" class="btn btn-primary icon-button" type="button" data-icon="shield-check">점검 실행</button>
             </div>
             <div id="doctor-status" class="mt-5 hidden"></div>
             <div id="doctor-results" class="result-list mt-5">
@@ -102,14 +102,14 @@
                 <ul data-recovery-paths></ul>
               </div>
               <div class="recovery-actions">
-                <button class="btn btn-sm btn-outline" type="button" data-recovery-refresh>복구 상태 새로고침</button>
-                <button class="btn btn-sm btn-outline" type="button" data-recovery-action="reset">메타데이터 리셋</button>
-                <button class="btn btn-sm btn-error" type="button" data-recovery-action="rollback">패키지 되돌리기</button>
+                <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="refresh-cw" data-recovery-refresh>복구 상태 새로고침</button>
+                <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="rotate-ccw" data-recovery-action="reset">메타데이터 리셋</button>
+                <button class="btn btn-sm btn-error icon-button" type="button" data-icon="undo-2" data-recovery-action="rollback">패키지 되돌리기</button>
               </div>
             </section>
             <div class="wizard-actions">
-              <button class="btn btn-ghost" type="button" data-next="login">이전</button>
-              <button id="check-next-button" class="btn btn-primary" type="button" data-next="options" disabled>점검 통과 후 다음</button>
+              <button class="btn btn-ghost icon-button" type="button" data-icon="chevron-left" data-next="login">이전</button>
+              <button id="check-next-button" class="btn btn-primary icon-button" type="button" data-icon="chevron-right" data-next="options" disabled>점검 통과 후 다음</button>
             </div>
           </section>
 
@@ -120,7 +120,7 @@
                 <h2>설치 방식 선택</h2>
                 <p>일반 사용자는 권장 조합을 선택하고 다음으로 넘어가면 됩니다.</p>
               </div>
-              <button class="btn btn-primary" type="button" data-next="plan">다음: 사양 확정</button>
+              <button class="btn btn-primary icon-button" type="button" data-icon="chevron-right" data-next="plan">다음: 사양 확정</button>
             </div>
 
             <form id="options-form" class="mt-5 grid gap-5">
@@ -396,8 +396,8 @@
               <section id="security-guidance" class="guidance-panel" aria-live="polite"></section>
             </form>
             <div class="wizard-actions">
-              <button class="btn btn-ghost" type="button" data-next="check">이전</button>
-              <button class="btn btn-primary" type="button" data-next="plan">다음: 사양 확정</button>
+              <button class="btn btn-ghost icon-button" type="button" data-icon="chevron-left" data-next="check">이전</button>
+              <button class="btn btn-primary icon-button" type="button" data-icon="chevron-right" data-next="plan">다음: 사양 확정</button>
             </div>
           </section>
 
@@ -408,13 +408,13 @@
                 <h2>설치 사양 확정</h2>
                 <p>선택한 사양과 변경 예정 항목을 확인한 뒤 패키지 설치 단계로 넘어갑니다.</p>
               </div>
-              <button id="plan-button" class="btn btn-primary" type="button">계획 생성</button>
+              <button id="plan-button" class="btn btn-primary icon-button" type="button" data-icon="clipboard-list">계획 생성</button>
             </div>
             <div id="plan-status" class="mt-5 hidden"></div>
             <pre id="plan-output" class="code-box mt-5">옵션을 확인한 뒤 계획 생성을 누르세요.</pre>
             <div class="wizard-actions">
-              <button class="btn btn-ghost" type="button" data-next="options">이전</button>
-              <button id="confirm-spec-button" class="btn btn-primary" type="button" data-next="install" disabled>이 사양으로 진행</button>
+              <button class="btn btn-ghost icon-button" type="button" data-icon="chevron-left" data-next="options">이전</button>
+              <button id="confirm-spec-button" class="btn btn-primary icon-button" type="button" data-icon="check" data-next="install" disabled>이 사양으로 진행</button>
             </div>
           </section>
 
@@ -425,7 +425,7 @@
                 <h2>패키지 설치 실행</h2>
                 <p>apt 패키지를 설치하고 기본 서비스와 포트가 살아나는지 확인합니다.</p>
               </div>
-              <button id="install-button" class="btn btn-error" type="button">패키지 설치 시작</button>
+              <button id="install-button" class="btn btn-error icon-button" type="button" data-icon="package-plus">패키지 설치 시작</button>
             </div>
             <div id="install-status" class="mt-5 hidden"></div>
             <progress id="install-progress" class="progress progress-primary mt-5 w-full" value="0" max="100"></progress>
@@ -452,14 +452,14 @@
                 <ul data-recovery-paths></ul>
               </div>
               <div class="recovery-actions">
-                <button class="btn btn-sm btn-outline" type="button" data-recovery-refresh>복구 상태 새로고침</button>
-                <button class="btn btn-sm btn-outline" type="button" data-recovery-action="reset">메타데이터 리셋</button>
-                <button class="btn btn-sm btn-error" type="button" data-recovery-action="rollback">패키지 되돌리기</button>
+                <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="refresh-cw" data-recovery-refresh>복구 상태 새로고침</button>
+                <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="rotate-ccw" data-recovery-action="reset">메타데이터 리셋</button>
+                <button class="btn btn-sm btn-error icon-button" type="button" data-icon="undo-2" data-recovery-action="rollback">패키지 되돌리기</button>
               </div>
             </section>
             <div class="wizard-actions">
-              <button class="btn btn-ghost" type="button" data-next="plan">이전</button>
-              <button id="install-result-button" class="btn btn-primary" type="button" data-next="report" disabled>설치 완료 후 결과 보기</button>
+              <button class="btn btn-ghost icon-button" type="button" data-icon="chevron-left" data-next="plan">이전</button>
+              <button id="install-result-button" class="btn btn-primary icon-button" type="button" data-icon="file-check" data-next="report" disabled>설치 완료 후 결과 보기</button>
             </div>
           </section>
 
@@ -471,9 +471,9 @@
                 <p>패키지 설치 결과, 검증 상태, 재시도 명령을 확인합니다.</p>
               </div>
               <div class="flex flex-wrap gap-2">
-                <button id="report-button" class="btn btn-outline" type="button">리포트 새로고침</button>
-                <button id="reset-button" class="btn btn-outline" type="button" data-recovery-action="reset">메타데이터 리셋</button>
-                <button id="rollback-button" class="btn btn-error" type="button" data-recovery-action="rollback">패키지 되돌리기</button>
+                <button id="report-button" class="btn btn-outline icon-button" type="button" data-icon="refresh-cw">리포트 새로고침</button>
+                <button id="reset-button" class="btn btn-outline icon-button" type="button" data-icon="rotate-ccw" data-recovery-action="reset">메타데이터 리셋</button>
+                <button id="rollback-button" class="btn btn-error icon-button" type="button" data-icon="undo-2" data-recovery-action="rollback">패키지 되돌리기</button>
               </div>
             </div>
             <div class="action-help-grid mt-5">
@@ -487,8 +487,8 @@
               <div class="empty-state">아직 리포트가 없습니다.</div>
             </div>
             <div class="wizard-actions">
-              <button class="btn btn-ghost" type="button" data-next="install">이전</button>
-              <button id="start-over-button" class="btn btn-primary" type="button">처음으로 돌아가기</button>
+              <button class="btn btn-ghost icon-button" type="button" data-icon="chevron-left" data-next="install">이전</button>
+              <button id="start-over-button" class="btn btn-primary icon-button" type="button" data-icon="home">처음으로 돌아가기</button>
             </div>
           </section>
         </div>
@@ -536,8 +536,8 @@
         <div id="install-confirm-summary" class="report-card mt-5"></div>
         <div class="modal-action">
           <form method="dialog" class="flex gap-2">
-            <button class="btn btn-ghost" value="cancel">취소</button>
-            <button id="install-confirm-start" class="btn btn-error" value="start">시작</button>
+            <button class="btn btn-ghost icon-button" value="cancel" data-icon="x">취소</button>
+            <button id="install-confirm-start" class="btn btn-error icon-button" value="start" data-icon="play">시작</button>
           </form>
         </div>
       </div>

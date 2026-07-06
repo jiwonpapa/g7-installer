@@ -21,6 +21,9 @@ need_pattern "web/index.html" "data-view=\"plan\""
 need_pattern "web/index.html" "data-view=\"install\""
 need_pattern "web/index.html" "data-view=\"report\""
 need_pattern "web/index.html" "id=\"theme-toggle\""
+need_pattern "web/index.html" "class=\"btn btn-sm btn-outline icon-button\""
+need_pattern "web/index.html" "data-icon=\"package-plus\""
+need_pattern "web/index.html" "data-ui-icon=\"shield-check\""
 need_pattern "web/index.html" "id=\"install-progress\""
 need_pattern "web/index.html" "id=\"package-progress-list\""
 need_pattern "web/index.html" "id=\"install-result-button\""
@@ -40,6 +43,10 @@ need_pattern "web/app.js" "formatError"
 need_pattern "web/app.js" "localizeMessage"
 need_pattern "web/app.js" "setDoctorPassed"
 need_pattern "web/app.js" "setReportReady"
+need_pattern "web/app.js" "lucide-static"
+need_pattern "web/app.js" "iconMarkup"
+need_pattern "web/app.js" "setButtonLabel"
+need_pattern "web/app.js" "hydrateIcons"
 need_pattern "web/app.js" "confirmInstallStart"
 need_pattern "web/app.js" "startPackageTicker"
 need_pattern "web/app.js" "renderSavedReport"
@@ -54,5 +61,10 @@ need_pattern "web/app.js" "syncServerState"
 need_pattern "web/app.js" "x-g7-csrf"
 need_pattern "crates/g7-cli/src/web_setup.rs" "CACHE_CONTROL"
 need_pattern "crates/g7-cli/src/web_setup.rs" "emit_progress"
+
+if rg -q "installButton\\.textContent|installResultButton\\.textContent|checkNextButton\\.textContent|themeToggle\\.textContent|button\\.textContent" "${ROOT_DIR}/web/app.js"; then
+  echo "web UI contract regression: stateful buttons must use setButtonLabel" >&2
+  exit 1
+fi
 
 echo "web static smoke passed"

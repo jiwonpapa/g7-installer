@@ -145,22 +145,93 @@ const templates = {
   },
 };
 
+// Icon paths are sourced from lucide-static and rendered inline to avoid extra requests.
+const iconSvg = {
+  "check": "<path d=\"M20 6 9 17l-5-5\" />",
+  "chevron-left": "<path d=\"m15 18-6-6 6-6\" />",
+  "chevron-right": "<path d=\"m9 18 6-6-6-6\" />",
+  "clipboard-list": "<rect width=\"8\" height=\"4\" x=\"8\" y=\"2\" rx=\"1\" ry=\"1\" /> <path d=\"M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2\" /> <path d=\"M12 11h4\" /> <path d=\"M12 16h4\" /> <path d=\"M8 11h.01\" /> <path d=\"M8 16h.01\" />",
+  "file-check": "<path d=\"M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z\" /> <path d=\"M14 2v5a1 1 0 0 0 1 1h5\" /> <path d=\"m9 15 2 2 4-4\" />",
+  "home": "<path d=\"M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8\" /> <path d=\"M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z\" />",
+  "log-in": "<path d=\"m10 17 5-5-5-5\" /> <path d=\"M15 12H3\" /> <path d=\"M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4\" />",
+  "moon": "<path d=\"M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401\" />",
+  "package-plus": "<path d=\"M12 22V12\" /> <path d=\"M16 17h6\" /> <path d=\"M19 14v6\" /> <path d=\"M21 10.535V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.729l7 4a2 2 0 0 0 2 .001l1.675-.955\" /> <path d=\"M3.29 7 12 12l8.71-5\" /> <path d=\"m7.5 4.27 8.997 5.148\" />",
+  "play": "<path d=\"M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z\" />",
+  "power": "<path d=\"M12 2v10\" /> <path d=\"M18.4 6.6a9 9 0 1 1-12.77.04\" />",
+  "refresh-cw": "<path d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8\" /> <path d=\"M21 3v5h-5\" /> <path d=\"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16\" /> <path d=\"M8 16H3v5\" />",
+  "rotate-ccw": "<path d=\"M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8\" /> <path d=\"M3 3v5h5\" />",
+  "scan-line": "<path d=\"M3 7V5a2 2 0 0 1 2-2h2\" /> <path d=\"M17 3h2a2 2 0 0 1 2 2v2\" /> <path d=\"M21 17v2a2 2 0 0 1-2 2h-2\" /> <path d=\"M7 21H5a2 2 0 0 1-2-2v-2\" /> <path d=\"M7 12h10\" />",
+  "shield-check": "<path d=\"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z\" /> <path d=\"m9 12 2 2 4-4\" />",
+  "sliders-horizontal": "<path d=\"M10 5H3\" /> <path d=\"M12 19H3\" /> <path d=\"M14 3v4\" /> <path d=\"M16 17v4\" /> <path d=\"M21 12h-9\" /> <path d=\"M21 19h-5\" /> <path d=\"M21 5h-7\" /> <path d=\"M8 10v4\" /> <path d=\"M8 12H3\" />",
+  "sun": "<circle cx=\"12\" cy=\"12\" r=\"4\" /> <path d=\"M12 2v2\" /> <path d=\"M12 20v2\" /> <path d=\"m4.93 4.93 1.41 1.41\" /> <path d=\"m17.66 17.66 1.41 1.41\" /> <path d=\"M2 12h2\" /> <path d=\"M20 12h2\" /> <path d=\"m6.34 17.66-1.41 1.41\" /> <path d=\"m19.07 4.93-1.41 1.41\" />",
+  "undo-2": "<path d=\"M9 14 4 9l5-5\" /> <path d=\"M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11\" />",
+  "x": "<path d=\"M18 6 6 18\" /> <path d=\"m6 6 12 12\" />",
+};
+
+function iconMarkup(name) {
+  const svg = iconSvg[name];
+  if (!svg) {
+    return "";
+  }
+
+  return `<svg class="icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${svg}</svg>`;
+}
+
+function buttonLabel(button) {
+  return button?.dataset?.label || button?.textContent?.trim() || "";
+}
+
+function hydrateIconButton(button) {
+  if (!button) {
+    return;
+  }
+
+  const label = buttonLabel(button);
+  button.dataset.label = label;
+  const icon = iconMarkup(button.dataset.icon);
+  button.innerHTML = `${icon}<span class="btn-label">${escapeHtml(label)}</span>`;
+}
+
+function setButtonLabel(button, label) {
+  if (!button) {
+    return;
+  }
+
+  button.dataset.label = label;
+  hydrateIconButton(button);
+}
+
+function hydrateIconLabel(label) {
+  if (!label) {
+    return;
+  }
+
+  const text = label.dataset.label || label.textContent.trim();
+  label.dataset.label = text;
+  label.innerHTML = `${iconMarkup(label.dataset.uiIcon)}<span>${escapeHtml(text)}</span>`;
+}
+
+function hydrateIcons(root = document) {
+  root.querySelectorAll("[data-icon]").forEach((button) => hydrateIconButton(button));
+  root.querySelectorAll("[data-ui-icon]").forEach((label) => hydrateIconLabel(label));
+}
+
 async function withBusy(button, busyText, task) {
   if (!button) {
     return task();
   }
 
-  const originalText = button.textContent;
+  const originalText = buttonLabel(button);
   button.disabled = true;
   if (busyText) {
-    button.textContent = busyText;
+    setButtonLabel(button, busyText);
   }
 
   try {
     return await task();
   } finally {
     button.disabled = false;
-    button.textContent = originalText;
+    setButtonLabel(button, originalText);
   }
 }
 
@@ -331,7 +402,7 @@ function setReportReady(ready) {
   state.reportReady = ready;
   if (nodes.installResultButton) {
     nodes.installResultButton.disabled = !ready;
-    nodes.installResultButton.textContent = ready ? "결과 보기" : "설치 완료 후 결과 보기";
+    setButtonLabel(nodes.installResultButton, ready ? "결과 보기" : "설치 완료 후 결과 보기");
   }
 }
 
@@ -342,25 +413,25 @@ function refreshInstallButtonState(label = null) {
 
   if (state.installRunning) {
     nodes.installButton.disabled = true;
-    nodes.installButton.textContent = "설치 중";
+    setButtonLabel(nodes.installButton, "설치 중");
     return;
   }
 
   if (state.installCompleted) {
     nodes.installButton.disabled = true;
-    nodes.installButton.textContent = "설치 완료";
+    setButtonLabel(nodes.installButton, "설치 완료");
     return;
   }
 
   nodes.installButton.disabled = false;
-  nodes.installButton.textContent = label || "패키지 설치 시작";
+  setButtonLabel(nodes.installButton, label || "패키지 설치 시작");
 }
 
 function setDoctorPassed(passed) {
   state.doctorPassed = passed;
   if (nodes.checkNextButton) {
     nodes.checkNextButton.disabled = !passed;
-    nodes.checkNextButton.textContent = passed ? "다음: 설치 방식" : "점검 통과 후 다음";
+    setButtonLabel(nodes.checkNextButton, passed ? "다음: 설치 방식" : "점검 통과 후 다음");
   }
 }
 
@@ -381,7 +452,9 @@ function applyTheme(theme) {
   state.theme = theme;
   document.documentElement.dataset.theme = theme;
   localStorage.setItem("g7inst-theme", theme);
-  nodes.themeToggle.textContent = theme === "dark" ? "라이트 모드" : "다크 모드";
+  nodes.themeToggle.dataset.icon = theme === "dark" ? "sun" : "moon";
+  nodes.themeToggle.title = theme === "dark" ? "라이트 모드" : "다크 모드";
+  setButtonLabel(nodes.themeToggle, theme === "dark" ? "라이트 모드" : "다크 모드");
 }
 
 function showStep(nextStep, options = {}) {
@@ -1832,6 +1905,7 @@ function bindEvents() {
 }
 
 async function boot() {
+  hydrateIcons();
   applyTheme(state.theme);
   bindEvents();
   bindHelpTooltips();
