@@ -7,7 +7,7 @@ Date: 2026-07-06
 - Local regression gate exists: `scripts/quality-gate.sh`.
 - Local gate covers `cargo fmt --check`, `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo doc --no-deps`, `cargo llvm-cov --fail-under-lines 60`, and web CSS build.
 - Current measured line coverage is 65.19%.
-- Release `v0.2.6` has both Linux musl assets and `checksums.txt`.
+- Release `v0.2.7` has both Linux musl assets and `checksums.txt`.
 - `scripts/ops-harness.sh` now verifies a disposable Ubuntu 24.04 server through install, report validation, rollback, removed-package checks, and reinstall.
 
 ## Gaps Found
