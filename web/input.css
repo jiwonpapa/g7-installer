@@ -164,7 +164,8 @@
   }
 
   .log-box {
-    @apply max-h-80 min-h-64 font-mono;
+    @apply max-h-80 min-h-64 overflow-x-hidden whitespace-pre-wrap break-words font-mono;
+    overflow-wrap: anywhere;
   }
 
   .empty-state {
