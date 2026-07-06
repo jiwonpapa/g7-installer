@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>G7 설치 마법사</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/app.css" />
+    <link rel="stylesheet" href="/app.css?v=__G7INST_ASSET_VERSION__" />
   </head>
   <body class="min-h-screen bg-base-200 text-base-content">
     <main class="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-5 px-4 py-5 sm:px-6">
@@ -87,7 +87,7 @@
               <div>
                 <span class="step-eyebrow">2단계</span>
                 <h2>서버 상태 점검</h2>
-                <p>운영체제, 권한, 기존 웹서비스, 포트, 설치 흔적을 확인합니다.</p>
+                <p>신규 Ubuntu 서버만 안전하게 세팅할 수 있으므로 기존 웹서비스, 포트, 설치 흔적을 먼저 확인합니다.</p>
               </div>
               <button id="doctor-button" class="btn btn-primary" type="button">점검 실행</button>
             </div>
@@ -97,7 +97,7 @@
             </div>
             <div class="wizard-actions">
               <button class="btn btn-ghost" type="button" data-next="login">이전</button>
-              <button class="btn btn-primary" type="button" data-next="options">다음: 설치 방식</button>
+              <button id="check-next-button" class="btn btn-primary" type="button" data-next="options" disabled>점검 통과 후 다음</button>
             </div>
           </section>
 
@@ -140,6 +140,39 @@
                     <span>
                       <strong>로컬 테스트</strong>
                       <small>g7-test.local 기준</small>
+                    </span>
+                  </label>
+                </div>
+              </fieldset>
+
+              <fieldset>
+                <legend class="field-label mb-3">
+                  설치할 앱
+                  <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="설치 앱 도움말">?</button>
+                    <span class="help-text">서버 스택을 먼저 준비한 뒤 마지막 단계에서 올릴 앱 종류입니다. 현재 버전은 서버 패키지 준비와 리포트에 반영합니다.</span>
+                  </span>
+                </legend>
+                <div class="template-grid">
+                  <label class="template-card">
+                    <input class="radio radio-primary" type="radio" name="app_package" value="gnuboard7" checked />
+                    <span>
+                      <strong>그누보드7</strong>
+                      <small>기본 목표 앱</small>
+                    </span>
+                  </label>
+                  <label class="template-card">
+                    <input class="radio radio-primary" type="radio" name="app_package" value="wordpress" />
+                    <span>
+                      <strong>WordPress</strong>
+                      <small>PHP CMS 구성</small>
+                    </span>
+                  </label>
+                  <label class="template-card">
+                    <input class="radio radio-primary" type="radio" name="app_package" value="laravel" />
+                    <span>
+                      <strong>Laravel</strong>
+                      <small>Composer 앱 구성</small>
                     </span>
                   </label>
                 </div>
@@ -225,6 +258,20 @@
                   </label>
                   <label class="field">
                     <span class="field-label">
+                      DB 버전
+                      <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="DB 버전 도움말">?</button>
+                    <span class="help-text">기본값은 Ubuntu apt 후보 버전을 사용합니다. 특정 버전 고정은 apt 소스가 준비된 서버에서만 안전합니다.</span>
+                  </span>
+                    </span>
+                    <select name="database_version" id="database-version" class="select select-bordered w-full">
+                      <option value="apt-default">Ubuntu apt 기본값</option>
+                      <option value="mysql-8.0">MySQL 8.0 계열</option>
+                      <option value="mysql-8.4">MySQL 8.4 LTS 계열</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">
                       웹루트
                       <span class="help-wrap">
                     <button class="help-circle" type="button" aria-label="웹루트 도움말">?</button>
@@ -275,13 +322,13 @@
                       메일 발송
                       <span class="help-wrap">
                     <button class="help-circle" type="button" aria-label="메일 발송 도움말">?</button>
-                    <span class="help-text">회원 인증/알림 메일 발송 방식입니다. 실제 운영은 SMTP Relay를 권장합니다.</span>
+                    <span class="help-text">회원 인증/알림 메일 발송 전용 설정입니다. 수신 메일 서버는 기본 설치 범위가 아닙니다.</span>
                   </span>
                     </span>
                     <select name="mail_mode" id="mail-mode" class="select select-bordered w-full">
-                      <option value="none">사용 안 함</option>
-                      <option value="smtp-relay">SMTP Relay</option>
-                      <option value="local-postfix">서버 Postfix</option>
+                      <option value="none">메일 발송 안 함</option>
+                      <option value="smtp-relay">외부 SMTP로 발송</option>
+                      <option value="local-postfix">서버 Postfix로 발송</option>
                     </select>
                   </label>
                   <label class="field">
@@ -333,6 +380,8 @@
                   </label>
                 </div>
               </details>
+
+              <section id="security-guidance" class="guidance-panel" aria-live="polite"></section>
             </form>
             <div class="wizard-actions">
               <button class="btn btn-ghost" type="button" data-next="check">이전</button>
@@ -396,10 +445,19 @@
                 <button id="rollback-button" class="btn btn-error" type="button">패키지 되돌리기</button>
               </div>
             </div>
+            <div class="action-help-grid mt-5">
+              <div><strong>리포트 새로고침</strong><span>서버에 저장된 결과만 다시 불러옵니다.</span></div>
+              <div><strong>메타데이터 리셋</strong><span>설치 기록만 초기화합니다. apt 패키지는 제거하지 않습니다.</span></div>
+              <div><strong>패키지 되돌리기</strong><span>설치 직후 운영 데이터가 없을 때만 패키지 제거를 시도합니다.</span></div>
+            </div>
             <div id="report-status" class="mt-5 hidden"></div>
-            <pre id="report-output" class="code-box mt-5">아직 리포트가 없습니다.</pre>
+            <progress id="report-progress" class="progress progress-primary mt-5 hidden w-full" value="0" max="100"></progress>
+            <div id="report-output" class="report-panel mt-5">
+              <div class="empty-state">아직 리포트가 없습니다.</div>
+            </div>
             <div class="wizard-actions">
               <button class="btn btn-ghost" type="button" data-next="install">이전</button>
+              <button id="start-over-button" class="btn btn-primary" type="button">처음으로 돌아가기</button>
             </div>
           </section>
         </div>
@@ -424,6 +482,10 @@
                 <dt>DB / Redis</dt>
                 <dd id="summary-data">확인 중</dd>
               </div>
+              <div class="metric">
+                <dt>앱 패키지</dt>
+                <dd id="summary-app">확인 중</dd>
+              </div>
             </dl>
           </section>
 
@@ -436,6 +498,23 @@
         </aside>
       </section>
     </main>
-    <script src="/app.js"></script>
+    <dialog id="install-confirm-dialog" class="modal">
+      <div class="modal-box">
+        <h3 class="text-lg font-semibold">패키지 설치를 시작할까요?</h3>
+        <p class="mt-2 text-sm text-base-content/60">서버 패키지 설치와 서비스/포트 검증을 진행합니다. 중간에 브라우저를 닫지 마세요.</p>
+        <div id="install-confirm-summary" class="report-card mt-5"></div>
+        <div class="modal-action">
+          <form method="dialog" class="flex gap-2">
+            <button class="btn btn-ghost" value="cancel">취소</button>
+            <button id="install-confirm-start" class="btn btn-error" value="start">시작</button>
+          </form>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+      </form>
+    </dialog>
+    <div id="floating-help" class="floating-help" role="tooltip" hidden></div>
+    <script src="/app.js?v=__G7INST_ASSET_VERSION__"></script>
   </body>
 </html>

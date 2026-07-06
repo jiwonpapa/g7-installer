@@ -38,6 +38,10 @@ pub const DEFAULT_BIND: &str = "127.0.0.1:7717";
 const INDEX_HTML: &str = include_str!("../../../web/index.html");
 const APP_JS: &str = include_str!("../../../web/app.js");
 const APP_CSS: &str = include_str!("../../../web/dist/app.css");
+const ASSET_VERSION: &str = match option_env!("G7_ASSET_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
 const REPORT_PATH: &str = "/var/log/g7-installer/report.json";
 const SESSION_COOKIE: &str = "g7inst_session";
 const CSRF_HEADER: &str = "x-g7-csrf";
@@ -85,6 +89,8 @@ struct WebEvent {
     message: String,
     stage: Option<&'static str>,
     status: Option<&'static str>,
+    operation: Option<&'static str>,
+    percent: Option<u8>,
 }
 
 #[derive(Debug, Serialize)]
@@ -123,6 +129,8 @@ struct SetupRequest {
     web_server: String,
     php_version: String,
     database: String,
+    database_version: String,
+    app_package: String,
     site_user: String,
     web_root_mode: String,
     web_root: Option<String>,
@@ -190,6 +198,8 @@ struct PlanApiReport {
     web_server: String,
     php_version: String,
     database: String,
+    database_version: String,
+    app_package: String,
     site_user: String,
     web_root: String,
     packages: Vec<NameDescription>,
@@ -239,6 +249,8 @@ struct InstallApiReport {
     web_server: String,
     php_version: String,
     database: String,
+    database_version: String,
+    app_package: String,
     site_user: String,
     web_root: String,
     phase: String,
@@ -421,7 +433,11 @@ async fn index(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Query(query): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
-    let mut response = Html(INDEX_HTML).into_response();
+    let mut response = Html(index_html()).into_response();
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-store, no-cache, max-age=0"),
+    );
     let client_ip = peer.ip();
 
     if query
@@ -443,6 +459,10 @@ async fn index(
     response
 }
 
+fn index_html() -> String {
+    INDEX_HTML.replace("__G7INST_ASSET_VERSION__", ASSET_VERSION)
+}
+
 async fn app_js(
     axum::extract::State(state): axum::extract::State<WebState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -450,10 +470,13 @@ async fn app_js(
     require_allowed_client_ip(&state, peer.ip())?;
 
     Ok((
-        [(
-            header::CONTENT_TYPE,
-            "application/javascript; charset=utf-8",
-        )],
+        [
+            (
+                header::CONTENT_TYPE,
+                "application/javascript; charset=utf-8",
+            ),
+            (header::CACHE_CONTROL, "no-store, no-cache, max-age=0"),
+        ],
         APP_JS,
     ))
 }
@@ -464,7 +487,13 @@ async fn app_css(
 ) -> std::result::Result<impl IntoResponse, ApiError> {
     require_allowed_client_ip(&state, peer.ip())?;
 
-    Ok(([(header::CONTENT_TYPE, "text/css; charset=utf-8")], APP_CSS))
+    Ok((
+        [
+            (header::CONTENT_TYPE, "text/css; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store, no-cache, max-age=0"),
+        ],
+        APP_CSS,
+    ))
 }
 
 async fn bootstrap(
@@ -567,6 +596,8 @@ async fn event_socket(mut socket: WebSocket, mut events: broadcast::Receiver<Web
         message: "event stream connected".to_string(),
         stage: None,
         status: None,
+        operation: None,
+        percent: None,
     };
 
     if send_event(&mut socket, &connected).await.is_err() {
@@ -620,6 +651,8 @@ async fn api_plan(
     require_csrf(&headers, &session)?;
     emit_log(&state, "building install plan");
     let domain = request.domain.clone();
+    let database_version = normalize_database_version(&request.database_version);
+    let app_package = normalize_app_package(&request.app_package);
     let options = options_from_request(request);
     let install_plan = match plan::build_with_options(domain, options) {
         Ok(install_plan) => install_plan,
@@ -631,7 +664,11 @@ async fn api_plan(
     };
     emit_log(&state, "install plan ready");
 
-    Ok(Json(plan_to_api(install_plan)))
+    Ok(Json(plan_to_api(
+        install_plan,
+        database_version,
+        app_package,
+    )))
 }
 
 async fn api_install_prepare(
@@ -648,19 +685,43 @@ async fn api_install_prepare(
         return Err(ApiError::conflict("install is already running"));
     }
 
+    emit_progress(&state, "install", 5, "install progress: starting preflight");
     emit_stage(&state, "preflight", "진행", "preflight started");
     let domain = request.domain.clone();
+    let database_version = normalize_database_version(&request.database_version);
+    let app_package = normalize_app_package(&request.app_package);
     let options = options_from_request(request);
+    emit_progress(
+        &state,
+        "install",
+        15,
+        "install progress: running package phase",
+    );
     let result = install::run(domain, options);
     state.install_running.store(false, Ordering::SeqCst);
 
     match result {
         Ok(report) => {
             emit_stage(&state, "preflight", "성공", "preflight passed");
+            emit_progress(&state, "install", 25, "install progress: preflight passed");
             emit_stage(&state, "packages", "성공", "packages installed");
+            emit_progress(
+                &state,
+                "install",
+                45,
+                "install progress: packages installed",
+            );
             emit_stage(&state, "config", "성공", "configuration prepared");
+            emit_progress(
+                &state,
+                "install",
+                60,
+                "install progress: configuration prepared",
+            );
             emit_stage(&state, "services", "성공", "services enabled");
+            emit_progress(&state, "install", 75, "install progress: services verified");
             emit_stage(&state, "ports", "성공", "ports verified");
+            emit_progress(&state, "install", 88, "install progress: ports verified");
             emit_stage(
                 &state,
                 "http",
@@ -668,11 +729,13 @@ async fn api_install_prepare(
                 "basic service verification completed",
             );
             emit_stage(&state, "report", "성공", "problem report prepared");
+            emit_progress(&state, "install", 100, "install progress: report ready");
             emit_log(&state, "package install completed");
-            Ok(Json(install_to_api(report)))
+            Ok(Json(install_to_api(report, database_version, app_package)))
         }
         Err(error) => {
             let details = failed_doctor_details(doctor::run());
+            emit_progress(&state, "install", 100, "install progress: failed");
             emit_stage(
                 &state,
                 "packages",
@@ -704,14 +767,27 @@ async fn api_reset(
     }
 
     emit_log(&state, "running reset");
+    emit_progress(
+        &state,
+        "reset",
+        10,
+        "reset progress: starting metadata cleanup",
+    );
     let report = match reset::run(true, request.dry_run) {
         Ok(report) => report,
         Err(error) => {
+            emit_progress(&state, "reset", 100, "reset progress: failed");
             emit_log(&state, format!("reset failed: {error}"));
             return Err(ApiError::bad_request(error)
                 .with_hint("root 권한과 installer owned-files 상태를 확인하세요."));
         }
     };
+    emit_progress(
+        &state,
+        "reset",
+        100,
+        "reset progress: metadata cleanup completed",
+    );
     emit_log(&state, "reset completed");
 
     Ok(Json(ResetApiReport {
@@ -737,18 +813,31 @@ async fn api_rollback(
     }
 
     emit_log(&state, "running package rollback");
+    emit_progress(
+        &state,
+        "rollback",
+        10,
+        "rollback progress: starting rollback",
+    );
     let report = rollback::run(true, request.dry_run);
     state.install_running.store(false, Ordering::SeqCst);
 
     let report = match report {
         Ok(report) => report,
         Err(error) => {
+            emit_progress(&state, "rollback", 100, "rollback progress: failed");
             emit_log(&state, format!("rollback failed: {error}"));
             return Err(ApiError::bad_request(error).with_hint(
                 "운영 웹루트가 비어 있고, 설치 직후 패키지 기준 정보가 남아 있는지 확인하세요.",
             ));
         }
     };
+    emit_progress(
+        &state,
+        "rollback",
+        100,
+        "rollback progress: rollback completed",
+    );
     emit_log(&state, "package rollback completed");
 
     Ok(Json(rollback_to_api(report)))
@@ -870,7 +959,11 @@ fn failed_doctor_details(report: doctor::DoctorReport) -> Vec<String> {
         .collect()
 }
 
-fn plan_to_api(install_plan: plan::InstallPlan) -> PlanApiReport {
+fn plan_to_api(
+    install_plan: plan::InstallPlan,
+    database_version: String,
+    app_package: String,
+) -> PlanApiReport {
     let text = crate::format_plan(&install_plan);
 
     PlanApiReport {
@@ -880,6 +973,8 @@ fn plan_to_api(install_plan: plan::InstallPlan) -> PlanApiReport {
         web_server: install_plan.web_server,
         php_version: install_plan.php_version,
         database: install_plan.database_engine,
+        database_version,
+        app_package,
         site_user: install_plan.site_user,
         web_root: install_plan.web_root,
         packages: install_plan
@@ -932,13 +1027,19 @@ fn plan_to_api(install_plan: plan::InstallPlan) -> PlanApiReport {
     }
 }
 
-fn install_to_api(report: install::InstallReport) -> InstallApiReport {
+fn install_to_api(
+    report: install::InstallReport,
+    database_version: String,
+    app_package: String,
+) -> InstallApiReport {
     InstallApiReport {
         domain: report.domain,
         deployment_mode: report.deployment_mode,
         web_server: report.web_server,
         php_version: report.php_version,
         database: report.database_engine,
+        database_version,
+        app_package,
         site_user: report.site_user,
         web_root: report.web_root,
         phase: report.phase,
@@ -948,6 +1049,20 @@ fn install_to_api(report: install::InstallReport) -> InstallApiReport {
         package_checks: install_checks_to_api(report.package_checks),
         service_checks: install_checks_to_api(report.service_checks),
         port_checks: install_checks_to_api(report.port_checks),
+    }
+}
+
+fn normalize_database_version(value: &str) -> String {
+    match value {
+        "mysql-8.0" | "mysql-8.4" => value.to_string(),
+        _ => "apt-default".to_string(),
+    }
+}
+
+fn normalize_app_package(value: &str) -> String {
+    match value {
+        "wordpress" | "laravel" => value.to_string(),
+        _ => "gnuboard7".to_string(),
     }
 }
 
@@ -1391,6 +1506,8 @@ fn emit_log(state: &WebState, message: impl Into<String>) {
         message: message.into(),
         stage: None,
         status: None,
+        operation: None,
+        percent: None,
     });
 }
 
@@ -1405,6 +1522,24 @@ fn emit_stage(
         message: message.into(),
         stage: Some(stage),
         status: Some(status),
+        operation: None,
+        percent: None,
+    });
+}
+
+fn emit_progress(
+    state: &WebState,
+    operation: &'static str,
+    percent: u8,
+    message: impl Into<String>,
+) {
+    let _ = state.events.send(WebEvent {
+        event_type: "progress",
+        message: message.into(),
+        stage: None,
+        status: None,
+        operation: Some(operation),
+        percent: Some(percent.min(100)),
     });
 }
 
@@ -1461,6 +1596,8 @@ mod tests {
             web_server: "nginx".to_string(),
             php_version: "8.3".to_string(),
             database: "mysql".to_string(),
+            database_version: "apt-default".to_string(),
+            app_package: "gnuboard7".to_string(),
             site_user: "g7".to_string(),
             web_root_mode: "public-html".to_string(),
             web_root: Some("  ".to_string()),
@@ -1814,34 +1951,40 @@ mod tests {
 
     #[test]
     fn install_and_rollback_reports_map_to_api_shapes() {
-        let install_api = install_to_api(install::InstallReport {
-            domain: "g7-test.local".to_string(),
-            deployment_mode: "local-test".to_string(),
-            web_server: "nginx".to_string(),
-            php_version: "8.3".to_string(),
-            database_engine: "mysql".to_string(),
-            site_user: "g7".to_string(),
-            web_root_mode: "public-html".to_string(),
-            web_root: "/home/g7/public_html".to_string(),
-            www_mode: "redirect-to-root".to_string(),
-            redis_mode: "enable".to_string(),
-            mail_mode: "none".to_string(),
-            security_profile: "standard".to_string(),
-            ssh_policy: "audit-only".to_string(),
-            phase: "packages-installed".to_string(),
-            state_path: PathBuf::from("/var/lib/g7-installer/state.json"),
-            owned_files_path: PathBuf::from("/var/lib/g7-installer/owned-files.json"),
-            owned_files: vec!["/etc/g7-installer/config.toml".to_string()],
-            completed_steps: vec!["preflight-passed".to_string()],
-            package_checks: vec![install::InstallCheck {
-                name: "nginx".to_string(),
-                status: "pass".to_string(),
-                message: "installed".to_string(),
-            }],
-            service_checks: Vec::new(),
-            port_checks: Vec::new(),
-        });
+        let install_api = install_to_api(
+            install::InstallReport {
+                domain: "g7-test.local".to_string(),
+                deployment_mode: "local-test".to_string(),
+                web_server: "nginx".to_string(),
+                php_version: "8.3".to_string(),
+                database_engine: "mysql".to_string(),
+                site_user: "g7".to_string(),
+                web_root_mode: "public-html".to_string(),
+                web_root: "/home/g7/public_html".to_string(),
+                www_mode: "redirect-to-root".to_string(),
+                redis_mode: "enable".to_string(),
+                mail_mode: "none".to_string(),
+                security_profile: "standard".to_string(),
+                ssh_policy: "audit-only".to_string(),
+                phase: "packages-installed".to_string(),
+                state_path: PathBuf::from("/var/lib/g7-installer/state.json"),
+                owned_files_path: PathBuf::from("/var/lib/g7-installer/owned-files.json"),
+                owned_files: vec!["/etc/g7-installer/config.toml".to_string()],
+                completed_steps: vec!["preflight-passed".to_string()],
+                package_checks: vec![install::InstallCheck {
+                    name: "nginx".to_string(),
+                    status: "pass".to_string(),
+                    message: "installed".to_string(),
+                }],
+                service_checks: Vec::new(),
+                port_checks: Vec::new(),
+            },
+            "apt-default".to_string(),
+            "gnuboard7".to_string(),
+        );
         assert_eq!(install_api.phase, "packages-installed");
+        assert_eq!(install_api.database_version, "apt-default");
+        assert_eq!(install_api.app_package, "gnuboard7");
         assert_eq!(install_api.package_checks[0].name, "nginx");
         assert_eq!(install_api.state_path, "/var/lib/g7-installer/state.json");
 
@@ -1915,6 +2058,10 @@ mod tests {
                 "application/javascript; charset=utf-8"
             ))
         );
+        assert_eq!(
+            js.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("no-store, no-cache, max-age=0"))
+        );
 
         let css = app_css(axum::extract::State(state), peer())
             .await
@@ -1924,6 +2071,10 @@ mod tests {
         assert_eq!(
             css.headers().get(header::CONTENT_TYPE),
             Some(&HeaderValue::from_static("text/css; charset=utf-8"))
+        );
+        assert_eq!(
+            css.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("no-store, no-cache, max-age=0"))
         );
         Ok(())
     }
@@ -1977,6 +2128,8 @@ mod tests {
         assert_eq!(payload["domain"], "g7-test.local");
         assert_eq!(payload["deployment_mode"], "local-test");
         assert_eq!(payload["web_server"], "nginx");
+        assert_eq!(payload["database_version"], "apt-default");
+        assert_eq!(payload["app_package"], "gnuboard7");
         assert!(payload["packages"].as_array().expect("packages").len() > 5);
         Ok(())
     }
@@ -2070,9 +2223,15 @@ mod tests {
             "example.com".to_string(),
             options_from_request(setup_request("example.com")),
         )?;
-        let api = super::plan_to_api(install_plan);
+        let api = super::plan_to_api(
+            install_plan,
+            "apt-default".to_string(),
+            "gnuboard7".to_string(),
+        );
 
         assert_eq!(api.domain, "example.com");
+        assert_eq!(api.database_version, "apt-default");
+        assert_eq!(api.app_package, "gnuboard7");
         assert_eq!(api.web_root, "/home/g7/public_html");
         assert!(api.text.contains("G7 Installer Plan"));
         assert!(
