@@ -2,11 +2,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-COVERAGE_FLOOR="${G7_COVERAGE_FLOOR:-60}"
+COVERAGE_FLOOR="${G7_COVERAGE_FLOOR:-75}"
 
 cd "${ROOT_DIR}"
 
 bash -n scripts/*.sh
+scripts/web-static-smoke.sh
 cargo fmt --check
 cargo test
 cargo clippy --all-targets -- -D warnings

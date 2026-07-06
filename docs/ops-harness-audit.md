@@ -5,8 +5,9 @@ Date: 2026-07-06
 ## Current Status
 
 - Local regression gate exists: `scripts/quality-gate.sh`.
-- Local gate covers `cargo fmt --check`, `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo doc --no-deps`, `cargo llvm-cov --fail-under-lines 60`, and web CSS build.
-- Current measured line coverage is 65.19%.
+- Local gate covers shell syntax, web static smoke, `cargo fmt --check`, `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo doc --no-deps`, `cargo llvm-cov --fail-under-lines 75`, and web CSS build.
+- Current measured line coverage is 77.46%.
+- Web controller line coverage is 76.63%.
 - Release `v0.2.7` has both Linux musl assets and `checksums.txt`.
 - `scripts/ops-harness.sh` now verifies a disposable Ubuntu 24.04 server through install, report validation, rollback, removed-package checks, and reinstall.
 
@@ -17,13 +18,16 @@ Date: 2026-07-06
 - Previous workflow push was rejected because the current GitHub token lacks `workflow` scope.
 - The old `scripts/g7-test-smoke.sh` treated `g7inst doctor` exit status as install permission. `doctor` reports `install_allowed` in stdout, so the smoke check could produce a false result.
 - Package rollback verification used `ssh` inside a file-fed loop. Without `ssh -n`, the first SSH call could consume the remaining package list from stdin.
-- Web controller coverage is weak compared with core command coverage.
 - No browser-driven web UI E2E harness exists yet.
+- CLI print-path coverage is still weaker than core command coverage.
 
 ## Improvements Applied
 
 - Added `scripts/ops-harness.sh`.
 - Reworked `scripts/g7-test-smoke.sh` as a wrapper over the ops harness.
+- Added web controller API/session/error-path regression coverage.
+- Added `scripts/web-static-smoke.sh` to catch wizard, theme, progress, reset, rollback, and localized error UI regressions.
+- Raised the default local line-coverage gate from 60% to 75%.
 - Remote harness commands now run with `ssh -n` so package verification loops inspect every package.
 - Shell compound checks that require sudo now run through `sudo sh -c` instead of relying on partial sudo command parsing.
 - Ops harness checks:

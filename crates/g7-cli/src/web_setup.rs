@@ -1411,16 +1411,28 @@ fn emit_stage(
 #[cfg(test)]
 mod tests {
     use super::{
-        AUTH_LOCKOUT, DoctorCheckStatus, SESSION_TTL, Session, WebState, browser_addr_for,
-        ensure_remote_binding_is_explicit, failed_doctor_details, lock_client_ip,
-        normalize_login_username, parse_bind, require_allowed_client_ip, require_login_allowed,
-        secure_eq, secure_token,
+        AUTH_LOCKOUT, CSRF_HEADER, DoctorCheckStatus, REPORT_PATH, SESSION_COOKIE, SESSION_TTL,
+        Session, SetupRequest, WebState, api_install_prepare, api_plan, api_report, api_reset,
+        api_rollback, api_status, app_css, app_js, bootstrap, browser_addr_for, create_session,
+        doctor_status_label, doctor_to_api, ensure_remote_binding_is_explicit,
+        failed_doctor_details, index, install_checks_to_api, install_to_api, lock_client_ip,
+        mark_session_authenticated, normalize_login_username, options_from_request, parse_bind,
+        remove_session, require_allowed_client_ip, require_authenticated_session, require_csrf,
+        require_login_allowed, require_loopback_login, require_session, require_session_id,
+        rollback_to_api, secure_eq, secure_token, session_cookie,
     };
-    use axum::http::StatusCode;
+    use axum::Json;
+    use axum::body::to_bytes;
+    use axum::extract::ConnectInfo;
+    use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+    use axum::response::IntoResponse;
     use g7_core::commands::doctor::{DoctorCheck, DoctorReport};
+    use g7_core::commands::{install, plan, reset, rollback};
     use std::collections::HashMap;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::path::PathBuf;
     use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering;
     use std::sync::{Arc, Mutex};
     use std::time::Instant;
     use tokio::sync::broadcast;
@@ -1436,6 +1448,67 @@ mod tests {
             allowed_client_ip: Arc::new(Mutex::new(None)),
             loopback_bind: true,
         }
+    }
+
+    fn peer() -> ConnectInfo<SocketAddr> {
+        ConnectInfo(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 49152))
+    }
+
+    fn setup_request(domain: &str) -> SetupRequest {
+        SetupRequest {
+            domain: domain.to_string(),
+            local_test: true,
+            web_server: "nginx".to_string(),
+            php_version: "8.3".to_string(),
+            database: "mysql".to_string(),
+            site_user: "g7".to_string(),
+            web_root_mode: "public-html".to_string(),
+            web_root: Some("  ".to_string()),
+            www_mode: "redirect-to-root".to_string(),
+            redis: "enable".to_string(),
+            mail_mode: "none".to_string(),
+            smtp_host: Some("  ".to_string()),
+            smtp_port: 587,
+            smtp_from: Some("  ".to_string()),
+            smtp_encryption: "starttls".to_string(),
+            security_profile: "standard".to_string(),
+            ssh_policy: "audit-only".to_string(),
+            rollback: true,
+            preserve_config: true,
+            dns_check: false,
+        }
+    }
+
+    fn authenticated_headers(
+        state: &WebState,
+    ) -> std::result::Result<HeaderMap, Box<dyn std::error::Error>> {
+        let session_id = create_session(state, IpAddr::V4(Ipv4Addr::LOCALHOST))
+            .expect("session should be created");
+        mark_session_authenticated(state, &session_id, "root")
+            .expect("session should authenticate");
+        let csrf = state
+            .sessions
+            .lock()
+            .expect("session lock")
+            .get(&session_id)
+            .expect("session exists")
+            .csrf_token
+            .clone();
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&session_cookie(&session_id))?,
+        );
+        headers.insert(CSRF_HEADER, HeaderValue::from_str(&csrf)?);
+        Ok(headers)
+    }
+
+    async fn response_json(response: axum::response::Response) -> serde_json::Value {
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body bytes");
+        serde_json::from_slice(&bytes).expect("json response")
     }
 
     #[test]
@@ -1570,5 +1643,454 @@ mod tests {
                 "request_client_ip: 10.0.0.5"
             ]
         );
+    }
+
+    #[test]
+    fn session_cookie_uses_http_only_same_site() {
+        let cookie = session_cookie("abc123");
+
+        assert!(cookie.contains("g7inst_session=abc123"));
+        assert!(cookie.contains("HttpOnly"));
+        assert!(cookie.contains("SameSite=Strict"));
+        assert!(cookie.contains("Max-Age=1800"));
+    }
+
+    #[test]
+    fn session_lifecycle_authentication_and_csrf()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let state = test_state();
+        let session_id = create_session(&state, IpAddr::V4(Ipv4Addr::LOCALHOST))
+            .expect("session should be created");
+        let cookie = session_cookie(&session_id);
+        let csrf = state
+            .sessions
+            .lock()
+            .expect("session lock")
+            .get(&session_id)
+            .expect("session exists")
+            .csrf_token
+            .clone();
+
+        let mut headers = HeaderMap::new();
+        headers.insert(header::COOKIE, HeaderValue::from_str(&cookie)?);
+        headers.insert(CSRF_HEADER, HeaderValue::from_str(&csrf)?);
+
+        let session = require_session(&state, &headers, IpAddr::V4(Ipv4Addr::LOCALHOST))
+            .expect("session should be valid");
+        require_csrf(&headers, &session).expect("csrf should match");
+        assert_eq!(
+            require_authenticated_session(&state, &headers, IpAddr::V4(Ipv4Addr::LOCALHOST))
+                .expect_err("session is not authenticated")
+                .status,
+            StatusCode::UNAUTHORIZED
+        );
+
+        mark_session_authenticated(&state, &session_id, "root")
+            .expect("session should authenticate");
+        let session =
+            require_authenticated_session(&state, &headers, IpAddr::V4(Ipv4Addr::LOCALHOST))
+                .expect("authenticated session should pass");
+        assert_eq!(session.username.as_deref(), Some("root"));
+
+        remove_session(&state, &session_id).expect("session should be removed");
+        assert_eq!(
+            require_session(&state, &headers, IpAddr::V4(Ipv4Addr::LOCALHOST))
+                .expect_err("removed session should be invalid")
+                .status,
+            StatusCode::UNAUTHORIZED
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn session_header_parser_accepts_multiple_cookies()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_static("theme=light; g7inst_session=session-1; other=yes"),
+        );
+
+        assert_eq!(
+            require_session_id(&headers).expect("session cookie should parse"),
+            "session-1"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn csrf_rejects_missing_or_invalid_token() {
+        let session = Session {
+            csrf_token: "csrf".to_string(),
+            authenticated: true,
+            username: Some("root".to_string()),
+            client_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            expires_at: Instant::now() + SESSION_TTL,
+            failed_login_attempts: 0,
+            login_blocked_until: None,
+        };
+        let headers = HeaderMap::new();
+        assert_eq!(
+            require_csrf(&headers, &session)
+                .expect_err("missing csrf")
+                .status,
+            StatusCode::FORBIDDEN
+        );
+
+        let mut headers = HeaderMap::new();
+        headers.insert(CSRF_HEADER, HeaderValue::from_static("wrong"));
+        assert_eq!(
+            require_csrf(&headers, &session)
+                .expect_err("invalid csrf")
+                .status,
+            StatusCode::FORBIDDEN
+        );
+    }
+
+    #[test]
+    fn remote_bind_blocks_password_login() {
+        let mut state = test_state();
+        state.loopback_bind = false;
+
+        assert_eq!(
+            require_loopback_login(&state)
+                .expect_err("remote bind should block password login")
+                .status,
+            StatusCode::FORBIDDEN
+        );
+    }
+
+    #[test]
+    fn setup_request_trims_empty_optional_fields() {
+        let options = options_from_request(setup_request("g7-test.local"));
+
+        assert!(options.local_test);
+        assert_eq!(options.custom_web_root, None);
+        assert_eq!(options.smtp_host, None);
+        assert_eq!(options.smtp_from, None);
+        assert_eq!(options.web_server, "nginx");
+        assert_eq!(options.database_engine, "mysql");
+    }
+
+    #[test]
+    fn doctor_conversion_preserves_status_labels() {
+        let report = doctor_to_api(DoctorReport {
+            install_allowed: false,
+            checks: vec![
+                DoctorCheck {
+                    name: "pass",
+                    status: DoctorCheckStatus::Pass,
+                    message: "ok".to_string(),
+                },
+                DoctorCheck {
+                    name: "warn",
+                    status: DoctorCheckStatus::Warn,
+                    message: "watch".to_string(),
+                },
+                DoctorCheck {
+                    name: "fail",
+                    status: DoctorCheckStatus::Fail,
+                    message: "blocked".to_string(),
+                },
+                DoctorCheck {
+                    name: "pending",
+                    status: DoctorCheckStatus::Pending,
+                    message: "unknown".to_string(),
+                },
+            ],
+        });
+
+        assert!(!report.install_allowed);
+        assert_eq!(
+            report
+                .checks
+                .into_iter()
+                .map(|check| check.status)
+                .collect::<Vec<_>>(),
+            vec!["pass", "warn", "fail", "pending"]
+        );
+        assert_eq!(doctor_status_label(DoctorCheckStatus::Pending), "pending");
+    }
+
+    #[test]
+    fn install_and_rollback_reports_map_to_api_shapes() {
+        let install_api = install_to_api(install::InstallReport {
+            domain: "g7-test.local".to_string(),
+            deployment_mode: "local-test".to_string(),
+            web_server: "nginx".to_string(),
+            php_version: "8.3".to_string(),
+            database_engine: "mysql".to_string(),
+            site_user: "g7".to_string(),
+            web_root_mode: "public-html".to_string(),
+            web_root: "/home/g7/public_html".to_string(),
+            www_mode: "redirect-to-root".to_string(),
+            redis_mode: "enable".to_string(),
+            mail_mode: "none".to_string(),
+            security_profile: "standard".to_string(),
+            ssh_policy: "audit-only".to_string(),
+            phase: "packages-installed".to_string(),
+            state_path: PathBuf::from("/var/lib/g7-installer/state.json"),
+            owned_files_path: PathBuf::from("/var/lib/g7-installer/owned-files.json"),
+            owned_files: vec!["/etc/g7-installer/config.toml".to_string()],
+            completed_steps: vec!["preflight-passed".to_string()],
+            package_checks: vec![install::InstallCheck {
+                name: "nginx".to_string(),
+                status: "pass".to_string(),
+                message: "installed".to_string(),
+            }],
+            service_checks: Vec::new(),
+            port_checks: Vec::new(),
+        });
+        assert_eq!(install_api.phase, "packages-installed");
+        assert_eq!(install_api.package_checks[0].name, "nginx");
+        assert_eq!(install_api.state_path, "/var/lib/g7-installer/state.json");
+
+        let checks = install_checks_to_api(vec![install::InstallCheck {
+            name: "80".to_string(),
+            status: "pass".to_string(),
+            message: "free".to_string(),
+        }]);
+        assert_eq!(checks[0].message, "free");
+
+        let rollback_api = rollback_to_api(rollback::RollbackReport {
+            dry_run: false,
+            phase: "packages-installed".to_string(),
+            package_actions: vec![rollback::RollbackAction {
+                name: "nginx".to_string(),
+                status: "removed".to_string(),
+                message: "package removed".to_string(),
+            }],
+            service_actions: vec![rollback::RollbackAction {
+                name: "nginx".to_string(),
+                status: "disabled".to_string(),
+                message: "service disabled".to_string(),
+            }],
+            metadata_reset: reset::ResetReport {
+                dry_run: false,
+                removed: vec!["/etc/g7-installer".to_string()],
+                missing: vec!["/tmp/g7".to_string()],
+            },
+        });
+        assert_eq!(rollback_api.package_actions[0].status, "removed");
+        assert_eq!(rollback_api.metadata_reset.missing, vec!["/tmp/g7"]);
+    }
+
+    #[tokio::test]
+    async fn index_with_token_creates_session_cookie()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let state = test_state();
+        let response = index(
+            axum::extract::State(state.clone()),
+            peer(),
+            axum::extract::Query(HashMap::from([("token".to_string(), "token".to_string())])),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let cookie = response
+            .headers()
+            .get(header::SET_COOKIE)
+            .expect("set-cookie")
+            .to_str()?;
+        assert!(cookie.contains(SESSION_COOKIE));
+        assert_eq!(state.sessions.lock().expect("session lock").len(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn static_assets_require_first_token_ip_lock()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let state = test_state();
+        lock_client_ip(&state, IpAddr::V4(Ipv4Addr::LOCALHOST)).expect("client IP should lock");
+
+        let js = app_js(axum::extract::State(state.clone()), peer())
+            .await
+            .expect("js should be served")
+            .into_response();
+        assert_eq!(js.status(), StatusCode::OK);
+        assert_eq!(
+            js.headers().get(header::CONTENT_TYPE),
+            Some(&HeaderValue::from_static(
+                "application/javascript; charset=utf-8"
+            ))
+        );
+
+        let css = app_css(axum::extract::State(state), peer())
+            .await
+            .expect("css should be served")
+            .into_response();
+        assert_eq!(css.status(), StatusCode::OK);
+        assert_eq!(
+            css.headers().get(header::CONTENT_TYPE),
+            Some(&HeaderValue::from_static("text/css; charset=utf-8"))
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn bootstrap_reports_token_accepted_and_authenticated_states()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let state = test_state();
+        let session_id = create_session(&state, IpAddr::V4(Ipv4Addr::LOCALHOST))
+            .expect("session should be created");
+        let cookie = session_cookie(&session_id);
+        let mut headers = HeaderMap::new();
+        headers.insert(header::COOKIE, HeaderValue::from_str(&cookie)?);
+
+        let response = bootstrap(axum::extract::State(state.clone()), peer(), headers.clone())
+            .await
+            .expect("bootstrap should respond")
+            .into_response();
+        let payload = response_json(response).await;
+        assert_eq!(payload["auth"]["status"], "token-accepted");
+        assert_eq!(payload["auth"]["authenticated"], false);
+
+        mark_session_authenticated(&state, &session_id, "root")
+            .expect("session should authenticate");
+        let response = bootstrap(axum::extract::State(state), peer(), headers)
+            .await
+            .expect("bootstrap should respond")
+            .into_response();
+        let payload = response_json(response).await;
+        assert_eq!(payload["auth"]["status"], "authenticated");
+        assert_eq!(payload["auth"]["username"], "root");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn plan_api_requires_authentication_and_returns_plan()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let state = test_state();
+        let headers = authenticated_headers(&state)?;
+        let response = api_plan(
+            axum::extract::State(state),
+            peer(),
+            headers,
+            Json(setup_request("g7-test.local")),
+        )
+        .await
+        .expect("plan should succeed")
+        .into_response();
+        let payload = response_json(response).await;
+
+        assert_eq!(payload["domain"], "g7-test.local");
+        assert_eq!(payload["deployment_mode"], "local-test");
+        assert_eq!(payload["web_server"], "nginx");
+        assert!(payload["packages"].as_array().expect("packages").len() > 5);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn status_report_reset_and_rollback_error_paths_are_json()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let state = test_state();
+        let headers = authenticated_headers(&state)?;
+
+        let status_response =
+            api_status(axum::extract::State(state.clone()), peer(), headers.clone())
+                .await
+                .expect("status should respond")
+                .into_response();
+        let status_payload = response_json(status_response).await;
+        assert_eq!(status_payload["installed"], false);
+
+        let report_response =
+            api_report(axum::extract::State(state.clone()), peer(), headers.clone())
+                .await
+                .expect("report should respond")
+                .into_response();
+        let report_payload = response_json(report_response).await;
+        assert_eq!(report_payload["exists"], false);
+        assert_eq!(report_payload["path"], REPORT_PATH);
+
+        let reset_error = match api_reset(
+            axum::extract::State(state.clone()),
+            peer(),
+            headers.clone(),
+            Json(super::ResetRequest { dry_run: true }),
+        )
+        .await
+        {
+            Ok(_) => panic!("non-root reset should fail in unit test"),
+            Err(error) => error,
+        };
+        assert_eq!(reset_error.status, StatusCode::BAD_REQUEST);
+        assert!(reset_error.hint.expect("reset hint").contains("root"));
+
+        let rollback_error = match api_rollback(
+            axum::extract::State(state),
+            peer(),
+            headers,
+            Json(super::RollbackRequest { dry_run: true }),
+        )
+        .await
+        {
+            Ok(_) => panic!("non-root rollback should fail in unit test"),
+            Err(error) => error,
+        };
+        assert_eq!(rollback_error.status, StatusCode::BAD_REQUEST);
+        assert!(
+            rollback_error
+                .hint
+                .expect("rollback hint")
+                .contains("웹루트")
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn install_prepare_rejects_concurrent_actions()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let state = test_state();
+        state.install_running.store(true, Ordering::SeqCst);
+        let headers = authenticated_headers(&state)?;
+
+        let error = match api_install_prepare(
+            axum::extract::State(state),
+            peer(),
+            headers,
+            Json(setup_request("g7-test.local")),
+        )
+        .await
+        {
+            Ok(_) => panic!("busy install should be rejected"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert_eq!(error.message, "install is already running");
+        Ok(())
+    }
+
+    #[test]
+    fn public_plan_api_mapping_exposes_user_visible_fields()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let install_plan = plan::build_with_options(
+            "example.com".to_string(),
+            options_from_request(setup_request("example.com")),
+        )?;
+        let api = super::plan_to_api(install_plan);
+
+        assert_eq!(api.domain, "example.com");
+        assert_eq!(api.web_root, "/home/g7/public_html");
+        assert!(api.text.contains("G7 Installer Plan"));
+        assert!(
+            api.files
+                .iter()
+                .any(|file| file.path == "/home/g7/public_html")
+        );
+        assert!(api.ports.iter().any(|port| port.port == 80));
+        assert!(
+            api.security_checks
+                .iter()
+                .any(|check| check.name == "redis-local-only")
+        );
+        assert!(
+            api.stop_conditions
+                .iter()
+                .any(|condition| condition.contains("Apache is running"))
+        );
+        Ok(())
     }
 }

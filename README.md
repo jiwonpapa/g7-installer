@@ -501,11 +501,12 @@ scripts/ops-harness.sh
 
 ```bash
 bash -n scripts/*.sh
+scripts/web-static-smoke.sh
 cargo fmt --check
 cargo test
 cargo clippy --all-targets -- -D warnings
 cargo doc --no-deps
-cargo llvm-cov --workspace --all-targets --summary-only --fail-under-lines 60
+cargo llvm-cov --workspace --all-targets --summary-only --fail-under-lines 75
 (cd web && bun install --frozen-lockfile && bun run build)
 ```
 
@@ -515,4 +516,4 @@ cargo llvm-cov --workspace --all-targets --summary-only --fail-under-lines 60
 scripts/quality-gate.sh
 ```
 
-현재 커버리지 하한은 line coverage `60%`입니다. GitHub Actions 강제 게이트는 workflow 권한이 있는 토큰으로 추가해야 합니다.
+현재 커버리지 하한은 line coverage `75%`입니다. GitHub Actions 강제 게이트는 workflow 권한이 있는 토큰으로 추가해야 합니다.
