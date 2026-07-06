@@ -417,6 +417,13 @@
             </div>
             <div id="install-status" class="mt-5 hidden"></div>
             <progress id="install-progress" class="progress progress-primary mt-5 w-full" value="0" max="100"></progress>
+            <section class="mt-5">
+              <h3 class="text-lg font-semibold">패키지 진행 상황</h3>
+              <p class="mt-1 text-sm text-base-content/60">설치 계획에서 확인한 apt 패키지를 하나씩 표시합니다.</p>
+              <div id="package-progress-list" class="package-progress-list mt-4">
+                <div class="empty-state">설치 사양 확정 후 패키지 목록이 표시됩니다.</div>
+              </div>
+            </section>
             <div class="mt-5 space-y-3" id="install-stages">
               <div class="stage-row" data-stage="preflight"><span>서버 사전 점검</span><strong>대기</strong></div>
               <div class="stage-row" data-stage="packages"><span>패키지 설치</span><strong>대기</strong></div>
@@ -428,7 +435,7 @@
             </div>
             <div class="wizard-actions">
               <button class="btn btn-ghost" type="button" data-next="plan">이전</button>
-              <button class="btn btn-primary" type="button" data-next="report">결과 보기</button>
+              <button id="install-result-button" class="btn btn-primary" type="button" data-next="report" disabled>설치 완료 후 결과 보기</button>
             </div>
           </section>
 

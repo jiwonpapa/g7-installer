@@ -6,7 +6,12 @@ const state = {
   authenticated: false,
   doctorPassed: false,
   planReady: false,
+  reportReady: false,
+  installRunning: false,
+  installCompleted: false,
   currentOperation: null,
+  planPackages: [],
+  packageTicker: null,
   theme: localStorage.getItem("g7inst-theme") || "light",
 };
 
@@ -36,8 +41,11 @@ const nodes = {
   reportStatus: document.querySelector("#report-status"),
   installProgress: document.querySelector("#install-progress"),
   reportProgress: document.querySelector("#report-progress"),
+  packageProgressList: document.querySelector("#package-progress-list"),
   checkNextButton: document.querySelector("#check-next-button"),
   confirmSpecButton: document.querySelector("#confirm-spec-button"),
+  installButton: document.querySelector("#install-button"),
+  installResultButton: document.querySelector("#install-result-button"),
   installConfirmDialog: document.querySelector("#install-confirm-dialog"),
   installConfirmSummary: document.querySelector("#install-confirm-summary"),
   installConfirmStart: document.querySelector("#install-confirm-start"),
@@ -133,6 +141,10 @@ const templates = {
 };
 
 async function withBusy(button, busyText, task) {
+  if (!button) {
+    return task();
+  }
+
   const originalText = button.textContent;
   button.disabled = true;
   if (busyText) {
@@ -253,6 +265,35 @@ function setPlanReady(ready) {
   }
 }
 
+function setReportReady(ready) {
+  state.reportReady = ready;
+  if (nodes.installResultButton) {
+    nodes.installResultButton.disabled = !ready;
+    nodes.installResultButton.textContent = ready ? "결과 보기" : "설치 완료 후 결과 보기";
+  }
+}
+
+function refreshInstallButtonState(label = null) {
+  if (!nodes.installButton) {
+    return;
+  }
+
+  if (state.installRunning) {
+    nodes.installButton.disabled = true;
+    nodes.installButton.textContent = "설치 중";
+    return;
+  }
+
+  if (state.installCompleted) {
+    nodes.installButton.disabled = true;
+    nodes.installButton.textContent = "설치 완료";
+    return;
+  }
+
+  nodes.installButton.disabled = false;
+  nodes.installButton.textContent = label || "패키지 설치 시작";
+}
+
 function setDoctorPassed(passed) {
   state.doctorPassed = passed;
   if (nodes.checkNextButton) {
@@ -303,6 +344,16 @@ function showStep(nextStep, options = {}) {
       "계획 생성을 완료한 뒤 이 사양으로 진행 버튼을 누르세요.",
     );
     step = "plan";
+  }
+
+  if (step === "report" && !state.reportReady) {
+    setAlert(
+      nodes.installStatus,
+      "warning",
+      "설치 결과가 아직 없습니다",
+      "패키지 설치 시작을 완료해야 결과 리포트를 볼 수 있습니다.",
+    );
+    step = "install";
   }
 
   const wasActiveStep = state.activeStep === step;
@@ -387,6 +438,11 @@ function applyTemplate(templateName) {
 
 function refreshFormState() {
   setPlanReady(false);
+  if (!state.installRunning && !state.installCompleted) {
+    setReportReady(false);
+    renderPackageProgress([]);
+    refreshInstallButtonState();
+  }
   const webRootIsCustom = nodes.webRootMode.value === "custom";
   nodes.customWebRoot.disabled = !webRootIsCustom;
   if (!webRootIsCustom) {
@@ -545,6 +601,121 @@ function markStage(stage, status) {
   row.dataset.status = status;
   row.querySelector("strong").textContent = status;
   updateInstallProgress();
+}
+
+function flattenPlanPackages(packages) {
+  if (!Array.isArray(packages)) {
+    return [];
+  }
+
+  return packages.flatMap((packageGroup) => String(packageGroup.name || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((name) => ({
+      name,
+      description: packageGroup.description || "설치 예정 패키지",
+    })));
+}
+
+function renderPackageProgress(packages) {
+  state.planPackages = packages;
+  stopPackageTicker();
+
+  if (!nodes.packageProgressList) {
+    return;
+  }
+
+  if (!packages.length) {
+    nodes.packageProgressList.innerHTML = `<div class="empty-state">설치 사양 확정 후 패키지 목록이 표시됩니다.</div>`;
+    return;
+  }
+
+  nodes.packageProgressList.innerHTML = packages.map((packageItem) => `
+    <div class="package-progress-row" data-package="${escapeHtml(packageItem.name)}">
+      <div>
+        <span>${escapeHtml(packageItem.name)}</span>
+        <p>${escapeHtml(packageItem.description)}</p>
+      </div>
+      <div class="package-progress-meter">
+        <progress class="progress progress-primary w-full" value="0" max="100"></progress>
+        <strong>대기 0%</strong>
+      </div>
+    </div>
+  `).join("");
+}
+
+function updatePackageProgress(name, status, percent, message = null) {
+  const row = document.querySelector(`[data-package="${CSS.escape(name)}"]`);
+  if (!row) {
+    return;
+  }
+
+  const progress = row.querySelector("progress");
+  const label = row.querySelector("strong");
+  const description = row.querySelector("p");
+  const value = Math.max(0, Math.min(100, Number(percent) || 0));
+  progress.value = value;
+  label.textContent = `${status} ${value}%`;
+  if (message) {
+    description.textContent = message;
+  }
+}
+
+function resetPackageProgressRows() {
+  state.planPackages.forEach((packageItem) => {
+    updatePackageProgress(packageItem.name, "대기", 0, packageItem.description);
+  });
+}
+
+function startPackageTicker() {
+  stopPackageTicker();
+  if (!state.planPackages.length) {
+    return;
+  }
+
+  let index = 0;
+  let percent = 0;
+  updatePackageProgress(state.planPackages[index].name, "설치 중", 5, "apt 작업을 준비하고 있습니다.");
+
+  state.packageTicker = window.setInterval(() => {
+    if (!state.installRunning) {
+      stopPackageTicker();
+      return;
+    }
+
+    const packageItem = state.planPackages[index];
+    percent = Math.min(95, percent + 10);
+    updatePackageProgress(packageItem.name, "설치 중", percent, "apt 설치 또는 검증을 진행 중입니다.");
+
+    if (percent >= 95 && index < state.planPackages.length - 1) {
+      index += 1;
+      percent = 5;
+      updatePackageProgress(state.planPackages[index].name, "설치 중", percent, "apt 작업을 준비하고 있습니다.");
+    }
+  }, 700);
+}
+
+function stopPackageTicker() {
+  if (state.packageTicker) {
+    window.clearInterval(state.packageTicker);
+    state.packageTicker = null;
+  }
+}
+
+function applyPackageChecks(checks) {
+  stopPackageTicker();
+  if (!Array.isArray(checks)) {
+    return;
+  }
+
+  checks.forEach((check) => {
+    updatePackageProgress(
+      check.name,
+      check.status === "pass" ? "설치됨" : "실패",
+      100,
+      check.message || "",
+    );
+  });
 }
 
 function updateInstallProgress() {
@@ -712,6 +883,10 @@ function renderInstallReport(report) {
 
   ["preflight", "packages", "config", "services", "ports", "http", "report"].forEach((stage) => markStage(stage, "성공"));
   setProgress(nodes.installProgress, 100);
+  applyPackageChecks(report.package_checks);
+  state.installCompleted = true;
+  setReportReady(true);
+  refreshInstallButtonState();
 }
 
 function renderSavedReport(payload) {
@@ -931,10 +1106,12 @@ function renderErrorReport(title, message) {
 }
 
 function resetInstallStages() {
+  stopPackageTicker();
   ["preflight", "packages", "config", "services", "ports", "http", "report"].forEach((stage) => {
     markStage(stage, "대기");
   });
   setProgress(nodes.installProgress, 0);
+  resetPackageProgressRows();
 }
 
 function installConfirmSummaryHtml(payload) {
@@ -976,7 +1153,11 @@ function confirmInstallStart() {
 function resetWizardForRetry() {
   setPlanReady(false);
   setDoctorPassed(false);
+  setReportReady(false);
+  state.installRunning = false;
+  state.installCompleted = false;
   state.currentOperation = null;
+  stopPackageTicker();
   hideAlert(nodes.planStatus);
   hideAlert(nodes.installStatus);
   hideAlert(nodes.reportStatus);
@@ -984,7 +1165,9 @@ function resetWizardForRetry() {
   resetInstallStages();
   nodes.doctorResults.innerHTML = `<div class="empty-state">아직 점검 전입니다. 점검 실행을 누르세요.</div>`;
   nodes.planOutput.textContent = "옵션을 확인한 뒤 계획 생성을 누르세요.";
+  renderPackageProgress([]);
   nodes.reportOutput.innerHTML = `<div class="empty-state">아직 리포트가 없습니다.</div>`;
+  refreshInstallButtonState();
   showStep("check");
 }
 
@@ -1115,19 +1298,29 @@ function bindEvents() {
           body: JSON.stringify(optionPayload()),
         });
         nodes.planOutput.textContent = renderPlanReport(report);
+        renderPackageProgress(flattenPlanPackages(report.packages));
         setAlert(nodes.planStatus, "success", "설치 계획 생성 완료", `${report.packages.length}개 패키지 묶음과 ${report.files.length}개 파일 변경 계획을 확인했습니다.`);
         setPlanReady(true);
+        state.installCompleted = false;
+        setReportReady(false);
+        refreshInstallButtonState();
         log(`설치 계획 준비 완료: packages=${report.packages.length}, files=${report.files.length}`);
       } catch (error) {
         nodes.planOutput.textContent = formatError(error);
         setAlert(nodes.planStatus, "error", "설치 계획 생성 실패", formatError(error));
         setPlanReady(false);
+        renderPackageProgress([]);
         log(formatError(error));
       }
     });
   });
 
   document.querySelector("#install-button").addEventListener("click", async (event) => {
+    const installButton = event.currentTarget;
+    if (state.installRunning || state.installCompleted) {
+      return;
+    }
+
     const confirmed = await confirmInstallStart();
     if (!confirmed) {
       log("패키지 설치 취소");
@@ -1135,32 +1328,43 @@ function bindEvents() {
     }
 
     state.currentOperation = "install";
+    state.installRunning = true;
+    state.installCompleted = false;
+    setReportReady(false);
+    refreshInstallButtonState();
     resetInstallStages();
     hideAlert(nodes.installStatus);
     hideReportProgress();
+    startPackageTicker();
 
-    await withBusy(event.currentTarget, "설치 중", async () => {
-      try {
-        markStage("preflight", "진행");
-        setAlert(nodes.installStatus, "info", "패키지 설치 진행 중", "apt 패키지 설치와 서비스/포트 검증을 진행합니다.");
-        log("패키지 설치 시작");
-        const report = await apiFetch("/api/install/prepare", {
-          method: "POST",
-          body: JSON.stringify(optionPayload()),
-        });
-        renderInstallReport(report);
-        setAlert(nodes.installStatus, "success", "패키지 설치 완료", "결과 리포트에서 패키지, 서비스, 포트 검증 결과를 확인하세요.");
-        showStep("report");
-        log(`패키지 설치 완료: ${report.phase}`);
-      } catch (error) {
-        markStage("packages", "실패");
-        renderErrorReport("패키지 설치 실패", `${formatError(error)}\n\n리포트와 로그를 확인하세요. 패키지 버전 문제면 PHP 8.3 조합으로 다시 시도하세요.`);
-        setAlert(nodes.installStatus, "error", "패키지 설치 실패", formatError(error));
-        log(formatError(error));
-      } finally {
-        state.currentOperation = null;
+    try {
+      markStage("preflight", "진행");
+      setAlert(nodes.installStatus, "info", "패키지 설치 진행 중", "apt 패키지 설치와 서비스/포트 검증을 진행합니다.");
+      log("패키지 설치 시작");
+      const report = await apiFetch("/api/install/prepare", {
+        method: "POST",
+        body: JSON.stringify(optionPayload()),
+      });
+      renderInstallReport(report);
+      setAlert(nodes.installStatus, "success", "패키지 설치 완료", "결과 리포트에서 패키지, 서비스, 포트 검증 결과를 확인하세요.");
+      showStep("report");
+      log(`패키지 설치 완료: ${report.phase}`);
+    } catch (error) {
+      markStage("packages", "실패");
+      stopPackageTicker();
+      renderErrorReport("패키지 설치 실패", `${formatError(error)}\n\n리포트와 로그를 확인하세요. 패키지 버전 문제면 PHP 8.3 조합으로 다시 시도하세요.`);
+      setAlert(nodes.installStatus, "error", "패키지 설치 실패", formatError(error));
+      setReportReady(true);
+      showStep("report");
+      log(formatError(error));
+    } finally {
+      state.currentOperation = null;
+      state.installRunning = false;
+      refreshInstallButtonState(state.installCompleted ? null : "다시 시도");
+      if (installButton && !state.installCompleted) {
+        installButton.disabled = false;
       }
-    });
+    }
   });
 
   document.querySelector("#report-button").addEventListener("click", async (event) => {

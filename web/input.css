@@ -191,6 +191,30 @@
     @apply mt-3 grid gap-2;
   }
 
+  .package-progress-list {
+    @apply grid gap-3;
+  }
+
+  .package-progress-row {
+    @apply grid gap-3 rounded-lg border border-base-300 bg-base-100 p-4 text-sm md:grid-cols-[minmax(0,1fr)_12rem];
+  }
+
+  .package-progress-row span {
+    @apply block break-words font-semibold;
+  }
+
+  .package-progress-row p {
+    @apply mt-1 text-xs leading-5 text-base-content/60;
+  }
+
+  .package-progress-meter {
+    @apply grid content-center gap-2;
+  }
+
+  .package-progress-meter strong {
+    @apply text-xs font-semibold text-base-content/60;
+  }
+
   .result-list {
     @apply grid gap-2;
   }
