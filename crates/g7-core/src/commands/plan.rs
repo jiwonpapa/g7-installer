@@ -14,7 +14,7 @@ use g7_system::php::{DEFAULT_FPM_VERSION, SUPPORTED_FPM_VERSIONS};
 
 pub const DEFAULT_PHP_VERSION: &str = DEFAULT_FPM_VERSION;
 pub const DEFAULT_WEB_SERVER: &str = "nginx";
-pub const DEFAULT_DATABASE_ENGINE: &str = "mariadb";
+pub const DEFAULT_DATABASE_ENGINE: &str = "mysql";
 pub const DEFAULT_SITE_USER: &str = "g7";
 pub const DEFAULT_WEB_ROOT_MODE: &str = "public-html";
 pub const DEFAULT_WWW_MODE: &str = "redirect-to-root";
@@ -26,7 +26,7 @@ pub const DEFAULT_SECURITY_PROFILE: &str = "standard";
 pub const DEFAULT_SSH_POLICY: &str = "audit-only";
 
 const SUPPORTED_WEB_SERVERS: [&str; 2] = ["nginx", "apache"];
-const SUPPORTED_DATABASE_ENGINES: [&str; 2] = ["mariadb", "mysql"];
+const SUPPORTED_DATABASE_ENGINES: [&str; 2] = ["mysql", "mariadb"];
 const SUPPORTED_WEB_ROOT_MODES: [&str; 4] = ["public-html", "www", "system", "custom"];
 const SUPPORTED_WWW_MODES: [&str; 4] = ["redirect-to-root", "redirect-to-www", "include", "none"];
 const SUPPORTED_REDIS_MODES: [&str; 2] = ["enable", "disable"];
@@ -1050,7 +1050,7 @@ mod tests {
         assert_eq!(plan.deployment_mode, "public");
         assert_eq!(plan.web_server, "nginx");
         assert_eq!(plan.php_version, "8.5");
-        assert_eq!(plan.database_engine, "mariadb");
+        assert_eq!(plan.database_engine, "mysql");
         assert_eq!(plan.site_user, "g7");
         assert_eq!(plan.web_root_mode, "public-html");
         assert_eq!(plan.web_root, "/home/g7/public_html");
@@ -1086,11 +1086,7 @@ mod tests {
                 .any(|file| file.path == "/home/g7/public_html")
         );
         assert!(plan.services.iter().any(|service| service.name == "nginx"));
-        assert!(
-            plan.services
-                .iter()
-                .any(|service| service.name == "mariadb")
-        );
+        assert!(plan.services.iter().any(|service| service.name == "mysql"));
         assert!(plan.ports.iter().any(|port| port.port == 443));
         assert!(plan.ports.iter().any(|port| port.port == 3306));
         assert!(plan.ports.iter().any(|port| port.port == 6379));

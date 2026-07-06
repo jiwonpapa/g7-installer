@@ -54,7 +54,7 @@ enum Command {
         /// PHP-FPM version. Default is 8.5. Use 8.3 for compatibility.
         #[arg(long, default_value_t = plan::DEFAULT_PHP_VERSION.to_string())]
         php_version: String,
-        /// Database engine: mariadb or mysql.
+        /// Database engine: mysql or mariadb.
         #[arg(long, default_value_t = plan::DEFAULT_DATABASE_ENGINE.to_string())]
         database: String,
         /// Linux account that owns the G7 site files.
@@ -117,7 +117,7 @@ enum Command {
         /// PHP-FPM version. Default is 8.5. Use 8.3 for compatibility.
         #[arg(long, default_value_t = plan::DEFAULT_PHP_VERSION.to_string())]
         php_version: String,
-        /// Database engine: mariadb or mysql.
+        /// Database engine: mysql or mariadb.
         #[arg(long, default_value_t = plan::DEFAULT_DATABASE_ENGINE.to_string())]
         database: String,
         /// Linux account that owns the G7 site files.
@@ -556,7 +556,7 @@ mod tests {
         assert!(output.contains("deployment_mode: public"));
         assert!(output.contains("web_server: nginx"));
         assert!(output.contains("php_version: 8.5"));
-        assert!(output.contains("database: mariadb"));
+        assert!(output.contains("database: mysql"));
         assert!(output.contains("redis: enable"));
         assert!(output.contains("rollback: true"));
         assert!(output.contains("- Apache is running."));

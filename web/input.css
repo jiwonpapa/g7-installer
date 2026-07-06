@@ -3,7 +3,11 @@
 @tailwind utilities;
 
 @layer base {
-  html {
+  html[data-theme="light"] {
+    color-scheme: light;
+  }
+
+  html[data-theme="dark"] {
     color-scheme: dark;
   }
 
@@ -11,141 +15,124 @@
     font-family:
       Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
-
-  input,
-  select {
-    @apply min-h-11 rounded border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none transition;
-  }
-
-  input:focus,
-  select:focus {
-    @apply border-cyan-500 ring-2 ring-cyan-500/20;
-  }
-
-  input:disabled,
-  select:disabled {
-    @apply cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600;
-  }
 }
 
 @layer components {
   .app-header {
-    @apply flex flex-col gap-4 border-b border-zinc-800 pb-5 sm:flex-row sm:items-end sm:justify-between;
+    @apply flex flex-col gap-4 border-b border-base-300 pb-5 sm:flex-row sm:items-end sm:justify-between;
   }
 
   .status-pill {
-    @apply inline-flex min-h-10 items-center gap-2 rounded border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-300;
+    @apply inline-flex min-h-10 items-center gap-2 rounded-lg border border-base-300 bg-base-100 px-3 text-sm;
   }
 
-  .progress-shell {
-    @apply rounded border border-zinc-800 bg-zinc-900/80 p-3;
-  }
-
-  .progress-list {
-    @apply grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6;
-  }
-
-  .progress-step {
-    @apply rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-center text-xs font-semibold uppercase text-zinc-500;
-  }
-
-  .progress-step.is-active {
-    @apply border-cyan-500 bg-cyan-950/50 text-cyan-100;
-  }
-
-  .notice-panel {
-    @apply rounded border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-100;
-  }
-
-  .side-nav {
-    @apply flex gap-2 overflow-auto lg:block lg:space-y-2 lg:overflow-visible;
-  }
-
-  .side-panel {
-    @apply space-y-4;
-  }
-
-  .panel,
-  .view-panel {
-    @apply rounded border border-zinc-800 bg-zinc-900/80 p-5 shadow-sm shadow-black/20;
+  .wizard-progress {
+    @apply rounded-lg border border-base-300 bg-base-100 px-3 py-4;
   }
 
   .view-panel {
-    @apply hidden;
+    @apply hidden rounded-lg border border-base-300 bg-base-100 p-5 shadow-sm;
   }
 
   .view-panel.is-visible {
     @apply block;
   }
 
-  .panel-heading {
+  .section-heading {
     @apply flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between;
   }
 
-  .panel-heading h2 {
-    @apply text-xl font-semibold text-white;
+  .section-heading h2 {
+    @apply text-2xl font-semibold;
   }
 
-  .panel-heading p {
-    @apply mt-1 text-sm text-zinc-400;
+  .section-heading p {
+    @apply mt-2 text-sm leading-6 text-base-content/60;
   }
 
-  .step-item {
-    @apply block min-w-40 rounded border border-zinc-800 bg-zinc-900 px-4 py-3 text-left text-sm font-medium text-zinc-300 transition hover:border-cyan-700 hover:text-white lg:w-full;
-  }
-
-  .step-item.is-active {
-    @apply border-cyan-500 bg-cyan-950/40 text-cyan-100;
+  .step-eyebrow {
+    @apply text-xs font-semibold text-primary;
   }
 
   .field {
     @apply grid gap-2;
   }
 
-  .field span {
-    @apply text-sm font-medium text-zinc-300;
+  .field-label {
+    @apply flex items-center gap-1 text-sm font-semibold;
   }
 
-  .btn-primary,
-  .btn-secondary,
-  .btn-danger {
-    @apply inline-flex min-h-10 items-center justify-center rounded px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50;
+  .help-circle {
+    @apply inline-flex h-5 w-5 items-center justify-center rounded-full border border-base-300 bg-base-200 text-xs font-bold text-base-content/70 transition hover:border-primary hover:bg-primary hover:text-primary-content;
   }
 
-  .btn-primary {
-    @apply bg-cyan-500 text-zinc-950 hover:bg-cyan-400;
+  .help-wrap {
+    @apply relative inline-flex items-center;
   }
 
-  .btn-secondary {
-    @apply border border-zinc-700 bg-zinc-900 text-zinc-200 hover:border-zinc-500 hover:bg-zinc-800;
+  .help-text {
+    @apply invisible absolute bottom-full left-1/2 z-20 mb-2 w-72 -translate-x-1/2 rounded-lg bg-neutral px-3 py-2 text-center text-xs font-medium leading-5 text-neutral-content opacity-0 shadow-lg transition;
   }
 
-  .btn-danger {
-    @apply bg-red-500 text-white hover:bg-red-400;
+  .help-wrap:hover .help-text,
+  .help-wrap:focus-within .help-text {
+    @apply visible opacity-100;
   }
 
-  .badge-warn {
-    @apply inline-flex min-h-8 items-center rounded border border-amber-500/40 bg-amber-500/10 px-3 text-xs font-semibold uppercase text-amber-200;
+  .template-grid {
+    @apply grid gap-3 md:grid-cols-3;
+  }
+
+  .template-card {
+    @apply flex min-h-24 cursor-pointer items-start gap-3 rounded-lg border border-base-300 bg-base-100 p-4 transition hover:border-primary hover:bg-primary/5;
+  }
+
+  .template-card:has(input:checked) {
+    @apply border-primary bg-primary/10;
+  }
+
+  .template-card strong {
+    @apply block text-base font-semibold;
+  }
+
+  .template-card small {
+    @apply mt-1 block text-sm text-base-content/60;
+  }
+
+  .wizard-actions {
+    @apply mt-6 flex flex-wrap items-center justify-end gap-2;
+  }
+
+  .side-panel {
+    @apply space-y-4;
+  }
+
+  .summary-panel {
+    @apply rounded-lg border border-base-300 bg-base-100 p-5 shadow-sm;
   }
 
   .metric {
-    @apply rounded border border-zinc-800 bg-zinc-950 p-4;
+    @apply rounded-lg border border-base-300 bg-base-200 p-4;
   }
 
   .metric dt {
-    @apply text-xs font-medium uppercase text-zinc-500;
+    @apply text-xs font-semibold text-base-content/50;
   }
 
   .metric dd {
-    @apply mt-2 break-words text-base font-semibold text-zinc-100;
+    @apply mt-2 break-words text-base font-semibold;
   }
 
   .code-box {
-    @apply max-h-[520px] min-h-80 overflow-auto rounded border border-zinc-800 bg-black p-4 text-sm leading-6 text-zinc-300;
+    @apply max-h-[520px] min-h-72 overflow-auto rounded-lg border border-base-300 bg-base-200 p-4 text-sm leading-6;
+  }
+
+  .log-box {
+    @apply max-h-80 min-h-64 font-mono;
   }
 
   .empty-state {
-    @apply rounded border border-dashed border-zinc-700 p-6 text-center text-sm text-zinc-500;
+    @apply rounded-lg border border-dashed border-base-300 p-6 text-center text-sm text-base-content/50;
   }
 
   .result-list {
@@ -154,12 +141,12 @@
 
   .result-row,
   .stage-row {
-    @apply flex min-h-12 items-center justify-between gap-3 rounded border border-zinc-800 bg-zinc-950 px-4 text-sm text-zinc-300;
+    @apply flex min-h-14 items-center justify-between gap-3 rounded-lg border border-base-300 bg-base-100 px-4 text-sm;
   }
 
   .result-row strong,
   .stage-row strong {
-    @apply shrink-0 text-zinc-500;
+    @apply inline-flex min-w-14 shrink-0 items-center justify-center rounded-full px-2 py-1 text-xs font-semibold;
   }
 
   .result-copy {
@@ -167,27 +154,28 @@
   }
 
   .result-copy span {
-    @apply block break-words font-medium text-zinc-100;
+    @apply block break-words font-semibold;
   }
 
   .result-copy p {
-    @apply mt-1 break-words text-xs leading-5 text-zinc-500;
+    @apply mt-1 break-words text-xs leading-5 text-base-content/60;
   }
 
   .result-row[data-status="pass"] strong,
   .stage-row[data-status="성공"] strong {
-    @apply text-emerald-300;
+    @apply bg-success text-success-content;
   }
 
   .result-row[data-status="warn"] strong,
   .stage-row[data-status="진행"] strong,
-  .stage-row[data-status="준비"] strong {
-    @apply text-amber-300;
+  .stage-row[data-status="준비"] strong,
+  .stage-row[data-status="대기"] strong {
+    @apply bg-warning text-warning-content;
   }
 
   .result-row[data-status="fail"] strong,
   .result-row[data-status="pending"] strong,
   .stage-row[data-status="실패"] strong {
-    @apply text-red-300;
+    @apply bg-error text-error-content;
   }
 }

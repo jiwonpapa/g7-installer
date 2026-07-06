@@ -1,285 +1,437 @@
 <!doctype html>
-<html lang="ko">
+<html lang="ko" data-theme="light">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>G7inst Web Controller</title>
+    <title>G7 설치 마법사</title>
+    <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/app.css" />
   </head>
-  <body class="min-h-screen bg-zinc-950 text-zinc-100">
-    <main class="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6">
+  <body class="min-h-screen bg-base-200 text-base-content">
+    <main class="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-5 px-4 py-5 sm:px-6">
       <header class="app-header">
         <div>
-          <p class="text-sm font-medium text-cyan-300">G7 Installer</p>
-          <h1 class="mt-1 text-2xl font-semibold tracking-normal text-white sm:text-3xl">Web Controller</h1>
+          <p class="text-sm font-semibold text-primary">G7 Installer</p>
+          <h1 class="mt-1 text-2xl font-semibold tracking-normal sm:text-3xl">G7 설치 마법사</h1>
+          <p class="mt-2 text-sm text-base-content/60">서버 점검부터 설치 준비 리포트까지 단계별로 진행합니다.</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <span class="status-pill">
-            <span class="text-zinc-500">Connection</span>
-            <span id="connection-status" class="font-medium text-amber-300">starting</span>
+            <span class="text-base-content/50">연결</span>
+            <span id="connection-status" class="badge badge-warning">시작 중</span>
           </span>
-          <button id="shutdown-button" class="btn-secondary" type="button" disabled>종료</button>
+          <button id="theme-toggle" class="btn btn-sm btn-outline" type="button">다크 모드</button>
+          <button id="shutdown-button" class="btn btn-sm btn-ghost" type="button" disabled>종료</button>
         </div>
       </header>
 
-      <section class="progress-shell" aria-label="Install progress">
-        <ol class="progress-list">
-          <li class="progress-step is-active" data-progress="login">Login</li>
-          <li class="progress-step" data-progress="check">Check</li>
-          <li class="progress-step" data-progress="options">Options</li>
-          <li class="progress-step" data-progress="plan">Plan</li>
-          <li class="progress-step" data-progress="install">Prepare</li>
-          <li class="progress-step" data-progress="report">Report</li>
-        </ol>
+      <section class="alert alert-warning">
+        <span>현재 버전은 실제 패키지 설치 전 단계입니다. 설치 준비 파일, 계획, 리포트 생성까지 수행합니다.</span>
       </section>
 
-      <section class="notice-panel">
-        현재 버전은 실제 apt 패키지 설치가 아니라 설치 준비 파일, 계획, 리포트 생성까지 수행합니다.
-      </section>
+      <nav class="wizard-progress" aria-label="설치 단계">
+        <ul class="steps steps-vertical w-full sm:steps-horizontal">
+          <li class="step step-primary" data-progress="login">서버 로그인</li>
+          <li class="step" data-progress="check">서버 점검</li>
+          <li class="step" data-progress="options">설치 방식</li>
+          <li class="step" data-progress="plan">사양 확정</li>
+          <li class="step" data-progress="install">설치 준비</li>
+          <li class="step" data-progress="report">결과</li>
+        </ul>
+      </nav>
 
-      <section class="grid min-h-0 flex-1 gap-4 lg:grid-cols-[260px_1fr_360px]">
-        <nav class="side-nav" aria-label="Setup steps">
-          <button class="step-item is-active" type="button" data-step="login">Server Login</button>
-          <button class="step-item" type="button" data-step="check">Server Check</button>
-          <button class="step-item" type="button" data-step="options">Install Options</button>
-          <button class="step-item" type="button" data-step="plan">Plan Preview</button>
-          <button class="step-item" type="button" data-step="install">Prepare Install</button>
-          <button class="step-item" type="button" data-step="report">Report</button>
-        </nav>
-
-        <div class="min-w-0 space-y-4">
+      <section class="grid min-h-0 flex-1 gap-5 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div class="min-w-0">
           <section class="view-panel is-visible" data-view="login">
-            <div class="panel-heading">
+            <div class="section-heading">
               <div>
-                <h2>서버 로그인</h2>
-                <p>root 또는 sudo 가능한 서버 계정으로 로그인합니다. 비밀번호가 없다면 터미널에서 sudo passwd root를 실행하세요.</p>
+                <span class="step-eyebrow">1단계</span>
+                <h2>서버 계정으로 로그인</h2>
+                <p>설치 준비 작업은 root 또는 sudo 권한이 있는 서버 계정으로만 진행합니다.</p>
               </div>
-              <span class="badge-warn">server account</span>
+              <span class="badge badge-outline">서버 계정</span>
             </div>
+
+            <div id="login-status" class="mt-5 hidden"></div>
+
             <form id="login-form" class="mt-5 grid gap-4 sm:grid-cols-2">
               <label class="field">
-                <span>서버 계정</span>
-                <input id="login-username" autocomplete="username" value="root" />
+                <span class="field-label">
+                  서버 계정
+                  <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="서버 계정 도움말">?</button>
+                    <span class="help-text">Ubuntu에 실제로 존재하는 계정입니다. root 또는 sudo 권한 계정을 사용하세요.</span>
+                  </span>
+                </span>
+                <input id="login-username" class="input input-bordered w-full" autocomplete="username" value="root" />
               </label>
               <label class="field">
-                <span>비밀번호</span>
-                <input id="login-password" type="password" autocomplete="current-password" placeholder="서버 계정 비밀번호" />
+                <span class="field-label">
+                  비밀번호
+                  <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="비밀번호 도움말">?</button>
+                    <span class="help-text">서버 계정 비밀번호입니다. 비밀번호가 없다면 서버 터미널에서 sudo passwd root 또는 sudo passwd 계정명을 실행하세요.</span>
+                  </span>
+                </span>
+                <input id="login-password" class="input input-bordered w-full" type="password" autocomplete="current-password" placeholder="서버 계정 비밀번호" />
               </label>
-              <div class="sm:col-span-2 flex flex-wrap items-center gap-2">
-                <button class="btn-primary" type="submit">로그인</button>
-                <button class="btn-secondary" type="button" data-next="check">점검만 보기</button>
+              <div class="wizard-actions sm:col-span-2">
+                <button class="btn btn-primary" type="submit">로그인하고 계속</button>
+                <button class="btn btn-ghost" type="button" data-next="check">로그인 없이 점검만 보기</button>
               </div>
             </form>
           </section>
 
           <section class="view-panel" data-view="check">
-            <div class="panel-heading">
+            <div class="section-heading">
               <div>
-                <h2>서버 점검</h2>
-                <p>Ubuntu, root 권한, 기존 웹서비스, 포트, 설치 흔적을 확인합니다.</p>
+                <span class="step-eyebrow">2단계</span>
+                <h2>서버 상태 점검</h2>
+                <p>운영체제, 권한, 기존 웹서비스, 포트, 설치 흔적을 확인합니다.</p>
               </div>
-              <button id="doctor-button" class="btn-primary" type="button">점검 실행</button>
+              <button id="doctor-button" class="btn btn-primary" type="button">점검 실행</button>
             </div>
+            <div id="doctor-status" class="mt-5 hidden"></div>
             <div id="doctor-results" class="result-list mt-5">
-              <div class="empty-state">아직 점검 전입니다.</div>
+              <div class="empty-state">아직 점검 전입니다. 점검 실행을 누르세요.</div>
+            </div>
+            <div class="wizard-actions">
+              <button class="btn btn-ghost" type="button" data-next="login">이전</button>
+              <button class="btn btn-primary" type="button" data-next="options">다음: 설치 방식</button>
             </div>
           </section>
 
           <section class="view-panel" data-view="options">
-            <div class="panel-heading">
+            <div class="section-heading">
               <div>
-                <h2>설치 옵션</h2>
-                <p>운영 기본값은 안전한 새 VPS 기준입니다.</p>
+                <span class="step-eyebrow">3단계</span>
+                <h2>설치 방식 선택</h2>
+                <p>일반 사용자는 권장 조합을 선택하고 다음으로 넘어가면 됩니다.</p>
               </div>
-              <button class="btn-primary" type="button" data-next="plan">계획 보기</button>
+              <button class="btn btn-primary" type="button" data-next="plan">다음: 사양 확정</button>
             </div>
-            <form id="options-form" class="mt-5 grid gap-4 md:grid-cols-2">
-              <label class="field">
-                <span>도메인</span>
-                <input name="domain" id="domain-input" value="example.com" />
-              </label>
-              <label class="field">
-                <span>배포 모드</span>
-                <select name="deployment_mode" id="deployment-mode">
-                  <option value="public">실제 도메인</option>
-                  <option value="local-test">로컬 테스트</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>웹서버</span>
-                <select name="web_server">
-                  <option value="nginx">Nginx</option>
-                  <option value="apache">Apache</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>PHP-FPM</span>
-                <select name="php_version">
-                  <option value="8.5">8.5</option>
-                  <option value="8.3">8.3</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>Database</span>
-                <select name="database">
-                  <option value="mariadb">MariaDB</option>
-                  <option value="mysql">MySQL</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>사이트 계정</span>
-                <input name="site_user" value="g7" />
-              </label>
-              <label class="field">
-                <span>웹루트</span>
-                <select name="web_root_mode" id="web-root-mode">
-                  <option value="public-html">/home/계정/public_html</option>
-                  <option value="www">/home/계정/www</option>
-                  <option value="system">/var/www/도메인</option>
-                  <option value="custom">직접 입력</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>직접 입력 웹루트</span>
-                <input name="web_root" id="custom-web-root" placeholder="/srv/www/g7" disabled />
-              </label>
-              <label class="field">
-                <span>www 정책</span>
-                <select name="www_mode">
-                  <option value="redirect-to-root">root로 리다이렉트</option>
-                  <option value="redirect-to-www">www로 리다이렉트</option>
-                  <option value="include">둘 다 허용</option>
-                  <option value="none">없음</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>Redis</span>
-                <select name="redis">
-                  <option value="enable">사용</option>
-                  <option value="disable">사용 안 함</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>메일</span>
-                <select name="mail_mode" id="mail-mode">
-                  <option value="none">없음</option>
-                  <option value="smtp-relay">SMTP Relay</option>
-                  <option value="local-postfix">Local Postfix</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>SMTP Host</span>
-                <input name="smtp_host" id="smtp-host" placeholder="smtp.example.com" disabled />
-              </label>
-              <label class="field">
-                <span>SMTP Port</span>
-                <input name="smtp_port" id="smtp-port" type="number" value="587" min="1" max="65535" disabled />
-              </label>
-              <label class="field">
-                <span>SMTP From</span>
-                <input name="smtp_from" id="smtp-from" placeholder="no-reply@example.com" disabled />
-              </label>
-              <label class="field">
-                <span>SMTP Encryption</span>
-                <select name="smtp_encryption" id="smtp-encryption" disabled>
-                  <option value="starttls">STARTTLS</option>
-                  <option value="tls">TLS</option>
-                  <option value="none">없음</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>보안 프로필</span>
-                <select name="security_profile">
-                  <option value="standard">Standard</option>
-                  <option value="hardened">Hardened</option>
-                  <option value="audit-only">Audit only</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>SSH 정책</span>
-                <select name="ssh_policy">
-                  <option value="audit-only">Audit only</option>
-                  <option value="harden">Harden</option>
-                </select>
-              </label>
+
+            <form id="options-form" class="mt-5 grid gap-5">
+              <fieldset>
+                <legend class="field-label mb-3">
+                  설치 템플릿
+                  <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="설치 템플릿 도움말">?</button>
+                    <span class="help-text">자주 쓰는 서버 조합을 미리 적용합니다. 상세 설정에서 나중에 바꿀 수 있습니다.</span>
+                  </span>
+                </legend>
+                <div class="template-grid">
+                  <label class="template-card">
+                    <input class="radio radio-primary" type="radio" name="install_template" value="recommended" checked />
+                    <span>
+                      <strong>권장 설치</strong>
+                      <small>Nginx + MySQL + Redis</small>
+                    </span>
+                  </label>
+                  <label class="template-card">
+                    <input class="radio radio-primary" type="radio" name="install_template" value="apache" />
+                    <span>
+                      <strong>Apache 호환</strong>
+                      <small>Apache + MySQL + Redis</small>
+                    </span>
+                  </label>
+                  <label class="template-card">
+                    <input class="radio radio-primary" type="radio" name="install_template" value="local" />
+                    <span>
+                      <strong>로컬 테스트</strong>
+                      <small>g7-test.local 기준</small>
+                    </span>
+                  </label>
+                </div>
+              </fieldset>
+
+              <div class="grid gap-4 md:grid-cols-2">
+                <label class="field">
+                  <span class="field-label">
+                    도메인
+                    <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="도메인 도움말">?</button>
+                    <span class="help-text">브라우저에서 접속할 주소입니다. 실제 VPS는 DNS A 레코드가 서버 IP를 가리켜야 합니다.</span>
+                  </span>
+                  </span>
+                  <input name="domain" id="domain-input" class="input input-bordered w-full" value="example.com" />
+                </label>
+                <label class="field">
+                  <span class="field-label">
+                    사이트 계정
+                    <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="사이트 계정 도움말">?</button>
+                    <span class="help-text">웹파일 소유자로 사용할 Linux 계정입니다. 기본값 g7을 권장합니다.</span>
+                  </span>
+                  </span>
+                  <input name="site_user" class="input input-bordered w-full" value="g7" />
+                </label>
+              </div>
+
+              <details class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-100">
+                <summary class="collapse-title font-semibold">상세 설정</summary>
+                <div class="collapse-content grid gap-4 md:grid-cols-2">
+                  <label class="field">
+                    <span class="field-label">
+                      배포 모드
+                      <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="배포 모드 도움말">?</button>
+                    <span class="help-text">실제 도메인은 공개 서버용입니다. 로컬 테스트는 DNS/인증서 확인을 건너뜁니다.</span>
+                  </span>
+                    </span>
+                    <select name="deployment_mode" id="deployment-mode" class="select select-bordered w-full">
+                      <option value="public">실제 도메인</option>
+                      <option value="local-test">로컬 테스트</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">
+                      웹서버
+                      <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="웹서버 도움말">?</button>
+                    <span class="help-text">방문자의 HTTP 요청을 PHP 앱으로 전달합니다. 일반 설치는 Nginx를 권장합니다.</span>
+                  </span>
+                    </span>
+                    <select name="web_server" class="select select-bordered w-full">
+                      <option value="nginx">Nginx</option>
+                      <option value="apache">Apache</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">
+                      PHP 실행기
+                      <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="PHP 실행기 도움말">?</button>
+                    <span class="help-text">그누보드7을 실행할 PHP-FPM 버전입니다. 최신 테스트는 8.5, 호환성은 8.3을 선택합니다.</span>
+                  </span>
+                    </span>
+                    <select name="php_version" class="select select-bordered w-full">
+                      <option value="8.5">PHP 8.5</option>
+                      <option value="8.3">PHP 8.3</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">
+                      데이터베이스
+                      <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="데이터베이스 도움말">?</button>
+                    <span class="help-text">게시글과 회원 정보를 저장합니다. 기본은 MySQL입니다. MariaDB는 필요할 때만 선택하세요.</span>
+                  </span>
+                    </span>
+                    <select name="database" class="select select-bordered w-full">
+                      <option value="mysql">MySQL</option>
+                      <option value="mariadb">MariaDB</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">
+                      웹루트
+                      <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="웹루트 도움말">?</button>
+                    <span class="help-text">웹에서 공개될 파일 위치입니다. 일반 호스팅 방식은 /home/계정/public_html을 사용합니다.</span>
+                  </span>
+                    </span>
+                    <select name="web_root_mode" id="web-root-mode" class="select select-bordered w-full">
+                      <option value="public-html">/home/계정/public_html</option>
+                      <option value="www">/home/계정/www</option>
+                      <option value="system">/var/www/도메인</option>
+                      <option value="custom">직접 입력</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">직접 입력 웹루트</span>
+                    <input name="web_root" id="custom-web-root" class="input input-bordered w-full" placeholder="/srv/www/g7" disabled />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">
+                      www 처리
+                      <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="www 처리 도움말">?</button>
+                    <span class="help-text">www.example.com 접속을 example.com으로 보낼지, 반대로 보낼지 정합니다.</span>
+                  </span>
+                    </span>
+                    <select name="www_mode" class="select select-bordered w-full">
+                      <option value="redirect-to-root">www 없이 통일</option>
+                      <option value="redirect-to-www">www로 통일</option>
+                      <option value="include">둘 다 허용</option>
+                      <option value="none">설정 안 함</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">
+                      Redis
+                      <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="Redis 도움말">?</button>
+                    <span class="help-text">캐시와 세션 처리에 쓰는 빠른 저장소입니다. 기본 사용을 권장합니다.</span>
+                  </span>
+                    </span>
+                    <select name="redis" class="select select-bordered w-full">
+                      <option value="enable">사용</option>
+                      <option value="disable">사용 안 함</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">
+                      메일 발송
+                      <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="메일 발송 도움말">?</button>
+                    <span class="help-text">회원 인증/알림 메일 발송 방식입니다. 실제 운영은 SMTP Relay를 권장합니다.</span>
+                  </span>
+                    </span>
+                    <select name="mail_mode" id="mail-mode" class="select select-bordered w-full">
+                      <option value="none">사용 안 함</option>
+                      <option value="smtp-relay">SMTP Relay</option>
+                      <option value="local-postfix">서버 Postfix</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">SMTP 서버</span>
+                    <input name="smtp_host" id="smtp-host" class="input input-bordered w-full" placeholder="smtp.example.com" disabled />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">SMTP 포트</span>
+                    <input name="smtp_port" id="smtp-port" class="input input-bordered w-full" type="number" value="587" min="1" max="65535" disabled />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">보내는 주소</span>
+                    <input name="smtp_from" id="smtp-from" class="input input-bordered w-full" placeholder="no-reply@example.com" disabled />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">SMTP 암호화</span>
+                    <select name="smtp_encryption" id="smtp-encryption" class="select select-bordered w-full" disabled>
+                      <option value="starttls">STARTTLS</option>
+                      <option value="tls">TLS</option>
+                      <option value="none">없음</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">
+                      보안 수준
+                      <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="보안 수준 도움말">?</button>
+                    <span class="help-text">standard는 안전 기본값입니다. hardened는 더 강하지만 접속 정책 변경이 커질 수 있습니다.</span>
+                  </span>
+                    </span>
+                    <select name="security_profile" class="select select-bordered w-full">
+                      <option value="standard">표준</option>
+                      <option value="hardened">강화</option>
+                      <option value="audit-only">점검만</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">
+                      SSH 정책
+                      <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="SSH 정책 도움말">?</button>
+                    <span class="help-text">기본은 SSH 설정을 바꾸지 않고 위험만 리포트합니다. 강화는 명시한 경우에만 사용합니다.</span>
+                  </span>
+                    </span>
+                    <select name="ssh_policy" class="select select-bordered w-full">
+                      <option value="audit-only">점검만</option>
+                      <option value="harden">강화</option>
+                    </select>
+                  </label>
+                </div>
+              </details>
             </form>
+            <div class="wizard-actions">
+              <button class="btn btn-ghost" type="button" data-next="check">이전</button>
+              <button class="btn btn-primary" type="button" data-next="plan">다음: 사양 확정</button>
+            </div>
           </section>
 
           <section class="view-panel" data-view="plan">
-            <div class="panel-heading">
+            <div class="section-heading">
               <div>
-                <h2>설치 계획</h2>
-                <p>실행 전 변경될 패키지, 파일, 서비스, 포트를 확인합니다.</p>
+                <span class="step-eyebrow">4단계</span>
+                <h2>설치 사양 확정</h2>
+                <p>선택한 사양과 변경 예정 항목을 확인한 뒤 설치 준비 단계로 넘어갑니다.</p>
               </div>
-              <button id="plan-button" class="btn-primary" type="button">계획 생성</button>
+              <button id="plan-button" class="btn btn-primary" type="button">계획 생성</button>
             </div>
-            <pre id="plan-output" class="code-box mt-5">옵션을 확인한 뒤 계획을 생성하세요.</pre>
+            <div id="plan-status" class="mt-5 hidden"></div>
+            <pre id="plan-output" class="code-box mt-5">옵션을 확인한 뒤 계획 생성을 누르세요.</pre>
+            <div class="wizard-actions">
+              <button class="btn btn-ghost" type="button" data-next="options">이전</button>
+              <button id="confirm-spec-button" class="btn btn-primary" type="button" data-next="install" disabled>이 사양으로 진행</button>
+            </div>
           </section>
 
           <section class="view-panel" data-view="install">
-            <div class="panel-heading">
+            <div class="section-heading">
               <div>
-                <h2>설치 준비 진행</h2>
+                <span class="step-eyebrow">5단계</span>
+                <h2>설치 준비 실행</h2>
                 <p>현재 단계는 설치 메타데이터와 리포트 생성입니다. 실제 패키지 설치는 아직 실행하지 않습니다.</p>
               </div>
-              <button id="install-button" class="btn-danger" type="button">설치 준비 시작</button>
+              <button id="install-button" class="btn btn-error" type="button">설치 준비 시작</button>
             </div>
+            <div id="install-status" class="mt-5 hidden"></div>
+            <progress id="install-progress" class="progress progress-primary mt-5 w-full" value="0" max="100"></progress>
             <div class="mt-5 space-y-3" id="install-stages">
-              <div class="stage-row" data-stage="preflight"><span>Preflight</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="packages"><span>Packages planned</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="config"><span>Config</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="services"><span>Services planned</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="ports"><span>Ports planned</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="http"><span>HTTP Test planned</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="report"><span>Report</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="preflight"><span>서버 사전 점검</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="packages"><span>패키지 계획</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="config"><span>설정 파일 생성</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="services"><span>서비스 계획</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="ports"><span>포트 확인 계획</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="http"><span>HTTP 확인 계획</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="report"><span>리포트 생성</span><strong>대기</strong></div>
+            </div>
+            <div class="wizard-actions">
+              <button class="btn btn-ghost" type="button" data-next="plan">이전</button>
+              <button class="btn btn-primary" type="button" data-next="report">결과 보기</button>
             </div>
           </section>
 
           <section class="view-panel" data-view="report">
-            <div class="panel-heading">
+            <div class="section-heading">
               <div>
-                <h2>리포트</h2>
+                <span class="step-eyebrow">6단계</span>
+                <h2>결과 리포트</h2>
                 <p>설치 준비 결과, 검증 상태, 재시도 명령을 확인합니다.</p>
               </div>
-              <div class="flex gap-2">
-                <button id="report-button" class="btn-secondary" type="button">새로고침</button>
-                <button id="reset-button" class="btn-danger" type="button">리셋</button>
+              <div class="flex flex-wrap gap-2">
+                <button id="report-button" class="btn btn-outline" type="button">리포트 새로고침</button>
+                <button id="reset-button" class="btn btn-error" type="button">리셋</button>
               </div>
             </div>
+            <div id="report-status" class="mt-5 hidden"></div>
             <pre id="report-output" class="code-box mt-5">아직 리포트가 없습니다.</pre>
+            <div class="wizard-actions">
+              <button class="btn btn-ghost" type="button" data-next="install">이전</button>
+            </div>
           </section>
         </div>
 
         <aside class="side-panel">
-          <section class="panel">
-            <h2 class="text-lg font-semibold text-white">현재 선택</h2>
+          <section class="summary-panel">
+            <h2 class="text-lg font-semibold">현재 선택</h2>
             <dl class="mt-4 grid gap-3">
               <div class="metric">
                 <dt>도메인</dt>
-                <dd id="summary-domain">loading</dd>
+                <dd id="summary-domain">확인 중</dd>
               </div>
               <div class="metric">
                 <dt>모드</dt>
-                <dd id="summary-mode">loading</dd>
+                <dd id="summary-mode">확인 중</dd>
               </div>
               <div class="metric">
                 <dt>웹서버 / PHP</dt>
-                <dd id="summary-runtime">loading</dd>
+                <dd id="summary-runtime">확인 중</dd>
               </div>
               <div class="metric">
                 <dt>DB / Redis</dt>
-                <dd id="summary-data">loading</dd>
+                <dd id="summary-data">확인 중</dd>
               </div>
             </dl>
           </section>
 
-          <section class="panel">
-            <div class="flex items-center justify-between gap-3">
-              <h2 class="text-lg font-semibold text-white">Live Log</h2>
-              <span class="text-xs uppercase text-zinc-500">web</span>
+          <details class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-100">
+            <summary class="collapse-title font-semibold">상세 로그</summary>
+            <div class="collapse-content">
+              <pre id="live-log" class="code-box log-box">웹 컨트롤러를 불러오는 중...</pre>
             </div>
-            <pre id="live-log" class="mt-4 h-80 overflow-auto rounded bg-black p-4 text-sm leading-6 text-zinc-300">loading web controller...</pre>
-          </section>
+          </details>
         </aside>
       </section>
     </main>

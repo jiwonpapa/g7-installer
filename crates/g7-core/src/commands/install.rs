@@ -374,7 +374,7 @@ mod tests {
         assert_eq!(report.deployment_mode, "public");
         assert_eq!(report.web_server, "nginx");
         assert_eq!(report.php_version, "8.5");
-        assert_eq!(report.database_engine, "mariadb");
+        assert_eq!(report.database_engine, "mysql");
         assert_eq!(report.site_user, "g7");
         assert_eq!(report.web_root_mode, "public-html");
         assert_eq!(report.web_root, "/home/g7/public_html");
@@ -387,7 +387,7 @@ mod tests {
         assert!(config.contains("deployment_mode = \"public\""));
         assert!(config.contains("web_server = \"nginx\""));
         assert!(config.contains("php_version = \"8.5\""));
-        assert!(config.contains("database = \"mariadb\""));
+        assert!(config.contains("database = \"mysql\""));
         assert!(config.contains("database_password_policy = \"generate-random-store-root-only\""));
         assert!(config.contains("site_user = \"g7\""));
         assert!(config.contains("web_root = \"/home/g7/public_html\""));
