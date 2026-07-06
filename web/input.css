@@ -163,6 +163,30 @@
     @apply mt-1 block text-xs leading-5 text-base-content/60;
   }
 
+  .recovery-panel {
+    @apply grid gap-4 rounded-lg border border-warning/40 bg-warning/10 p-4;
+  }
+
+  .recovery-panel[hidden] {
+    @apply hidden;
+  }
+
+  .recovery-panel h3 {
+    @apply font-semibold;
+  }
+
+  .recovery-panel p {
+    @apply mt-1 text-sm leading-6 text-base-content/70;
+  }
+
+  .recovery-panel ul {
+    @apply mt-3 grid gap-1 text-xs text-base-content/60;
+  }
+
+  .recovery-actions {
+    @apply flex flex-wrap gap-2;
+  }
+
   .report-panel {
     @apply grid gap-4;
   }

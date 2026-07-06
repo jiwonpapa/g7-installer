@@ -9,6 +9,10 @@ const state = {
   reportReady: false,
   installRunning: false,
   installCompleted: false,
+  doctorReport: null,
+  planReport: null,
+  savedReportPayload: null,
+  recoveryStatus: null,
   currentOperation: null,
   planPackages: [],
   packageTicker: null,
@@ -58,6 +62,7 @@ const nodes = {
 };
 
 const stepOrder = ["login", "check", "options", "plan", "install", "report"];
+const wizardStorageKey = "g7inst-wizard-state-v1";
 
 const statusLabel = {
   pass: "통과",
@@ -258,6 +263,63 @@ function hideAlert(node) {
   node.innerHTML = "";
 }
 
+function formValues() {
+  const values = {};
+  const form = new FormData(nodes.optionsForm);
+  form.forEach((value, key) => {
+    values[key] = value;
+  });
+  return values;
+}
+
+function applyFormValues(values) {
+  if (!values || typeof values !== "object") {
+    return;
+  }
+
+  Object.entries(values).forEach(([name, value]) => {
+    setFormValue(name, value);
+  });
+}
+
+function readWizardState() {
+  try {
+    const raw = sessionStorage.getItem(wizardStorageKey);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function saveWizardState() {
+  try {
+    sessionStorage.setItem(wizardStorageKey, JSON.stringify({
+      activeStep: state.activeStep,
+      form: formValues(),
+      doctorReport: state.doctorReport,
+      planReport: state.planReport,
+      savedReportPayload: state.savedReportPayload,
+      recoveryStatus: state.recoveryStatus,
+      flags: {
+        doctorPassed: state.doctorPassed,
+        planReady: state.planReady,
+        reportReady: state.reportReady,
+        installCompleted: state.installCompleted,
+      },
+    }));
+  } catch (_error) {
+    log("브라우저 세션 상태 저장 실패");
+  }
+}
+
+function clearWizardState() {
+  try {
+    sessionStorage.removeItem(wizardStorageKey);
+  } catch (_error) {
+    log("브라우저 세션 상태 삭제 실패");
+  }
+}
+
 function setPlanReady(ready) {
   state.planReady = ready;
   if (nodes.confirmSpecButton) {
@@ -325,8 +387,15 @@ function applyTheme(theme) {
 function showStep(nextStep, options = {}) {
   let step = normalizedStep(nextStep);
   const shouldPushHistory = options.pushHistory !== false;
+  const recoveryMode = Boolean(
+    state.reportReady
+      || state.installCompleted
+      || state.recoveryStatus?.can_reset
+      || state.recoveryStatus?.can_rollback
+      || state.recoveryStatus?.metadata_paths?.length,
+  );
 
-  if (["options", "plan", "install"].includes(step) && !state.doctorPassed) {
+  if (["options", "plan"].includes(step) && !state.doctorPassed) {
     setAlert(
       nodes.doctorStatus,
       "warning",
@@ -336,7 +405,17 @@ function showStep(nextStep, options = {}) {
     step = "check";
   }
 
-  if (step === "install" && !state.planReady) {
+  if (step === "install" && !state.doctorPassed && !recoveryMode) {
+    setAlert(
+      nodes.doctorStatus,
+      "warning",
+      "서버 점검이 먼저 필요합니다",
+      "신규 서버 상태를 통과하거나 설치기 복구 상태가 확인되어야 합니다.",
+    );
+    step = "check";
+  }
+
+  if (step === "install" && !state.planReady && !recoveryMode) {
     setAlert(
       nodes.planStatus,
       "warning",
@@ -377,6 +456,8 @@ function showStep(nextStep, options = {}) {
   if (shouldPushHistory && !wasActiveStep) {
     writeStepHistory(step, false);
   }
+
+  saveWizardState();
 }
 
 function optionPayload() {
@@ -436,9 +517,17 @@ function applyTemplate(templateName) {
   refreshFormState();
 }
 
-function refreshFormState() {
-  setPlanReady(false);
-  if (!state.installRunning && !state.installCompleted) {
+function refreshFormState(options = {}) {
+  const preservePlan = Boolean(options.preservePlan);
+  const shouldPersist = options.persist !== false;
+
+  if (!preservePlan) {
+    state.planReport = null;
+    state.savedReportPayload = null;
+    setPlanReady(false);
+  }
+
+  if (!preservePlan && !state.installRunning && !state.installCompleted) {
     setReportReady(false);
     renderPackageProgress([]);
     refreshInstallButtonState();
@@ -464,6 +553,9 @@ function refreshFormState() {
 
   refreshSecurityGuidance();
   refreshSummary();
+  if (shouldPersist) {
+    saveWizardState();
+  }
 }
 
 function refreshSummary() {
@@ -555,7 +647,72 @@ function refreshSecurityGuidance() {
   `;
 }
 
+function recoveryPanels() {
+  return Array.from(document.querySelectorAll("[data-recovery-panel]"));
+}
+
+function recoveryActionButtons(action) {
+  return Array.from(document.querySelectorAll(`[data-recovery-action="${action}"]`));
+}
+
+function renderRecoveryStatus(status) {
+  state.recoveryStatus = status || null;
+  const hasMetadata = Boolean(status?.metadata_paths?.length);
+  const doctorBlocked = Boolean(state.doctorReport && !state.doctorReport.install_allowed);
+  const shouldShowPanel = Boolean(state.authenticated && (hasMetadata || doctorBlocked));
+
+  recoveryPanels().forEach((panel) => {
+    panel.hidden = !shouldShowPanel;
+    const message = panel.querySelector("[data-recovery-message]");
+    const paths = panel.querySelector("[data-recovery-paths]");
+
+    if (message) {
+      message.textContent = status?.message || "설치기 소유 흔적을 확인하지 못했습니다.";
+    }
+    if (paths) {
+      const rows = status?.metadata_paths?.length
+        ? status.metadata_paths.map((path) => `<li>${escapeHtml(path)}</li>`).join("")
+        : `<li>설치기 메타데이터 없음</li>`;
+      paths.innerHTML = rows;
+    }
+  });
+
+  recoveryActionButtons("rollback").forEach((button) => {
+    button.disabled = !status?.can_rollback;
+    button.title = status?.can_rollback
+      ? "설치 직후 패키지와 메타데이터를 되돌립니다."
+      : (status?.rollback_reason || "안전 조건을 만족하지 않아 되돌릴 수 없습니다.");
+  });
+
+  recoveryActionButtons("reset").forEach((button) => {
+    button.disabled = !status?.can_reset;
+    button.title = status?.can_reset
+      ? "설치기 메타데이터만 정리합니다. apt 패키지는 제거하지 않습니다."
+      : (status?.can_rollback ? "패키지 설치 후에는 패키지 되돌리기를 먼저 사용하세요." : "설치기 메타데이터가 없어 리셋할 수 없습니다.");
+  });
+
+  saveWizardState();
+}
+
+async function refreshRecoveryStatus() {
+  if (!state.authenticated) {
+    renderRecoveryStatus(null);
+    return null;
+  }
+
+  try {
+    const status = await apiFetch("/api/recovery");
+    renderRecoveryStatus(status);
+    return status;
+  } catch (error) {
+    renderRecoveryStatus(null);
+    log(formatError(error));
+    return null;
+  }
+}
+
 function renderDoctor(report) {
+  state.doctorReport = report;
   nodes.doctorResults.innerHTML = "";
   setDoctorPassed(Boolean(report.install_allowed));
 
@@ -581,6 +738,8 @@ function renderDoctor(report) {
     `;
     nodes.doctorResults.append(item);
   });
+  renderRecoveryStatus(state.recoveryStatus);
+  saveWizardState();
 }
 
 async function runDoctorCheck() {
@@ -588,6 +747,7 @@ async function runDoctorCheck() {
   log("서버 점검 실행");
   const report = await apiFetch("/api/doctor");
   renderDoctor(report);
+  await refreshRecoveryStatus();
   log(`서버 점검 완료: install_allowed=${report.install_allowed}`);
   return report;
 }
@@ -859,8 +1019,90 @@ async function apiFetch(path, options = {}) {
   return body;
 }
 
+function parseSavedReport(payload) {
+  if (!payload?.exists) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(payload.content);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function packageItemsFromChecks(checks) {
+  if (!Array.isArray(checks)) {
+    return [];
+  }
+
+  return checks.map((check) => ({
+    name: check.name,
+    description: check.message || "저장된 설치 리포트",
+  }));
+}
+
+function applyReportOptions(report) {
+  if (!report || typeof report !== "object") {
+    return;
+  }
+
+  applyFormValues({
+    domain: report.domain,
+    deployment_mode: report.deployment_mode,
+    web_server: report.web_server,
+    php_version: report.php_version,
+    database: report.database,
+    site_user: report.site_user,
+    web_root: report.web_root,
+    security_profile: report.security_profile,
+    ssh_policy: report.ssh_policy,
+  });
+  refreshFormState({ preservePlan: true, persist: false });
+}
+
+function restoreInstallStateFromReport(report) {
+  if (!report || typeof report !== "object") {
+    return;
+  }
+
+  applyReportOptions(report);
+  const packageChecks = Array.isArray(report.package_checks) ? report.package_checks : [];
+  if (packageChecks.length) {
+    renderPackageProgress(packageItemsFromChecks(packageChecks));
+    applyPackageChecks(packageChecks);
+  }
+
+  if (report.phase === "packages-installed") {
+    ["preflight", "packages", "config", "services", "ports", "http", "report"].forEach((stage) => markStage(stage, "성공"));
+    setProgress(nodes.installProgress, 100);
+    state.installCompleted = true;
+    setReportReady(true);
+    refreshInstallButtonState();
+    return;
+  }
+
+  if (report.phase === "package-failed") {
+    markStage("preflight", "성공");
+    markStage("packages", "실패");
+    setProgress(nodes.installProgress, 100);
+    state.installCompleted = false;
+    setReportReady(true);
+    refreshInstallButtonState("복구 후 다시 시도");
+    return;
+  }
+
+  if (report.phase === "prepared") {
+    markStage("preflight", "성공");
+    setProgress(nodes.installProgress, 20);
+    state.installCompleted = false;
+    setReportReady(true);
+    refreshInstallButtonState("복구 후 다시 시도");
+  }
+}
+
 function renderInstallReport(report) {
-  const link = accessLink(report.domain, report.deployment_mode);
+  const link = accessLink(report.domain, report.deployment_mode, report.phase);
   nodes.reportOutput.innerHTML = [
     reportSummaryCard("패키지 설치 완료", [
       ["도메인", report.domain],
@@ -887,11 +1129,20 @@ function renderInstallReport(report) {
   state.installCompleted = true;
   setReportReady(true);
   refreshInstallButtonState();
+  state.savedReportPayload = {
+    exists: true,
+    path: "방금 생성됨",
+    content: JSON.stringify(report),
+  };
+  saveWizardState();
 }
 
 function renderSavedReport(payload) {
+  state.savedReportPayload = payload;
   if (!payload.exists) {
     nodes.reportOutput.innerHTML = `<div class="empty-state">아직 생성된 리포트가 없습니다.</div>`;
+    setReportReady(false);
+    saveWizardState();
     return;
   }
 
@@ -905,10 +1156,12 @@ function renderSavedReport(payload) {
         <pre class="code-box mt-3">${escapeHtml(payload.content)}</pre>
       </section>
     `;
+    setReportReady(true);
+    saveWizardState();
     return;
   }
 
-  const link = accessLink(report.domain || "example.com", report.deployment_mode || "public");
+  const link = accessLink(report.domain || "example.com", report.deployment_mode || "public", report.phase);
   nodes.reportOutput.innerHTML = [
     reportSummaryCard("저장된 설치 리포트", [
       ["리포트 파일", payload.path],
@@ -927,6 +1180,9 @@ function renderSavedReport(payload) {
     checksCard("포트 검증", report.port_checks),
     report.problem ? listCard("문제", [report.problem]) : "",
   ].join("");
+  setReportReady(true);
+  restoreInstallStateFromReport(report);
+  saveWizardState();
 }
 
 function renderResetReport(report) {
@@ -1040,7 +1296,16 @@ function actionStatus(status) {
   return "fail";
 }
 
-function accessLink(domain, mode) {
+function accessLink(domain, mode, phase = "packages-installed") {
+  if (["prepared", "package-failed", "packages-installed"].includes(phase)) {
+    return {
+      html: `<span class="text-base-content/60">사이트 페이지는 아직 생성 전입니다.</span>`,
+      hint: mode === "local-test"
+        ? "현재 단계는 apt 패키지 검증까지만 완료합니다. 로컬 테스트 도메인은 hosts 매핑과 vhost/app 설치 단계가 끝난 뒤 접속 링크를 제공합니다."
+        : "현재 단계는 apt 패키지 검증까지만 완료합니다. vhost와 앱 설치 단계가 끝난 뒤 접속 링크를 제공합니다.",
+    };
+  }
+
   const protocol = mode === "local-test" ? "http" : "https";
   const href = `${protocol}://${domain}`;
   return {
@@ -1151,6 +1416,11 @@ function confirmInstallStart() {
 }
 
 function resetWizardForRetry() {
+  clearWizardState();
+  state.doctorReport = null;
+  state.planReport = null;
+  state.savedReportPayload = null;
+  state.recoveryStatus = null;
   setPlanReady(false);
   setDoctorPassed(false);
   setReportReady(false);
@@ -1168,7 +1438,151 @@ function resetWizardForRetry() {
   renderPackageProgress([]);
   nodes.reportOutput.innerHTML = `<div class="empty-state">아직 리포트가 없습니다.</div>`;
   refreshInstallButtonState();
+  renderRecoveryStatus(null);
   showStep("check");
+}
+
+function restoreWizardState() {
+  const saved = readWizardState();
+  if (!saved || typeof saved !== "object") {
+    return;
+  }
+
+  applyFormValues(saved.form);
+  refreshFormState({ preservePlan: true });
+
+  if (saved.doctorReport) {
+    renderDoctor(saved.doctorReport);
+  }
+  if (saved.planReport) {
+    state.planReport = saved.planReport;
+    nodes.planOutput.textContent = renderPlanReport(saved.planReport);
+    renderPackageProgress(flattenPlanPackages(saved.planReport.packages));
+    setPlanReady(true);
+  }
+  if (saved.savedReportPayload) {
+    renderSavedReport(saved.savedReportPayload);
+  }
+  if (saved.recoveryStatus) {
+    renderRecoveryStatus(saved.recoveryStatus);
+  }
+
+  state.activeStep = normalizedStep(saved.activeStep || state.activeStep);
+  if (saved.flags) {
+    setDoctorPassed(Boolean(saved.flags.doctorPassed || state.doctorPassed));
+    setPlanReady(Boolean(saved.flags.planReady || state.planReady));
+    setReportReady(Boolean(saved.flags.reportReady || state.reportReady));
+    state.installCompleted = Boolean(saved.flags.installCompleted || state.installCompleted);
+    refreshInstallButtonState();
+  }
+}
+
+async function syncServerState() {
+  if (!state.authenticated) {
+    renderRecoveryStatus(null);
+    return;
+  }
+
+  await refreshRecoveryStatus();
+
+  try {
+    const reportPayload = await apiFetch("/api/report");
+    state.savedReportPayload = reportPayload;
+    if (reportPayload.exists) {
+      renderSavedReport(reportPayload);
+      const report = parseSavedReport(reportPayload);
+      restoreInstallStateFromReport(report);
+    } else {
+      state.savedReportPayload = reportPayload;
+      if (!state.installRunning) {
+        setReportReady(false);
+        if (!state.planReady) {
+          state.installCompleted = false;
+          refreshInstallButtonState();
+        }
+      }
+    }
+    saveWizardState();
+  } catch (error) {
+    log(formatError(error));
+  }
+}
+
+async function runRecoveryAction(action, button) {
+  const statusNode = state.activeStep === "install"
+    ? nodes.installStatus
+    : (state.activeStep === "check" ? nodes.doctorStatus : nodes.reportStatus);
+
+  if (action === "rollback" && !state.recoveryStatus?.can_rollback) {
+    setAlert(statusNode, "warning", "되돌리기 불가", state.recoveryStatus?.rollback_reason || "안전 조건을 만족하지 않습니다.");
+    return;
+  }
+
+  if (action === "reset" && !state.recoveryStatus?.can_reset) {
+    setAlert(statusNode, "warning", "리셋 불가", "설치기 메타데이터가 없거나 패키지 되돌리기를 먼저 해야 합니다.");
+    return;
+  }
+
+  const confirmMessage = action === "rollback"
+    ? "패키지 설치 직후, 운영 콘텐츠가 없을 때만 사용하세요.\n서비스를 중지하고 설치 패키지를 제거한 뒤 installer 메타데이터를 리셋합니다.\n계속할까요?"
+    : "installer 메타데이터만 리셋합니다.\napt 패키지와 기존 웹서비스는 제거하지 않습니다.\n계속할까요?";
+
+  if (!window.confirm(confirmMessage)) {
+    return;
+  }
+
+  const endpoint = action === "rollback" ? "/api/rollback" : "/api/reset";
+  const busyText = action === "rollback" ? "되돌리는 중" : "리셋 중";
+  const successTitle = action === "rollback" ? "패키지 되돌리기 완료" : "리셋 완료";
+
+  await withBusy(button, busyText, async () => {
+    try {
+      state.currentOperation = action;
+      showReportProgress(5);
+      hideAlert(statusNode);
+      hideAlert(nodes.reportStatus);
+      log(action === "rollback" ? "패키지 되돌리기 실행" : "리셋 실행");
+      const report = await apiFetch(endpoint, {
+        method: "POST",
+        body: JSON.stringify({ dry_run: false }),
+      });
+
+      if (action === "rollback") {
+        renderRollbackReport(report);
+      } else {
+        renderResetReport(report);
+      }
+
+      showReportProgress(100);
+      setAlert(
+        statusNode,
+        "success",
+        successTitle,
+        action === "rollback"
+          ? "서비스 중지, apt 패키지 제거, installer 메타데이터 정리를 완료했습니다."
+          : "installer 메타데이터와 준비 흔적을 정리했습니다.",
+      );
+      log(successTitle);
+      clearWizardState();
+      state.installCompleted = false;
+      state.planReport = null;
+      state.savedReportPayload = null;
+      setPlanReady(false);
+      setReportReady(false);
+      refreshInstallButtonState();
+      await refreshRecoveryStatus();
+      await runDoctorCheck();
+      showStep("check");
+    } catch (error) {
+      renderErrorReport(action === "rollback" ? "패키지 되돌리기 실패" : "리셋 실패", formatError(error));
+      setAlert(statusNode, "error", action === "rollback" ? "패키지 되돌리기 실패" : "리셋 실패", formatError(error));
+      log(formatError(error));
+      await refreshRecoveryStatus();
+    } finally {
+      state.currentOperation = null;
+      saveWizardState();
+    }
+  });
 }
 
 function bindHelpTooltips() {
@@ -1267,6 +1681,7 @@ function bindEvents() {
         state.authenticated = response.authenticated;
         setAlert(nodes.loginStatus, "success", "로그인 성공", `${response.username} 계정으로 인증되었습니다.`);
         log(`서버 계정 인증 성공: ${response.username}`);
+        await syncServerState();
         showStep("check");
       } catch (error) {
         passwordInput.value = "";
@@ -1297,6 +1712,7 @@ function bindEvents() {
           method: "POST",
           body: JSON.stringify(optionPayload()),
         });
+        state.planReport = report;
         nodes.planOutput.textContent = renderPlanReport(report);
         renderPackageProgress(flattenPlanPackages(report.packages));
         setAlert(nodes.planStatus, "success", "설치 계획 생성 완료", `${report.packages.length}개 패키지 묶음과 ${report.files.length}개 파일 변경 계획을 확인했습니다.`);
@@ -1304,12 +1720,15 @@ function bindEvents() {
         state.installCompleted = false;
         setReportReady(false);
         refreshInstallButtonState();
+        saveWizardState();
         log(`설치 계획 준비 완료: packages=${report.packages.length}, files=${report.files.length}`);
       } catch (error) {
+        state.planReport = null;
         nodes.planOutput.textContent = formatError(error);
         setAlert(nodes.planStatus, "error", "설치 계획 생성 실패", formatError(error));
         setPlanReady(false);
         renderPackageProgress([]);
+        saveWizardState();
         log(formatError(error));
       }
     });
@@ -1346,6 +1765,7 @@ function bindEvents() {
         body: JSON.stringify(optionPayload()),
       });
       renderInstallReport(report);
+      await refreshRecoveryStatus();
       setAlert(nodes.installStatus, "success", "패키지 설치 완료", "결과 리포트에서 패키지, 서비스, 포트 검증 결과를 확인하세요.");
       showStep("report");
       log(`패키지 설치 완료: ${report.phase}`);
@@ -1355,6 +1775,7 @@ function bindEvents() {
       renderErrorReport("패키지 설치 실패", `${formatError(error)}\n\n리포트와 로그를 확인하세요. 패키지 버전 문제면 PHP 8.3 조합으로 다시 시도하세요.`);
       setAlert(nodes.installStatus, "error", "패키지 설치 실패", formatError(error));
       setReportReady(true);
+      await refreshRecoveryStatus();
       showStep("report");
       log(formatError(error));
     } finally {
@@ -1373,6 +1794,7 @@ function bindEvents() {
         hideAlert(nodes.reportStatus);
         const report = await apiFetch("/api/report");
         renderSavedReport(report);
+        await refreshRecoveryStatus();
         setAlert(
           nodes.reportStatus,
           report.exists ? "success" : "warning",
@@ -1388,66 +1810,18 @@ function bindEvents() {
     });
   });
 
-  document.querySelector("#reset-button").addEventListener("click", async (event) => {
-    if (!window.confirm("설치기가 만든 파일을 리셋할까요?")) {
-      return;
-    }
-
-    await withBusy(event.currentTarget, "리셋 중", async () => {
-      try {
-        state.currentOperation = "reset";
-        showReportProgress(5);
-        hideAlert(nodes.reportStatus);
-        log("리셋 실행");
-        const report = await apiFetch("/api/reset", {
-          method: "POST",
-          body: JSON.stringify({ dry_run: false }),
-        });
-        renderResetReport(report);
-        showReportProgress(100);
-        setAlert(nodes.reportStatus, "success", "리셋 완료", "installer 메타데이터와 준비 흔적을 정리했습니다.");
-        log("리셋 완료");
+  document.querySelectorAll("[data-recovery-refresh]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      await withBusy(event.currentTarget, "확인 중", async () => {
+        await refreshRecoveryStatus();
         await runDoctorCheck();
-      } catch (error) {
-        renderErrorReport("리셋 실패", formatError(error));
-        setAlert(nodes.reportStatus, "error", "리셋 실패", formatError(error));
-        log(formatError(error));
-      } finally {
-        state.currentOperation = null;
-      }
+      });
     });
   });
 
-  document.querySelector("#rollback-button").addEventListener("click", async (event) => {
-    const confirmed = window.confirm(
-      "패키지 설치 직후, 운영 콘텐츠가 없을 때만 사용하세요.\n서비스를 중지하고 설치 패키지를 제거한 뒤 installer 메타데이터를 리셋합니다.\n계속할까요?",
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    await withBusy(event.currentTarget, "되돌리는 중", async () => {
-      try {
-        state.currentOperation = "rollback";
-        showReportProgress(5);
-        hideAlert(nodes.reportStatus);
-        log("패키지 되돌리기 실행");
-        const report = await apiFetch("/api/rollback", {
-          method: "POST",
-          body: JSON.stringify({ dry_run: false }),
-        });
-        renderRollbackReport(report);
-        showReportProgress(100);
-        setAlert(nodes.reportStatus, "success", "패키지 되돌리기 완료", "서비스 중지, apt 패키지 제거, installer 메타데이터 정리를 완료했습니다.");
-        log("패키지 되돌리기 완료");
-        await runDoctorCheck();
-      } catch (error) {
-        renderErrorReport("패키지 되돌리기 실패", formatError(error));
-        setAlert(nodes.reportStatus, "error", "패키지 되돌리기 실패", formatError(error));
-        log(formatError(error));
-      } finally {
-        state.currentOperation = null;
-      }
+  document.querySelectorAll("[data-recovery-action]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      await runRecoveryAction(event.currentTarget.dataset.recoveryAction, event.currentTarget);
     });
   });
 
@@ -1461,7 +1835,7 @@ async function boot() {
   applyTheme(state.theme);
   bindEvents();
   bindHelpTooltips();
-  refreshFormState();
+  refreshFormState({ preservePlan: true, persist: false });
   connectEvents();
 
   try {
@@ -1474,7 +1848,9 @@ async function boot() {
       nodes.domain.value = state.bootstrap.domain;
     }
     nodes.mode.value = state.bootstrap.local_test ? "local-test" : "public";
-    refreshFormState();
+    refreshFormState({ preservePlan: true, persist: false });
+    restoreWizardState();
+    await syncServerState();
     showStep(normalizedStep(window.location.hash.replace("#", "") || state.activeStep), { pushHistory: false });
     writeStepHistory(state.activeStep, true);
     log("웹 컨트롤러 준비 완료");

@@ -16,6 +16,7 @@ axum.workspace = true
 clap.workspace = true
 getrandom.workspace = true
 g7-core = { path = "../g7-core" }
+g7-state = { path = "../g7-state" }
 miette.workspace = true
 serde.workspace = true
 serde_json.workspace = true

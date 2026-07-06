@@ -95,6 +95,18 @@
             <div id="doctor-results" class="result-list mt-5">
               <div class="empty-state">아직 점검 전입니다. 점검 실행을 누르세요.</div>
             </div>
+            <section class="recovery-panel mt-5" data-recovery-panel hidden>
+              <div>
+                <h3>복구 / 초기화</h3>
+                <p data-recovery-message>설치기 소유 흔적을 확인하는 중입니다.</p>
+                <ul data-recovery-paths></ul>
+              </div>
+              <div class="recovery-actions">
+                <button class="btn btn-sm btn-outline" type="button" data-recovery-refresh>복구 상태 새로고침</button>
+                <button class="btn btn-sm btn-outline" type="button" data-recovery-action="reset">메타데이터 리셋</button>
+                <button class="btn btn-sm btn-error" type="button" data-recovery-action="rollback">패키지 되돌리기</button>
+              </div>
+            </section>
             <div class="wizard-actions">
               <button class="btn btn-ghost" type="button" data-next="login">이전</button>
               <button id="check-next-button" class="btn btn-primary" type="button" data-next="options" disabled>점검 통과 후 다음</button>
@@ -433,6 +445,18 @@
               <div class="stage-row" data-stage="http"><span>기본 검증</span><strong>대기</strong></div>
               <div class="stage-row" data-stage="report"><span>리포트 생성</span><strong>대기</strong></div>
             </div>
+            <section class="recovery-panel mt-5" data-recovery-panel hidden>
+              <div>
+                <h3>복구 / 초기화</h3>
+                <p data-recovery-message>설치기 소유 흔적을 확인하는 중입니다.</p>
+                <ul data-recovery-paths></ul>
+              </div>
+              <div class="recovery-actions">
+                <button class="btn btn-sm btn-outline" type="button" data-recovery-refresh>복구 상태 새로고침</button>
+                <button class="btn btn-sm btn-outline" type="button" data-recovery-action="reset">메타데이터 리셋</button>
+                <button class="btn btn-sm btn-error" type="button" data-recovery-action="rollback">패키지 되돌리기</button>
+              </div>
+            </section>
             <div class="wizard-actions">
               <button class="btn btn-ghost" type="button" data-next="plan">이전</button>
               <button id="install-result-button" class="btn btn-primary" type="button" data-next="report" disabled>설치 완료 후 결과 보기</button>
@@ -448,8 +472,8 @@
               </div>
               <div class="flex flex-wrap gap-2">
                 <button id="report-button" class="btn btn-outline" type="button">리포트 새로고침</button>
-                <button id="reset-button" class="btn btn-outline" type="button">메타데이터 리셋</button>
-                <button id="rollback-button" class="btn btn-error" type="button">패키지 되돌리기</button>
+                <button id="reset-button" class="btn btn-outline" type="button" data-recovery-action="reset">메타데이터 리셋</button>
+                <button id="rollback-button" class="btn btn-error" type="button" data-recovery-action="rollback">패키지 되돌리기</button>
               </div>
             </div>
             <div class="action-help-grid mt-5">

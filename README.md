@@ -58,7 +58,9 @@ sudo passwd root
 sudo g7inst setup --local-test --domain g7-test.local
 ```
 
-웹 UI의 `패키지 설치 시작`은 한 번만 실행됩니다. 다시 테스트할 때 apt 패키지까지 되돌리려면 `패키지 되돌리기` 또는 `sudo g7inst rollback --yes`를 먼저 실행합니다. installer 메타데이터만 지우려면 `sudo g7inst reset --yes`를 사용합니다.
+웹 UI의 `패키지 설치 시작`은 한 번만 실행됩니다. 뒤로가기, 새로고침, 외부 링크 이동 후 돌아와도 브라우저 세션과 서버 report를 기준으로 설치/복구 상태를 다시 복원합니다. 다시 테스트할 때 apt 패키지까지 되돌리려면 `패키지 되돌리기` 또는 `sudo g7inst rollback --yes`를 먼저 실행합니다. installer 메타데이터만 지우려면 `sudo g7inst reset --yes`를 사용합니다.
+
+웹 UI의 복구 버튼은 설치기 소유 흔적이 확인될 때만 열립니다. `rollback` 가능 상태에서는 `메타데이터 리셋`을 먼저 누를 수 없게 막습니다. 운영 중이던 웹서비스만 감지되고 `/var/lib/g7-installer/state.json`, `owned-files.json`, `report.json` 같은 설치기 메타데이터가 없으면 자동 초기화 버튼을 제공하지 않습니다.
 
 테스트 흔적을 지우고 다시 시작하려면:
 
@@ -335,7 +337,10 @@ sudo g7inst self-update
   - CSRF 토큰과 HttpOnly 세션 쿠키 사용
   - WebSocket으로 Live log, 단계별 진행 상태, 설치/되돌리기 퍼센트 표시
   - 서버 점검, 옵션 선택, 계획 확인, 패키지 설치, 리포트, 리셋, 패키지 되돌리기 화면 제공
-  - HTML 결과 리포트, 도메인 접속 링크, 패키지/서비스/포트 검증 목록 제공
+  - 뒤로가기/새로고침 후 브라우저 세션과 서버 report 기준으로 마법사 단계 복원
+  - `/api/recovery`로 설치기 메타데이터와 안전한 rollback 가능 여부 확인
+  - HTML 결과 리포트, 패키지/서비스/포트 검증 목록 제공
+  - 현재 패키지 설치 단계에서는 vhost/app이 없으므로 도메인 접속 링크는 비활성 안내로 표시
   - 정적 CSS/JS 자산에 빌드 버전 쿼리와 no-cache 헤더 적용
   - reset 성공 후 server check 자동 재실행
 

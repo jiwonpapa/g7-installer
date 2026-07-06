@@ -23,6 +23,8 @@ use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use g7_core::commands::{DoctorCheckStatus, doctor, install, plan, reset, rollback, status};
+use g7_state::owned_files::OWNED_FILES_PATH;
+use g7_state::state::STATE_PATH;
 use getrandom::fill as fill_random;
 use miette::{IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
@@ -43,6 +45,9 @@ const ASSET_VERSION: &str = match option_env!("G7_ASSET_VERSION") {
     None => env!("CARGO_PKG_VERSION"),
 };
 const REPORT_PATH: &str = "/var/log/g7-installer/report.json";
+const CONFIG_PATH: &str = "/etc/g7-installer/config.toml";
+const LOCAL_HOSTS_PATH: &str = "/etc/g7-installer/local-hosts.txt";
+const ROLLBACK_PATH: &str = "/var/lib/g7-installer/rollback.json";
 const SESSION_COOKIE: &str = "g7inst_session";
 const CSRF_HEADER: &str = "x-g7-csrf";
 const SESSION_TTL: Duration = Duration::from_secs(30 * 60);
@@ -299,6 +304,16 @@ struct StatusApiReport {
 }
 
 #[derive(Debug, Serialize)]
+struct RecoveryApiStatus {
+    can_reset: bool,
+    can_rollback: bool,
+    recommended_action: &'static str,
+    message: String,
+    metadata_paths: Vec<String>,
+    rollback_reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 struct ComponentApiStatus {
     name: &'static str,
     state: &'static str,
@@ -346,6 +361,7 @@ pub async fn run(config: WebSetupConfig) -> Result<()> {
         .route("/api/reset", post(api_reset))
         .route("/api/rollback", post(api_rollback))
         .route("/api/status", get(api_status))
+        .route("/api/recovery", get(api_recovery))
         .route("/api/report", get(api_report))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
@@ -864,6 +880,16 @@ async fn api_status(
     }))
 }
 
+async fn api_recovery(
+    axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> std::result::Result<impl IntoResponse, ApiError> {
+    require_authenticated_session(&state, &headers, peer.ip())?;
+
+    Ok(Json(recovery_status()))
+}
+
 async fn api_report(
     axum::extract::State(state): axum::extract::State<WebState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -888,6 +914,62 @@ async fn api_report(
             content: format!("failed to read report: {err}"),
         })),
     }
+}
+
+fn recovery_status() -> RecoveryApiStatus {
+    let metadata_paths = installer_metadata_paths()
+        .into_iter()
+        .filter(|path| fs::metadata(path).is_ok())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+
+    let rollback_check = rollback::run(true, true);
+    let (can_rollback, rollback_reason) = match rollback_check {
+        Ok(_) => (true, None),
+        Err(error) => (false, Some(error.to_string())),
+    };
+
+    let has_installer_metadata = !metadata_paths.is_empty();
+    let can_reset = has_installer_metadata && !can_rollback;
+    let recommended_action = if can_rollback {
+        "rollback"
+    } else if can_reset {
+        "reset"
+    } else {
+        "manual"
+    };
+    let message = match recommended_action {
+        "rollback" => {
+            "설치 직후 패키지 되돌리기가 가능합니다. 설치기가 새로 넣은 패키지만 제거하고 메타데이터를 정리합니다."
+        }
+        "reset" => {
+            "설치기 메타데이터만 정리할 수 있습니다. apt 패키지나 기존 웹서비스는 제거하지 않습니다."
+        }
+        _ => {
+            "설치기 소유 흔적이 확인되지 않았습니다. 기존 운영 서버일 수 있으므로 자동 초기화 버튼을 제공하지 않습니다."
+        }
+    }
+    .to_string();
+
+    RecoveryApiStatus {
+        can_reset,
+        can_rollback,
+        recommended_action,
+        message,
+        metadata_paths,
+        rollback_reason,
+    }
+}
+
+fn installer_metadata_paths() -> [&'static str; 6] {
+    [
+        STATE_PATH,
+        OWNED_FILES_PATH,
+        REPORT_PATH,
+        CONFIG_PATH,
+        LOCAL_HOSTS_PATH,
+        ROLLBACK_PATH,
+    ]
 }
 
 fn options_from_request(request: SetupRequest) -> plan::PlanOptions {
@@ -1547,9 +1629,9 @@ fn emit_progress(
 mod tests {
     use super::{
         AUTH_LOCKOUT, CSRF_HEADER, DoctorCheckStatus, REPORT_PATH, SESSION_COOKIE, SESSION_TTL,
-        Session, SetupRequest, WebState, api_install_prepare, api_plan, api_report, api_reset,
-        api_rollback, api_status, app_css, app_js, bootstrap, browser_addr_for, create_session,
-        doctor_status_label, doctor_to_api, ensure_remote_binding_is_explicit,
+        Session, SetupRequest, WebState, api_install_prepare, api_plan, api_recovery, api_report,
+        api_reset, api_rollback, api_status, app_css, app_js, bootstrap, browser_addr_for,
+        create_session, doctor_status_label, doctor_to_api, ensure_remote_binding_is_explicit,
         failed_doctor_details, index, install_checks_to_api, install_to_api, lock_client_ip,
         mark_session_authenticated, normalize_login_username, options_from_request, parse_bind,
         remove_session, require_allowed_client_ip, require_authenticated_session, require_csrf,
@@ -2156,6 +2238,16 @@ mod tests {
         let report_payload = response_json(report_response).await;
         assert_eq!(report_payload["exists"], false);
         assert_eq!(report_payload["path"], REPORT_PATH);
+
+        let recovery_response =
+            api_recovery(axum::extract::State(state.clone()), peer(), headers.clone())
+                .await
+                .expect("recovery should respond")
+                .into_response();
+        let recovery_payload = response_json(recovery_response).await;
+        assert_eq!(recovery_payload["can_reset"], false);
+        assert_eq!(recovery_payload["can_rollback"], false);
+        assert_eq!(recovery_payload["recommended_action"], "manual");
 
         let reset_error = match api_reset(
             axum::extract::State(state.clone()),

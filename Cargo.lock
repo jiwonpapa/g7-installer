@@ -332,6 +332,7 @@ dependencies = [
  "axum",
  "clap",
  "g7-core",
+ "g7-state",
  "getrandom",
  "miette",
  "serde",
