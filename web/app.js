@@ -59,6 +59,7 @@ const nodes = {
   recoveryConfirmMessage: document.querySelector("#recovery-confirm-message"),
   recoveryConfirmSummary: document.querySelector("#recovery-confirm-summary"),
   recoveryConfirmYes: document.querySelector("#recovery-confirm-yes"),
+  summaryPanel: document.querySelector("#summary-panel"),
   floatingHelp: document.querySelector("#floating-help"),
   summaryDomain: document.querySelector("#summary-domain"),
   summaryMode: document.querySelector("#summary-mode"),
@@ -679,6 +680,10 @@ function refreshFormState(options = {}) {
 }
 
 function refreshSummary() {
+  if (nodes.summaryPanel) {
+    nodes.summaryPanel.hidden = !state.authenticated;
+  }
+
   const payload = optionPayload();
   nodes.summaryDomain.textContent = payload.domain;
   nodes.summaryMode.textContent = payload.local_test ? "로컬 테스트" : "실제 도메인";
