@@ -465,4 +465,15 @@ G7_SMOKE_RESET=1 scripts/g7-test-smoke.sh
 cargo fmt --check
 cargo test
 cargo clippy --all-targets -- -D warnings
+cargo doc --no-deps
+cargo llvm-cov --workspace --all-targets --summary-only --fail-under-lines 60
+(cd web && bun install --frozen-lockfile && bun run build)
 ```
+
+한 번에 실행:
+
+```bash
+scripts/quality-gate.sh
+```
+
+현재 커버리지 하한은 line coverage `60%`입니다. GitHub Actions 강제 게이트는 workflow 권한이 있는 토큰으로 추가해야 합니다.
