@@ -14,6 +14,7 @@ const state = {
   savedReportPayload: null,
   recoveryStatus: null,
   currentOperation: null,
+  operationLocked: false,
   planPackages: [],
   packageTicker: null,
   theme: localStorage.getItem("g7inst-theme") || "light",
@@ -53,6 +54,11 @@ const nodes = {
   installConfirmDialog: document.querySelector("#install-confirm-dialog"),
   installConfirmSummary: document.querySelector("#install-confirm-summary"),
   installConfirmStart: document.querySelector("#install-confirm-start"),
+  recoveryConfirmDialog: document.querySelector("#recovery-confirm-dialog"),
+  recoveryConfirmTitle: document.querySelector("#recovery-confirm-title"),
+  recoveryConfirmMessage: document.querySelector("#recovery-confirm-message"),
+  recoveryConfirmSummary: document.querySelector("#recovery-confirm-summary"),
+  recoveryConfirmYes: document.querySelector("#recovery-confirm-yes"),
   floatingHelp: document.querySelector("#floating-help"),
   summaryDomain: document.querySelector("#summary-domain"),
   summaryMode: document.querySelector("#summary-mode"),
@@ -220,6 +226,26 @@ function hydrateIconLabel(label) {
 function hydrateIcons(root = document) {
   root.querySelectorAll("[data-icon]").forEach((button) => hydrateIconButton(button));
   root.querySelectorAll("[data-ui-icon]").forEach((label) => hydrateIconLabel(label));
+}
+
+function setOperationLocked(locked) {
+  state.operationLocked = locked;
+  document.body.dataset.operationLocked = locked ? "true" : "false";
+
+  document.querySelectorAll("button, input, select, textarea").forEach((control) => {
+    if (locked) {
+      if (!Object.prototype.hasOwnProperty.call(control.dataset, "lockPrevDisabled")) {
+        control.dataset.lockPrevDisabled = control.disabled ? "true" : "false";
+      }
+      control.disabled = true;
+      return;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(control.dataset, "lockPrevDisabled")) {
+      control.disabled = control.dataset.lockPrevDisabled === "true";
+      delete control.dataset.lockPrevDisabled;
+    }
+  });
 }
 
 async function withBusy(button, busyText, task) {
@@ -464,6 +490,11 @@ function applyTheme(theme) {
 }
 
 function showStep(nextStep, options = {}) {
+  if (state.operationLocked && !options.force) {
+    log("진행 중인 서버 작업이 끝난 뒤 이동할 수 있습니다.");
+    return;
+  }
+
   let step = normalizedStep(nextStep);
   const shouldPushHistory = options.pushHistory !== false;
   const recoveryMode = Boolean(
@@ -1542,6 +1573,62 @@ function confirmInstallStart() {
   });
 }
 
+function recoveryConfirmContent(action) {
+  if (action === "rollback") {
+    return {
+      title: "패키지 되돌리기를 실행할까요?",
+      message: "설치 직후 운영 데이터가 없을 때만 사용하세요. 서비스 중지, 패키지 제거, 설치기 메타데이터 정리를 진행합니다.",
+      yesClass: "btn btn-error icon-button",
+      rows: [
+        ["대상", "이번 설치기가 설치한 apt 패키지와 서비스"],
+        ["보존", "설치 전부터 있던 패키지와 운영자가 만든 파일"],
+        ["실행 후", "서버 점검 단계로 돌아가 다시 테스트할 수 있습니다."],
+      ],
+    };
+  }
+
+  return {
+    title: "메타데이터 리셋을 실행할까요?",
+    message: "설치 기록과 준비 흔적만 정리합니다. apt 패키지와 기존 웹서비스는 제거하지 않습니다.",
+    yesClass: "btn btn-primary icon-button",
+    rows: [
+      ["대상", "installer 상태 파일, 리포트, 준비 파일"],
+      ["보존", "apt 패키지와 서비스"],
+      ["실행 후", "패키지가 남아 있으면 신규 설치 점검이 막힐 수 있습니다."],
+    ],
+  };
+}
+
+function recoveryConfirmSummaryHtml(action) {
+  const content = recoveryConfirmContent(action);
+  return `<dl>${content.rows.map(([key, value]) => `
+    <div>
+      <dt>${escapeHtml(key)}</dt>
+      <dd>${escapeHtml(value)}</dd>
+    </div>
+  `).join("")}</dl>`;
+}
+
+function confirmRecoveryAction(action) {
+  const content = recoveryConfirmContent(action);
+  if (!nodes.recoveryConfirmDialog?.showModal) {
+    return Promise.resolve(window.confirm(content.message));
+  }
+
+  nodes.recoveryConfirmTitle.textContent = content.title;
+  nodes.recoveryConfirmMessage.textContent = content.message;
+  nodes.recoveryConfirmSummary.innerHTML = recoveryConfirmSummaryHtml(action);
+  nodes.recoveryConfirmYes.className = content.yesClass;
+  nodes.recoveryConfirmDialog.returnValue = "cancel";
+  nodes.recoveryConfirmDialog.showModal();
+
+  return new Promise((resolve) => {
+    nodes.recoveryConfirmDialog.addEventListener("close", () => {
+      resolve(nodes.recoveryConfirmDialog.returnValue === "confirm");
+    }, { once: true });
+  });
+}
+
 function resetWizardForRetry() {
   clearWizardState();
   state.doctorReport = null;
@@ -1636,6 +1723,11 @@ async function syncServerState() {
 }
 
 async function runRecoveryAction(action, button) {
+  if (state.operationLocked || state.installRunning) {
+    log("진행 중인 서버 작업이 끝난 뒤 다시 시도하세요.");
+    return;
+  }
+
   const statusNode = state.activeStep === "install"
     ? nodes.installStatus
     : (state.activeStep === "check" ? nodes.doctorStatus : nodes.reportStatus);
@@ -1650,66 +1742,78 @@ async function runRecoveryAction(action, button) {
     return;
   }
 
-  const confirmMessage = action === "rollback"
-    ? "패키지 설치 직후, 운영 콘텐츠가 없을 때만 사용하세요.\n서비스를 중지하고 설치 패키지를 제거한 뒤 installer 메타데이터를 리셋합니다.\n계속할까요?"
-    : "installer 메타데이터만 리셋합니다.\napt 패키지와 기존 웹서비스는 제거하지 않습니다.\n계속할까요?";
-
-  if (!window.confirm(confirmMessage)) {
+  const confirmed = await confirmRecoveryAction(action);
+  if (!confirmed) {
+    log(action === "rollback" ? "패키지 되돌리기 취소" : "리셋 취소");
     return;
   }
 
   const endpoint = action === "rollback" ? "/api/rollback" : "/api/reset";
   const busyText = action === "rollback" ? "되돌리는 중" : "리셋 중";
   const successTitle = action === "rollback" ? "패키지 되돌리기 완료" : "리셋 완료";
+  const originalText = buttonLabel(button);
+  let recoveryCompleted = false;
 
-  await withBusy(button, busyText, async () => {
-    try {
-      state.currentOperation = action;
-      showReportProgress(5);
-      hideAlert(statusNode);
-      hideAlert(nodes.reportStatus);
-      log(action === "rollback" ? "패키지 되돌리기 실행" : "리셋 실행");
-      const report = await apiFetch(endpoint, {
-        method: "POST",
-        body: JSON.stringify({ dry_run: false }),
-      });
+  try {
+    state.currentOperation = action;
+    setButtonLabel(button, busyText);
+    setOperationLocked(true);
+    showReportProgress(5);
+    hideAlert(statusNode);
+    hideAlert(nodes.reportStatus);
+    log(action === "rollback" ? "패키지 되돌리기 실행" : "리셋 실행");
+    const report = await apiFetch(endpoint, {
+      method: "POST",
+      body: JSON.stringify({ dry_run: false }),
+    });
 
-      if (action === "rollback") {
-        renderRollbackReport(report);
-      } else {
-        renderResetReport(report);
-      }
-
-      showReportProgress(100);
-      setAlert(
-        statusNode,
-        "success",
-        successTitle,
-        action === "rollback"
-          ? "서비스 중지, apt 패키지 제거, installer 메타데이터 정리를 완료했습니다."
-          : "installer 메타데이터와 준비 흔적을 정리했습니다.",
-      );
-      log(successTitle);
-      clearWizardState();
-      state.installCompleted = false;
-      state.planReport = null;
-      state.savedReportPayload = null;
-      setPlanReady(false);
-      setReportReady(false);
-      refreshInstallButtonState();
-      await refreshRecoveryStatus();
-      await runDoctorCheck();
-      showStep("check");
-    } catch (error) {
-      renderErrorReport(action === "rollback" ? "패키지 되돌리기 실패" : "리셋 실패", formatError(error));
-      setAlert(statusNode, "error", action === "rollback" ? "패키지 되돌리기 실패" : "리셋 실패", formatError(error));
-      log(formatError(error));
-      await refreshRecoveryStatus();
-    } finally {
-      state.currentOperation = null;
-      saveWizardState();
+    if (action === "rollback") {
+      renderRollbackReport(report);
+    } else {
+      renderResetReport(report);
     }
-  });
+
+    showReportProgress(100);
+    setAlert(
+      statusNode,
+      "success",
+      successTitle,
+      action === "rollback"
+        ? "서비스 중지, apt 패키지 제거, installer 메타데이터 정리를 완료했습니다."
+        : "installer 메타데이터와 준비 흔적을 정리했습니다.",
+    );
+    log(successTitle);
+    clearWizardState();
+    state.installCompleted = false;
+    state.planReport = null;
+    state.savedReportPayload = null;
+    setPlanReady(false);
+    setReportReady(false);
+    refreshInstallButtonState();
+    await refreshRecoveryStatus();
+    await runDoctorCheck();
+    recoveryCompleted = true;
+  } catch (error) {
+    renderErrorReport(action === "rollback" ? "패키지 되돌리기 실패" : "리셋 실패", formatError(error));
+    setAlert(statusNode, "error", action === "rollback" ? "패키지 되돌리기 실패" : "리셋 실패", formatError(error));
+    log(formatError(error));
+    await refreshRecoveryStatus();
+  } finally {
+    state.currentOperation = null;
+    setOperationLocked(false);
+    if (button && originalText) {
+      setButtonLabel(button, originalText);
+    }
+    renderRecoveryStatus(state.recoveryStatus);
+    setDoctorPassed(Boolean(state.doctorReport?.install_allowed));
+    setPlanReady(Boolean(state.planReport || state.planReady));
+    refreshInstallButtonState(state.installCompleted ? null : undefined);
+    saveWizardState();
+  }
+
+  if (recoveryCompleted) {
+    showStep("check");
+  }
 }
 
 function bindHelpTooltips() {

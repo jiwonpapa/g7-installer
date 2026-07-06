@@ -275,6 +275,10 @@
     @apply text-xs font-semibold text-base-content/60;
   }
 
+  body[data-operation-locked="true"] .app-shell {
+    @apply cursor-progress;
+  }
+
   .result-list {
     @apply grid gap-2;
   }
