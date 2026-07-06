@@ -6,6 +6,7 @@ COVERAGE_FLOOR="${G7_COVERAGE_FLOOR:-60}"
 
 cd "${ROOT_DIR}"
 
+bash -n scripts/*.sh
 cargo fmt --check
 cargo test
 cargo clippy --all-targets -- -D warnings

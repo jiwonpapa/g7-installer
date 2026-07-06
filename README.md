@@ -457,11 +457,50 @@ VM reset까지 같이 실행:
 G7_SMOKE_RESET=1 scripts/g7-test-smoke.sh
 ```
 
+## 서버 운영 하네스
+
+운영 하네스는 disposable Ubuntu 24.04 테스트 VPS에서만 실행합니다.
+
+Release 바이너리 기준:
+
+```bash
+G7_OPS_CONFIRM_DISPOSABLE=1 \
+G7_OPS_HOST=g7-test \
+G7_OPS_SOURCE=release \
+G7_OPS_VERSION=v0.2.6 \
+scripts/ops-harness.sh
+```
+
+로컬 빌드 바이너리 기준:
+
+```bash
+G7_OPS_CONFIRM_DISPOSABLE=1 \
+G7_OPS_HOST=g7-test \
+G7_OPS_SOURCE=local \
+scripts/ops-harness.sh
+```
+
+검증 항목:
+
+- Ubuntu 24.04 서버 확인
+- bootstrap 또는 로컬 바이너리 배치
+- `doctor` fresh install 허용 확인
+- `plan --local-test` 생성
+- `install --local-test` 실행
+- `/var/log/g7-installer/report.json` 계약 검증
+- 설치 후 `doctor` fresh install 차단 확인
+- `rollback --dry-run` 확인
+- `rollback --yes` 실행
+- 새로 설치된 패키지 전체 제거 확인
+- installer metadata 파일과 installer 전용 디렉터리 제거 확인
+- rollback 후 재설치 가능 여부 확인
+
 ## 개발 검증
 
 커밋 전 기본 검증:
 
 ```bash
+bash -n scripts/*.sh
 cargo fmt --check
 cargo test
 cargo clippy --all-targets -- -D warnings
