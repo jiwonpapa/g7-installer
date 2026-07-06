@@ -12,6 +12,7 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io;
 use std::io::Write;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -49,6 +50,11 @@ pub struct InstallReport {
     pub www_mode: String,
     pub redis_mode: String,
     pub mail_mode: String,
+    pub smtp_host: Option<String>,
+    pub smtp_port: Option<u16>,
+    pub smtp_from: Option<String>,
+    pub smtp_encryption: Option<String>,
+    pub dns_check: bool,
     pub security_profile: String,
     pub ssh_policy: String,
     pub phase: String,
@@ -56,9 +62,13 @@ pub struct InstallReport {
     pub owned_files_path: PathBuf,
     pub owned_files: Vec<String>,
     pub completed_steps: Vec<String>,
+    pub preinstall_package_checks: Vec<InstallCheck>,
     pub package_checks: Vec<InstallCheck>,
     pub service_checks: Vec<InstallCheck>,
     pub port_checks: Vec<InstallCheck>,
+    pub network_checks: Vec<InstallCheck>,
+    pub mail_checks: Vec<InstallCheck>,
+    pub certbot_checks: Vec<InstallCheck>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,6 +102,9 @@ struct ApplySummary {
     package_checks: Vec<InstallCheck>,
     service_checks: Vec<InstallCheck>,
     port_checks: Vec<InstallCheck>,
+    network_checks: Vec<InstallCheck>,
+    mail_checks: Vec<InstallCheck>,
+    certbot_checks: Vec<InstallCheck>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -246,6 +259,9 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     completed_steps.push("package-verification-passed".to_string());
     completed_steps.push("service-verification-passed".to_string());
     completed_steps.push("port-verification-passed".to_string());
+    completed_steps.push("network-readiness-checked".to_string());
+    completed_steps.push("mail-readiness-checked".to_string());
+    completed_steps.push("certbot-readiness-checked".to_string());
     state.phase = "packages-installed".to_string();
     state.completed_steps = completed_steps.clone();
     write_state_file(&state_path, &state).map_err(|source| Error::FileWriteFailed {
@@ -270,6 +286,11 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         www_mode: install_plan.www_mode,
         redis_mode: install_plan.redis_mode,
         mail_mode: install_plan.mail_mode,
+        smtp_host: install_plan.smtp_host,
+        smtp_port: install_plan.smtp_port,
+        smtp_from: install_plan.smtp_from,
+        smtp_encryption: install_plan.smtp_encryption,
+        dns_check: install_plan.dns_check_required,
         security_profile: install_plan.security_profile,
         ssh_policy: install_plan.ssh_policy,
         phase: state.phase,
@@ -277,9 +298,13 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         owned_files_path,
         owned_files: owned_files.files,
         completed_steps,
+        preinstall_package_checks: apply_summary.preinstall_package_checks,
         package_checks: apply_summary.package_checks,
         service_checks: apply_summary.service_checks,
         port_checks: apply_summary.port_checks,
+        network_checks: apply_summary.network_checks,
+        mail_checks: apply_summary.mail_checks,
+        certbot_checks: apply_summary.certbot_checks,
     })
 }
 
@@ -360,12 +385,18 @@ fn apply_package_phase<R: CommandRunner>(
     let service_checks = verify_services(probe, &services)?;
     let port_checks = verify_ports(probe, &ports)?;
     require_checks_passed(&package_checks, &service_checks, &port_checks)?;
+    let network_checks = verify_network_readiness(probe, plan);
+    let mail_checks = verify_mail_readiness(probe, plan);
+    let certbot_checks = verify_certbot_readiness(probe, plan, &service_checks);
 
     Ok(ApplySummary {
         preinstall_package_checks,
         package_checks,
         service_checks,
         port_checks,
+        network_checks,
+        mail_checks,
+        certbot_checks,
     })
 }
 
@@ -393,6 +424,222 @@ fn managed_ports(plan: &plan::InstallPlan) -> Vec<u16> {
             _ => None,
         })
         .collect()
+}
+
+fn verify_network_readiness<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    plan: &plan::InstallPlan,
+) -> Vec<InstallCheck> {
+    if !plan.dns_check_required {
+        return vec![InstallCheck {
+            name: "dns-public-ip".to_string(),
+            status: "skipped".to_string(),
+            message: "DNS/IP check is skipped for local-test mode or disabled dns_check."
+                .to_string(),
+        }];
+    }
+
+    let public_v4 = match probe.public_ipv4() {
+        Ok(Some(address)) => {
+            let mut checks = vec![InstallCheck::pass(
+                "server-public-ipv4",
+                format!("Detected server public IPv4: {address}"),
+            )];
+            checks.extend(verify_dns_hosts_v4(probe, plan, Some(address)));
+            return checks;
+        }
+        Ok(None) => None,
+        Err(err) => {
+            return vec![InstallCheck::fail(
+                "server-public-ipv4",
+                format!("Could not detect server public IPv4: {err}"),
+            )];
+        }
+    };
+
+    verify_dns_hosts_v4(probe, plan, public_v4)
+}
+
+fn verify_dns_hosts_v4<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    plan: &plan::InstallPlan,
+    public_v4: Option<IpAddr>,
+) -> Vec<InstallCheck> {
+    let mut checks = Vec::new();
+
+    for host in certificate_hosts(plan) {
+        let name = if host == plan.domain {
+            "dns-a".to_string()
+        } else {
+            format!("dns-a-{host}")
+        };
+
+        let Some(public_v4) = public_v4 else {
+            checks.push(InstallCheck::fail(
+                name,
+                "Server public IPv4 is unavailable, so DNS A record cannot be compared.",
+            ));
+            continue;
+        };
+
+        match probe.dns_ipv4_records(&host) {
+            Ok(records) if records.contains(&public_v4) => checks.push(InstallCheck::pass(
+                name,
+                format!(
+                    "{} A record matches server public IPv4 {}.",
+                    host, public_v4
+                ),
+            )),
+            Ok(records) if records.is_empty() => checks.push(InstallCheck::fail(
+                name,
+                format!("{host} has no A record from system resolver."),
+            )),
+            Ok(records) => checks.push(InstallCheck::fail(
+                name,
+                format!(
+                    "{host} A records {:?} do not include server public IPv4 {}.",
+                    records, public_v4
+                ),
+            )),
+            Err(err) => checks.push(InstallCheck::fail(
+                name,
+                format!("Could not resolve {host} A record: {err}"),
+            )),
+        }
+    }
+
+    checks
+}
+
+fn verify_mail_readiness<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    plan: &plan::InstallPlan,
+) -> Vec<InstallCheck> {
+    match plan.mail_mode.as_str() {
+        "none" => vec![InstallCheck {
+            name: "mail-delivery".to_string(),
+            status: "skipped".to_string(),
+            message: "Mail delivery is disabled for this install.".to_string(),
+        }],
+        "smtp-relay" => {
+            let host = plan.smtp_host.as_deref().unwrap_or("");
+            let port = plan.smtp_port.unwrap_or(587);
+            let status = probe.tcp_connect(host, port);
+            vec![match status {
+                Ok(true) => InstallCheck::pass(
+                    "smtp-relay",
+                    format!("SMTP relay {host}:{port} is reachable from this server."),
+                ),
+                Ok(false) => InstallCheck::fail(
+                    "smtp-relay",
+                    format!("SMTP relay {host}:{port} is not reachable from this server."),
+                ),
+                Err(err) => InstallCheck::fail(
+                    "smtp-relay",
+                    format!("Could not check SMTP relay {host}:{port}: {err}"),
+                ),
+            }]
+        }
+        "local-postfix" => vec![match probe.service_activity("postfix") {
+            Ok(ServiceActivity::Active) => InstallCheck::pass(
+                "local-postfix",
+                "Postfix service is active for outbound-only local mail delivery.",
+            ),
+            Ok(ServiceActivity::Inactive) => {
+                InstallCheck::fail("local-postfix", "Postfix service is inactive.")
+            }
+            Ok(ServiceActivity::NotFound) => {
+                InstallCheck::fail("local-postfix", "Postfix service was not found.")
+            }
+            Ok(ServiceActivity::Unknown) => {
+                InstallCheck::fail("local-postfix", "Postfix service state is unknown.")
+            }
+            Err(err) => InstallCheck::fail(
+                "local-postfix",
+                format!("Could not inspect Postfix service: {err}"),
+            ),
+        }],
+        other => vec![InstallCheck::fail(
+            "mail-delivery",
+            format!("Unsupported mail mode in install report: {other}"),
+        )],
+    }
+}
+
+fn verify_certbot_readiness<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    plan: &plan::InstallPlan,
+    service_checks: &[InstallCheck],
+) -> Vec<InstallCheck> {
+    if plan.deployment_mode == "local-test" {
+        return vec![InstallCheck {
+            name: "certbot".to_string(),
+            status: "skipped".to_string(),
+            message: "Local test mode skips Let's Encrypt certificates.".to_string(),
+        }];
+    }
+
+    let mut checks = Vec::new();
+    let timer_check = service_checks
+        .iter()
+        .find(|check| check.name == "certbot.timer")
+        .cloned()
+        .unwrap_or_else(|| {
+            InstallCheck::fail(
+                "certbot.timer",
+                "certbot.timer was not checked during install.",
+            )
+        });
+    checks.push(timer_check);
+
+    let cert_path = Path::new("/etc/letsencrypt/live").join(&plan.domain);
+    if !probe.path_exists(&cert_path) {
+        checks.push(InstallCheck {
+            name: "certbot-certificate".to_string(),
+            status: "deferred".to_string(),
+            message: "Certificate issuance waits for the vhost/app phase so HTTP-01 can be served safely.".to_string(),
+        });
+        checks.push(InstallCheck {
+            name: "certbot-renew-dry-run".to_string(),
+            status: "deferred".to_string(),
+            message: "Renewal dry-run will run after a certificate exists.".to_string(),
+        });
+        return checks;
+    }
+
+    checks.push(InstallCheck::pass(
+        "certbot-certificate",
+        format!("Existing certificate directory found for {}.", plan.domain),
+    ));
+
+    match probe.certbot_renew_dry_run(&plan.domain) {
+        Ok(output) if output.status == 0 => checks.push(InstallCheck::pass(
+            "certbot-renew-dry-run",
+            "certbot renew --dry-run completed successfully.",
+        )),
+        Ok(output) => checks.push(InstallCheck::fail(
+            "certbot-renew-dry-run",
+            format!(
+                "certbot renew --dry-run failed with status {}: {}",
+                output.status,
+                output.stderr.trim()
+            ),
+        )),
+        Err(err) => checks.push(InstallCheck::fail(
+            "certbot-renew-dry-run",
+            format!("Could not run certbot renew --dry-run: {err}"),
+        )),
+    }
+
+    checks
+}
+
+fn certificate_hosts(plan: &plan::InstallPlan) -> Vec<String> {
+    let mut hosts = vec![plan.domain.clone()];
+    if plan.www_mode != "none" && !plan.domain.starts_with("www.") {
+        hosts.push(format!("www.{}", plan.domain));
+    }
+    hosts
 }
 
 fn verify_packages<R: CommandRunner>(
@@ -663,14 +910,28 @@ fn report_content(
         "web_server": &plan.web_server,
         "php_version": &plan.php_version,
         "database": &plan.database_engine,
+        "database_name": &plan.database_name,
+        "database_user": &plan.database_user,
         "site_user": &plan.site_user,
+        "web_root_mode": &plan.web_root_mode,
         "web_root": &plan.web_root,
+        "www_mode": &plan.www_mode,
+        "redis": &plan.redis_mode,
+        "mail_mode": &plan.mail_mode,
+        "smtp_host": &plan.smtp_host,
+        "smtp_port": &plan.smtp_port,
+        "smtp_from": &plan.smtp_from,
+        "smtp_encryption": &plan.smtp_encryption,
+        "dns_check": plan.dns_check_required,
         "security_profile": &plan.security_profile,
         "ssh_policy": &plan.ssh_policy,
         "preinstall_package_checks": checks_json(&summary.preinstall_package_checks),
         "package_checks": checks_json(&summary.package_checks),
         "service_checks": checks_json(&summary.service_checks),
         "port_checks": checks_json(&summary.port_checks),
+        "network_checks": checks_json(&summary.network_checks),
+        "mail_checks": checks_json(&summary.mail_checks),
+        "certbot_checks": checks_json(&summary.certbot_checks),
         "problem": problem,
     });
     let mut payload =
@@ -801,6 +1062,33 @@ mod tests {
                 .iter()
                 .any(|check| { check.name == "80" && check.status == "pass" })
         );
+        assert!(
+            report
+                .network_checks
+                .iter()
+                .any(|check| { check.name == "server-public-ipv4" && check.status == "pass" })
+        );
+        assert!(
+            report
+                .network_checks
+                .iter()
+                .any(|check| { check.name == "dns-a" && check.status == "pass" })
+        );
+        assert!(
+            report
+                .mail_checks
+                .iter()
+                .any(|check| { check.name == "mail-delivery" && check.status == "skipped" })
+        );
+        assert!(
+            report
+                .certbot_checks
+                .iter()
+                .any(|check| { check.name == "certbot-certificate" && check.status == "deferred" })
+        );
+        assert!(report_json.contains("\"network_checks\""));
+        assert!(report_json.contains("\"mail_checks\""));
+        assert!(report_json.contains("\"certbot_checks\""));
 
         fs::remove_file(os_release_path)?;
         fs::remove_dir_all(fs_root)?;
@@ -880,8 +1168,52 @@ mod tests {
         assert!(local_hosts.contains("127.0.0.1 g7-test.local"));
         assert!(
             report
+                .network_checks
+                .iter()
+                .any(|check| { check.name == "dns-public-ip" && check.status == "skipped" })
+        );
+        assert!(
+            report
+                .certbot_checks
+                .iter()
+                .any(|check| { check.name == "certbot" && check.status == "skipped" })
+        );
+        assert!(
+            report
                 .completed_steps
                 .contains(&"local-hosts-suggestion-written".to_string())
+        );
+
+        fs::remove_file(os_release_path)?;
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn install_reports_smtp_relay_reachability()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let os_release_path = write_temp_os_release()?;
+        let fs_root = create_temp_fs_root()?;
+        let options = super::plan::PlanOptions {
+            mail_mode: "smtp-relay".to_string(),
+            smtp_host: Some("smtp.example.com".to_string()),
+            smtp_from: Some("no-reply@example.com".to_string()),
+            ..super::plan::PlanOptions::default()
+        };
+        let probe =
+            clean_root_probe_for_options(&os_release_path, &fs_root, "example.com", &options)?;
+        let paths = InstallPaths::with_root(&fs_root);
+
+        let report = run_with_probe_and_paths("example.com".to_string(), options, &probe, &paths)?;
+
+        assert_eq!(report.mail_mode, "smtp-relay");
+        assert_eq!(report.smtp_host.as_deref(), Some("smtp.example.com"));
+        assert_eq!(report.smtp_port, Some(587));
+        assert!(
+            report
+                .mail_checks
+                .iter()
+                .any(|check| { check.name == "smtp-relay" && check.status == "pass" })
         );
 
         fs::remove_file(os_release_path)?;
@@ -1024,6 +1356,35 @@ mod tests {
             runner.push_output(CommandOutput::success(format!(
                 "tcp LISTEN 0 4096 127.0.0.1:{port} 0.0.0.0:*\n"
             )));
+        }
+        push_successful_network_outputs(runner, install_plan);
+        push_successful_mail_outputs(runner, install_plan);
+    }
+
+    fn push_successful_network_outputs(
+        runner: &FakeCommandRunner,
+        install_plan: &super::plan::InstallPlan,
+    ) {
+        if !install_plan.dns_check_required {
+            return;
+        }
+
+        runner.push_output(CommandOutput::success("203.0.113.10\n"));
+        for host in super::certificate_hosts(install_plan) {
+            runner.push_output(CommandOutput::success(format!(
+                "203.0.113.10 STREAM {host}\n203.0.113.10 DGRAM {host}\n"
+            )));
+        }
+    }
+
+    fn push_successful_mail_outputs(
+        runner: &FakeCommandRunner,
+        install_plan: &super::plan::InstallPlan,
+    ) {
+        match install_plan.mail_mode.as_str() {
+            "smtp-relay" => runner.push_output(CommandOutput::success("")),
+            "local-postfix" => runner.push_output(CommandOutput::success("active\n")),
+            _ => {}
         }
     }
 

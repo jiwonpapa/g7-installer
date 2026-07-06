@@ -339,7 +339,8 @@ sudo g7inst self-update
   - 서버 점검, 옵션 선택, 계획 확인, 패키지 설치, 리포트, 리셋, 패키지 되돌리기 화면 제공
   - 뒤로가기/새로고침 후 브라우저 세션과 서버 report 기준으로 마법사 단계 복원
   - `/api/recovery`로 설치기 메타데이터와 안전한 rollback 가능 여부 확인
-  - HTML 결과 리포트, 패키지/서비스/포트 검증 목록 제공
+  - HTML 결과 리포트, 패키지/서비스/포트/DNS/메일/Certbot 검증 목록 제공
+  - 설치 전 패키지 기준을 `신규 설치`, `기존 보존` 라벨로 표시
   - 현재 패키지 설치 단계에서는 vhost/app이 없으므로 도메인 접속 링크는 비활성 안내로 표시
   - 정적 CSS/JS 자산에 빌드 버전 쿼리와 no-cache 헤더 적용
   - reset 성공 후 server check 자동 재실행
@@ -373,6 +374,11 @@ sudo g7inst self-update
   - `apt-get update`, 후보 패키지 확인, `apt-get install -y --no-install-recommends`를 비대화식으로 실행합니다.
   - Nginx/Apache, PHP-FPM, MySQL/MariaDB, Redis, Certbot timer 같은 기본 서비스를 `systemctl enable --now`로 시작합니다.
   - 설치 후 `dpkg-query`, `systemctl is-active`, `ss` 기반으로 패키지/서비스/포트를 검증합니다.
+  - 실제 도메인 모드에서는 `curl`로 서버 공인 IPv4를 확인하고 `getent ahostsv4`로 도메인/www A 레코드가 같은 IP를 가리키는지 리포트합니다.
+  - `smtp-relay` 모드에서는 선택한 SMTP host/port TCP 연결성을 리포트합니다.
+  - `local-postfix` 모드에서는 Postfix 서비스 활성 상태를 리포트합니다.
+  - 실제 도메인 모드에서는 Certbot 패키지와 `certbot.timer` 상태를 리포트하고, 인증서가 이미 있으면 `certbot renew --dry-run`을 실행합니다.
+  - 인증서 신규 발급은 vhost/app 단계에서 HTTP-01 challenge를 안전하게 제공할 수 있을 때 실행합니다.
   - 선택 옵션을 `/etc/g7-installer/config.toml`에 저장합니다.
   - 선택한 앱 웹루트는 config/report에 기록하지만 아직 디렉터리를 생성하지 않습니다.
   - `--local-test` 사용 시 `/etc/g7-installer/local-hosts.txt`에 hosts 등록 힌트를 저장합니다.
@@ -419,9 +425,8 @@ sudo g7inst self-update
 - DB app user/password 랜덤 생성 및 root-only 저장
 - G7 Release 다운로드 및 압축 해제
 - Certbot 인증서 발급
-- Certbot 자동갱신 timer 실제 활성화
-- 도메인 DNS A/AAAA와 VPS 공인 IP 실제 비교
-- SMTP outbound 실제 연결 테스트
+- Certbot 신규 인증서 발급 후 vhost TLS 적용
+- IPv6 AAAA 공인 IP 대조
 - Redis 하드닝
 - SSH 설정 audit/hardening
 - UFW/방화벽 allow/deny 적용

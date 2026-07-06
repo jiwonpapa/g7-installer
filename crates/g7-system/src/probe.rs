@@ -3,12 +3,15 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use crate::apt::{apt_candidate_available, apt_install, apt_purge, apt_update};
+use crate::certbot::renew_dry_run;
 use crate::command::{CommandError, CommandOutput, CommandRunner, RealCommandRunner};
+use crate::network::{dns_ipv4_records, dns_ipv6_records, public_ipv4, public_ipv6, tcp_connect};
 use crate::os::{OsRelease, OsReleaseError, read_os_release};
 use crate::package::{PackageStatus, package_status};
 use crate::port::{PortStatus, tcp_port_status};
 use crate::privilege::{Privilege, current_privilege};
 use crate::service::{ServiceActivity, disable_now, enable_now, is_active};
+use std::net::IpAddr;
 
 #[derive(Debug)]
 pub struct SystemProbe<R> {
@@ -76,6 +79,33 @@ impl<R: CommandRunner> SystemProbe<R> {
 
     pub fn tcp_port_status(&self, port: u16) -> Result<PortStatus, SystemProbeError> {
         tcp_port_status(&self.runner, port).map_err(SystemProbeError::Command)
+    }
+
+    pub fn public_ipv4(&self) -> Result<Option<IpAddr>, SystemProbeError> {
+        public_ipv4(&self.runner).map_err(SystemProbeError::Command)
+    }
+
+    pub fn public_ipv6(&self) -> Result<Option<IpAddr>, SystemProbeError> {
+        public_ipv6(&self.runner).map_err(SystemProbeError::Command)
+    }
+
+    pub fn dns_ipv4_records(&self, host: &str) -> Result<Vec<IpAddr>, SystemProbeError> {
+        dns_ipv4_records(&self.runner, host).map_err(SystemProbeError::Command)
+    }
+
+    pub fn dns_ipv6_records(&self, host: &str) -> Result<Vec<IpAddr>, SystemProbeError> {
+        dns_ipv6_records(&self.runner, host).map_err(SystemProbeError::Command)
+    }
+
+    pub fn tcp_connect(&self, host: &str, port: u16) -> Result<bool, SystemProbeError> {
+        tcp_connect(&self.runner, host, port).map_err(SystemProbeError::Command)
+    }
+
+    pub fn certbot_renew_dry_run(
+        &self,
+        cert_name: &str,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        renew_dry_run(&self.runner, cert_name).map_err(SystemProbeError::Command)
     }
 
     pub fn current_privilege(&self) -> Result<Privilege, SystemProbeError> {

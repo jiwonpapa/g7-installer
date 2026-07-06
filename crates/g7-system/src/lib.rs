@@ -2,6 +2,7 @@ pub mod apt;
 pub mod certbot;
 pub mod command;
 pub mod database;
+pub mod network;
 pub mod nginx;
 pub mod os;
 pub mod package;

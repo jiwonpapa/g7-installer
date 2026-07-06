@@ -69,6 +69,12 @@ const statusLabel = {
   warn: "주의",
   fail: "실패",
   pending: "대기",
+  info: "정보",
+  installed: "기존 보존",
+  "not-installed": "신규 설치",
+  unknown: "확인 필요",
+  skipped: "건너뜀",
+  deferred: "후속 단계",
 };
 
 const checkLabel = {
@@ -467,6 +473,16 @@ function showStep(nextStep, options = {}) {
       || state.recoveryStatus?.can_rollback
       || state.recoveryStatus?.metadata_paths?.length,
   );
+
+  if (step !== "login" && !state.authenticated) {
+    setAlert(
+      nodes.loginStatus,
+      "warning",
+      "서버 로그인이 필요합니다",
+      "저장 리포트, 점검 상태, 설치 진행 상태를 읽으려면 root 또는 sudo 가능한 계정으로 로그인하세요.",
+    );
+    step = "login";
+  }
 
   if (["options", "plan"].includes(step) && !state.doctorPassed) {
     setAlert(
@@ -1186,14 +1202,21 @@ function renderInstallReport(report) {
       ["앱 패키지", appPackageLabel(report.app_package)],
       ["사이트 계정", report.site_user],
       ["웹루트", report.web_root],
+      ["메일", mailModeLabel(report.mail_mode)],
+      ["SMTP 서버", report.smtp_host || "-"],
+      ["DNS/IP 확인", report.dns_check ? "수행" : "건너뜀"],
       ["단계", report.phase],
       ["상태 파일", report.state_path],
       ["소유 파일 목록", report.owned_files_path],
     ], link.hint),
     listCard("완료된 작업", report.completed_steps),
+    checksCard("설치 전 패키지 기준", report.preinstall_package_checks),
     checksCard("설치 패키지 검증", report.package_checks),
     checksCard("서비스 검증", report.service_checks),
     checksCard("포트 검증", report.port_checks),
+    checksCard("DNS / 네트워크 검증", report.network_checks),
+    checksCard("메일 발송 검증", report.mail_checks),
+    checksCard("SSL / Certbot 검증", report.certbot_checks),
   ].join("");
 
   ["preflight", "packages", "config", "services", "ports", "http", "report"].forEach((stage) => markStage(stage, "성공"));
@@ -1246,11 +1269,17 @@ function renderSavedReport(payload) {
       ["데이터베이스", databaseLabel(report.database)],
       ["사이트 계정", report.site_user || "-"],
       ["웹루트", report.web_root || "-"],
+      ["메일", mailModeLabel(report.mail_mode)],
+      ["SMTP 서버", report.smtp_host || "-"],
+      ["DNS/IP 확인", report.dns_check ? "수행" : "건너뜀"],
     ], link.hint),
-    checksCard("설치 전 패키지 상태", report.preinstall_package_checks),
+    checksCard("설치 전 패키지 기준", report.preinstall_package_checks),
     checksCard("설치 패키지 검증", report.package_checks),
     checksCard("서비스 검증", report.service_checks),
     checksCard("포트 검증", report.port_checks),
+    checksCard("DNS / 네트워크 검증", report.network_checks),
+    checksCard("메일 발송 검증", report.mail_checks),
+    checksCard("SSL / Certbot 검증", report.certbot_checks),
     report.problem ? listCard("문제", [report.problem]) : "",
   ].join("");
   setReportReady(true);
@@ -1315,15 +1344,18 @@ function checksCard(title, checks) {
     <section class="report-card">
       <h3>${escapeHtml(title)}</h3>
       <div class="result-list mt-3">
-        ${rows.map((check) => `
-          <div class="result-row" data-status="${checkStatus(check.status)}">
+        ${rows.map((check) => {
+          const normalizedStatus = checkStatus(check.status);
+          return `
+          <div class="result-row" data-status="${normalizedStatus}">
             <div class="result-copy">
               <span>${escapeHtml(check.name)}</span>
-              <p>${escapeHtml(check.message || "")}</p>
+              <p>${escapeHtml(checkMessage(check.status, check.message))}</p>
             </div>
-            <strong>${escapeHtml(statusLabel[checkStatus(check.status)] || check.status || "대기")}</strong>
+            <strong>${escapeHtml(checkStatusLabel(check.status, normalizedStatus))}</strong>
           </div>
-        `).join("")}
+        `;
+        }).join("")}
       </div>
     </section>
   `;
@@ -1353,10 +1385,26 @@ function checkStatus(status) {
   if (status === "pass") {
     return "pass";
   }
-  if (status === "warn" || status === "not-installed" || status === "pending") {
+  if (["installed", "not-installed", "skipped", "deferred", "pending"].includes(status)) {
+    return "info";
+  }
+  if (status === "warn" || status === "unknown") {
     return "warn";
   }
   return status === "fail" ? "fail" : "pending";
+}
+
+function checkStatusLabel(status, normalizedStatus) {
+  return statusLabel[status] || statusLabel[normalizedStatus] || status || "대기";
+}
+
+function checkMessage(status, message) {
+  const labelByMessage = {
+    "package was already installed before G7 installer ran": "설치 전부터 있던 패키지입니다. 되돌리기 때 보존합니다.",
+    "package was absent before G7 installer ran": "설치 전에는 없던 패키지입니다. 이번 설치기가 설치했습니다.",
+    "package preinstall state is unknown": "설치 전 패키지 상태를 확인하지 못했습니다.",
+  };
+  return labelByMessage[message] || message || "";
 }
 
 function actionStatus(status) {

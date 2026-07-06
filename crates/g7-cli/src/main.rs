@@ -503,6 +503,19 @@ fn print_install(report: install::InstallReport) {
     println!("www_mode: {}", report.www_mode);
     println!("redis: {}", report.redis_mode);
     println!("mail_mode: {}", report.mail_mode);
+    if let Some(host) = &report.smtp_host {
+        println!("smtp_host: {host}");
+    }
+    if let Some(port) = report.smtp_port {
+        println!("smtp_port: {port}");
+    }
+    if let Some(from) = &report.smtp_from {
+        println!("smtp_from: {from}");
+    }
+    if let Some(encryption) = &report.smtp_encryption {
+        println!("smtp_encryption: {encryption}");
+    }
+    println!("dns_check: {}", report.dns_check);
     println!("security_profile: {}", report.security_profile);
     println!("ssh_policy: {}", report.ssh_policy);
     println!("phase: {}", report.phase);
@@ -515,9 +528,16 @@ fn print_install(report: install::InstallReport) {
         println!("- {step}");
     }
 
+    print_install_checks(
+        "Preinstall package checks",
+        &report.preinstall_package_checks,
+    );
     print_install_checks("Package checks", &report.package_checks);
     print_install_checks("Service checks", &report.service_checks);
     print_install_checks("Port checks", &report.port_checks);
+    print_install_checks("Network checks", &report.network_checks);
+    print_install_checks("Mail checks", &report.mail_checks);
+    print_install_checks("Certbot checks", &report.certbot_checks);
 }
 
 fn print_install_checks(title: &str, checks: &[install::InstallCheck]) {

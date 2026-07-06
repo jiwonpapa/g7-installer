@@ -258,13 +258,23 @@ struct InstallApiReport {
     app_package: String,
     site_user: String,
     web_root: String,
+    mail_mode: String,
+    smtp_host: Option<String>,
+    smtp_port: Option<u16>,
+    smtp_from: Option<String>,
+    smtp_encryption: Option<String>,
+    dns_check: bool,
     phase: String,
     state_path: String,
     owned_files_path: String,
     completed_steps: Vec<String>,
+    preinstall_package_checks: Vec<InstallApiCheck>,
     package_checks: Vec<InstallApiCheck>,
     service_checks: Vec<InstallApiCheck>,
     port_checks: Vec<InstallApiCheck>,
+    network_checks: Vec<InstallApiCheck>,
+    mail_checks: Vec<InstallApiCheck>,
+    certbot_checks: Vec<InstallApiCheck>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1124,13 +1134,23 @@ fn install_to_api(
         app_package,
         site_user: report.site_user,
         web_root: report.web_root,
+        mail_mode: report.mail_mode,
+        smtp_host: report.smtp_host,
+        smtp_port: report.smtp_port,
+        smtp_from: report.smtp_from,
+        smtp_encryption: report.smtp_encryption,
+        dns_check: report.dns_check,
         phase: report.phase,
         state_path: report.state_path.display().to_string(),
         owned_files_path: report.owned_files_path.display().to_string(),
         completed_steps: report.completed_steps,
+        preinstall_package_checks: install_checks_to_api(report.preinstall_package_checks),
         package_checks: install_checks_to_api(report.package_checks),
         service_checks: install_checks_to_api(report.service_checks),
         port_checks: install_checks_to_api(report.port_checks),
+        network_checks: install_checks_to_api(report.network_checks),
+        mail_checks: install_checks_to_api(report.mail_checks),
+        certbot_checks: install_checks_to_api(report.certbot_checks),
     }
 }
 
@@ -2046,6 +2066,11 @@ mod tests {
                 www_mode: "redirect-to-root".to_string(),
                 redis_mode: "enable".to_string(),
                 mail_mode: "none".to_string(),
+                smtp_host: None,
+                smtp_port: None,
+                smtp_from: None,
+                smtp_encryption: None,
+                dns_check: false,
                 security_profile: "standard".to_string(),
                 ssh_policy: "audit-only".to_string(),
                 phase: "packages-installed".to_string(),
@@ -2053,6 +2078,11 @@ mod tests {
                 owned_files_path: PathBuf::from("/var/lib/g7-installer/owned-files.json"),
                 owned_files: vec!["/etc/g7-installer/config.toml".to_string()],
                 completed_steps: vec!["preflight-passed".to_string()],
+                preinstall_package_checks: vec![install::InstallCheck {
+                    name: "nginx".to_string(),
+                    status: "not-installed".to_string(),
+                    message: "package was absent before G7 installer ran".to_string(),
+                }],
                 package_checks: vec![install::InstallCheck {
                     name: "nginx".to_string(),
                     status: "pass".to_string(),
@@ -2060,6 +2090,9 @@ mod tests {
                 }],
                 service_checks: Vec::new(),
                 port_checks: Vec::new(),
+                network_checks: Vec::new(),
+                mail_checks: Vec::new(),
+                certbot_checks: Vec::new(),
             },
             "apt-default".to_string(),
             "gnuboard7".to_string(),
@@ -2067,6 +2100,12 @@ mod tests {
         assert_eq!(install_api.phase, "packages-installed");
         assert_eq!(install_api.database_version, "apt-default");
         assert_eq!(install_api.app_package, "gnuboard7");
+        assert_eq!(install_api.mail_mode, "none");
+        assert!(!install_api.dns_check);
+        assert_eq!(
+            install_api.preinstall_package_checks[0].status,
+            "not-installed"
+        );
         assert_eq!(install_api.package_checks[0].name, "nginx");
         assert_eq!(install_api.state_path, "/var/lib/g7-installer/state.json");
 
