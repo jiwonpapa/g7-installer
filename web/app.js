@@ -937,6 +937,12 @@ function startPackageTicker() {
     updatePackageProgress(packageItem.name, "설치 중", percent, "apt 설치 또는 검증을 진행 중입니다.");
 
     if (percent >= 95 && index < state.planPackages.length - 1) {
+      updatePackageProgress(
+        packageItem.name,
+        "검증 대기",
+        100,
+        "apt 설치 요청을 넘겼고 최종 검증 결과를 기다리고 있습니다.",
+      );
       index += 1;
       percent = 5;
       updatePackageProgress(state.planPackages[index].name, "설치 중", percent, "apt 작업을 준비하고 있습니다.");
