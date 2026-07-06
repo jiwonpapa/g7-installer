@@ -474,7 +474,7 @@ function showStep(nextStep, options = {}) {
       || state.recoveryStatus?.metadata_paths?.length,
   );
 
-  if (step !== "login" && !state.authenticated) {
+  if (!["login", "check"].includes(step) && !state.authenticated) {
     setAlert(
       nodes.loginStatus,
       "warning",
