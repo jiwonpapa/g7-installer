@@ -137,4 +137,42 @@ pub enum Error {
         help("Reset only removes paths tracked by installer ownership metadata.")
     )]
     UnsafeResetPath { path: String },
+
+    #[error("rollback requires explicit confirmation")]
+    #[diagnostic(
+        code(g7::rollback::confirmation_required),
+        help("Run rollback with --yes, or use --dry-run to preview package and metadata changes.")
+    )]
+    RollbackConfirmationRequired,
+
+    #[error("rollback blocked: {reason}")]
+    #[diagnostic(
+        code(g7::rollback::blocked),
+        help(
+            "Rollback only runs immediately after the package install phase and before app/site content is created."
+        )
+    )]
+    RollbackBlocked { reason: String },
+
+    #[error("rollback command failed during {step}: {command} exited with status {status}")]
+    #[diagnostic(
+        code(g7::rollback::command_failed),
+        help("Review the rollback output, fix the failed service or package state, and retry.")
+    )]
+    RollbackCommandFailed {
+        step: &'static str,
+        command: String,
+        status: i32,
+        stdout: String,
+        stderr: String,
+    },
+
+    #[error("rollback verification failed: {checks}")]
+    #[diagnostic(
+        code(g7::rollback::verification_failed),
+        help(
+            "Some packages still appear installed after rollback. Review apt output and remove them manually if needed."
+        )
+    )]
+    RollbackVerificationFailed { checks: String },
 }

@@ -6,7 +6,7 @@
 
 use clap::{Parser, Subcommand};
 use g7_core::commands::{
-    DoctorCheckStatus, doctor, install, logs, plan, reset, self_update, status, update,
+    DoctorCheckStatus, doctor, install, logs, plan, reset, rollback, self_update, status, update,
 };
 use miette::Result;
 
@@ -179,6 +179,15 @@ enum Command {
         #[arg(long, default_value_t = false)]
         dry_run: bool,
     },
+    /// Roll back package install before app/site content is created.
+    Rollback {
+        /// Confirm service disable, apt purge, and metadata reset.
+        #[arg(long, default_value_t = false)]
+        yes: bool,
+        /// Preview services, packages, and metadata without changing them.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
     /// Update the installed G7 application.
     Update,
     /// Update the installer binary.
@@ -307,6 +316,9 @@ async fn main() -> Result<()> {
         Command::Logs => print_logs(logs::location()),
         Command::Reset { yes, dry_run } => {
             print_reset(reset::run(yes, dry_run).map_err(miette::Report::new)?);
+        }
+        Command::Rollback { yes, dry_run } => {
+            print_rollback(rollback::run(yes, dry_run).map_err(miette::Report::new)?);
         }
         Command::Update => {
             update::run().map_err(miette::Report::new)?;
@@ -537,6 +549,46 @@ fn print_reset(report: reset::ResetReport) {
     if !report.missing.is_empty() {
         println!("missing:");
         for path in report.missing {
+            println!("- {path}");
+        }
+    }
+}
+
+fn print_rollback(report: rollback::RollbackReport) {
+    println!("G7 Installer Rollback");
+    println!("dry_run: {}", report.dry_run);
+    println!("phase: {}", report.phase);
+
+    println!();
+    println!("Service actions:");
+    if report.service_actions.is_empty() {
+        println!("- none");
+    } else {
+        for action in report.service_actions {
+            println!("- [{}] {} - {}", action.status, action.name, action.message);
+        }
+    }
+
+    println!();
+    println!("Package actions:");
+    if report.package_actions.is_empty() {
+        println!("- none");
+    } else {
+        for action in report.package_actions {
+            println!("- [{}] {} - {}", action.status, action.name, action.message);
+        }
+    }
+
+    println!();
+    println!("Metadata reset:");
+    println!("dry_run: {}", report.metadata_reset.dry_run);
+    println!("removed:");
+    for path in report.metadata_reset.removed {
+        println!("- {path}");
+    }
+    if !report.metadata_reset.missing.is_empty() {
+        println!("missing:");
+        for path in report.metadata_reset.missing {
             println!("- {path}");
         }
     }

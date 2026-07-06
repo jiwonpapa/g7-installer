@@ -70,6 +70,7 @@ const errorLabel = {
   "invalid CSRF token": "보안 확인 토큰이 올바르지 않습니다.",
   "install is already running": "설치 작업이 이미 진행 중입니다.",
   "reset is blocked while install is running": "설치 중에는 리셋할 수 없습니다.",
+  "rollback is blocked while another install action is running": "다른 설치 작업 중에는 되돌릴 수 없습니다.",
 };
 
 const templates = {
@@ -169,6 +170,20 @@ function localizeMessage(message) {
 
   if (message.startsWith("install verification failed:")) {
     return message.replace("install verification failed:", "설치 검증 실패:");
+  }
+
+  if (message.startsWith("rollback blocked:")) {
+    return message.replace("rollback blocked:", "되돌리기 중단:");
+  }
+
+  if (message.startsWith("rollback command failed during")) {
+    return message
+      .replace("rollback command failed during", "되돌리기 명령 실패:")
+      .replace("exited with status", "종료 코드");
+  }
+
+  if (message.startsWith("rollback verification failed:")) {
+    return message.replace("rollback verification failed:", "되돌리기 검증 실패:");
   }
 
   return message;
@@ -579,6 +594,37 @@ function renderResetReport(report) {
   ].join("\n");
 }
 
+function renderRollbackReport(report) {
+  nodes.reportOutput.textContent = [
+    "패키지 되돌리기 완료",
+    `미리보기: ${report.dry_run}`,
+    `단계: ${report.phase}`,
+    "",
+    "서비스 처리:",
+    ...formatRollbackActions(report.service_actions),
+    "",
+    "패키지 처리:",
+    ...formatRollbackActions(report.package_actions),
+    "",
+    "메타데이터 리셋:",
+    `- 미리보기: ${report.metadata_reset.dry_run}`,
+    ...(report.metadata_reset.removed.length
+      ? report.metadata_reset.removed.map((path) => `- 삭제: ${path}`)
+      : ["- 삭제 항목 없음"]),
+    ...(report.metadata_reset.missing.length
+      ? report.metadata_reset.missing.map((path) => `- 이미 없음: ${path}`)
+      : []),
+  ].join("\n");
+}
+
+function formatRollbackActions(actions) {
+  if (!Array.isArray(actions) || actions.length === 0) {
+    return ["- 없음"];
+  }
+
+  return actions.map((action) => `- [${action.status}] ${action.name}: ${action.message}`);
+}
+
 function renderPlanReport(report) {
   const packages = report.packages.length
     ? report.packages.map((item) => `- ${item.name}: ${item.description}`).join("\n")
@@ -783,6 +829,34 @@ function bindEvents() {
       } catch (error) {
         nodes.reportOutput.textContent = formatError(error);
         setAlert(nodes.reportStatus, "error", "리셋 실패", formatError(error));
+        log(formatError(error));
+      }
+    });
+  });
+
+  document.querySelector("#rollback-button").addEventListener("click", async (event) => {
+    const confirmed = window.confirm(
+      "패키지 설치 직후, 운영 콘텐츠가 없을 때만 사용하세요.\n서비스를 중지하고 설치 패키지를 제거한 뒤 installer 메타데이터를 리셋합니다.\n계속할까요?",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    await withBusy(event.currentTarget, "되돌리는 중", async () => {
+      try {
+        hideAlert(nodes.reportStatus);
+        log("패키지 되돌리기 실행");
+        const report = await apiFetch("/api/rollback", {
+          method: "POST",
+          body: JSON.stringify({ dry_run: false }),
+        });
+        renderRollbackReport(report);
+        setAlert(nodes.reportStatus, "success", "패키지 되돌리기 완료", "서비스 중지, apt 패키지 제거, installer 메타데이터 정리를 완료했습니다.");
+        log("패키지 되돌리기 완료");
+        await runDoctorCheck();
+      } catch (error) {
+        nodes.reportOutput.textContent = formatError(error);
+        setAlert(nodes.reportStatus, "error", "패키지 되돌리기 실패", formatError(error));
         log(formatError(error));
       }
     });

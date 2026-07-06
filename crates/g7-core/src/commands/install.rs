@@ -88,6 +88,7 @@ impl InstallCheck {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ApplySummary {
+    preinstall_package_checks: Vec<InstallCheck>,
     package_checks: Vec<InstallCheck>,
     service_checks: Vec<InstallCheck>,
     port_checks: Vec<InstallCheck>,
@@ -323,6 +324,7 @@ fn apply_package_phase<R: CommandRunner>(
     let packages = package_names(plan);
     let services = managed_services(plan);
     let ports = managed_ports(plan);
+    let preinstall_package_checks = inspect_preinstall_packages(probe, &packages)?;
 
     let output = probe
         .apt_update()
@@ -360,6 +362,7 @@ fn apply_package_phase<R: CommandRunner>(
     require_checks_passed(&package_checks, &service_checks, &port_checks)?;
 
     Ok(ApplySummary {
+        preinstall_package_checks,
         package_checks,
         service_checks,
         port_checks,
@@ -408,6 +411,37 @@ fn verify_packages<R: CommandRunner>(
             }
             Err(err) => Err(command_error(
                 "package-verify",
+                format!("dpkg-query {package}"),
+                err,
+            )),
+        })
+        .collect()
+}
+
+fn inspect_preinstall_packages<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    packages: &[String],
+) -> Result<Vec<InstallCheck>> {
+    packages
+        .iter()
+        .map(|package| match probe.package_status(package) {
+            Ok(PackageStatus::Installed) => Ok(InstallCheck {
+                name: package.clone(),
+                status: "installed".to_string(),
+                message: "package was already installed before G7 installer ran".to_string(),
+            }),
+            Ok(PackageStatus::NotInstalled) => Ok(InstallCheck {
+                name: package.clone(),
+                status: "not-installed".to_string(),
+                message: "package was absent before G7 installer ran".to_string(),
+            }),
+            Ok(PackageStatus::Unknown) => Ok(InstallCheck {
+                name: package.clone(),
+                status: "unknown".to_string(),
+                message: "package preinstall state is unknown".to_string(),
+            }),
+            Err(err) => Err(command_error(
+                "package-baseline",
                 format!("dpkg-query {package}"),
                 err,
             )),
@@ -633,6 +667,7 @@ fn report_content(
         "web_root": &plan.web_root,
         "security_profile": &plan.security_profile,
         "ssh_policy": &plan.ssh_policy,
+        "preinstall_package_checks": checks_json(&summary.preinstall_package_checks),
         "package_checks": checks_json(&summary.package_checks),
         "service_checks": checks_json(&summary.service_checks),
         "port_checks": checks_json(&summary.port_checks),
@@ -751,6 +786,9 @@ mod tests {
                 .iter()
                 .any(|check| { check.name == "nginx" && check.status == "pass" })
         );
+        let report_json = fs::read_to_string(fs_root.join("var/log/g7-installer/report.json"))?;
+        assert!(report_json.contains("\"preinstall_package_checks\""));
+        assert!(report_json.contains("\"status\": \"not-installed\""));
         assert!(
             report
                 .service_checks
@@ -858,12 +896,21 @@ mod tests {
         let fs_root = create_temp_fs_root()?;
         fs::create_dir_all(fs_root.join("etc/nginx/sites-enabled"))?;
         fs::create_dir_all(fs_root.join("etc/nginx/conf.d"))?;
+        let options = super::plan::PlanOptions {
+            php_version: "8.5".to_string(),
+            ..super::plan::PlanOptions::default()
+        };
+        let install_plan =
+            super::plan::build_with_options("example.com".to_string(), options.clone())?;
         let runner = FakeCommandRunner::default();
         runner.push_output(CommandOutput::success("0\n"));
         runner.push_output(CommandOutput::success("inactive\n"));
         runner.push_output(CommandOutput::success("inactive\n"));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
+        for _package in super::package_names(&install_plan) {
+            runner.push_output(CommandOutput::failure(1, "no packages found"));
+        }
         runner.push_output(CommandOutput::success("apt update ok\n"));
         runner.push_output(CommandOutput::success("nginx:\n  Candidate: 1\n"));
         runner.push_output(CommandOutput::success("php8.5-fpm:\n  Candidate: (none)\n"));
@@ -871,10 +918,6 @@ mod tests {
             .with_os_release_path(&os_release_path)
             .with_fs_root(&fs_root);
         let paths = InstallPaths::with_root(&fs_root);
-        let options = super::plan::PlanOptions {
-            php_version: "8.5".to_string(),
-            ..super::plan::PlanOptions::default()
-        };
 
         let err = match run_with_probe_and_paths("example.com".to_string(), options, &probe, &paths)
         {
@@ -958,6 +1001,9 @@ mod tests {
         let services = super::managed_services(install_plan);
         let ports = super::managed_ports(install_plan);
 
+        for _package in &packages {
+            runner.push_output(CommandOutput::failure(1, "no packages found"));
+        }
         runner.push_output(CommandOutput::success("apt update ok\n"));
         for package in &packages {
             runner.push_output(CommandOutput::success(format!(

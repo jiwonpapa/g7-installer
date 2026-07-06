@@ -22,7 +22,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use g7_core::commands::{DoctorCheckStatus, doctor, install, plan, reset, status};
+use g7_core::commands::{DoctorCheckStatus, doctor, install, plan, reset, rollback, status};
 use getrandom::fill as fill_random;
 use miette::{IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
@@ -146,6 +146,12 @@ struct ResetRequest {
     dry_run: bool,
 }
 
+#[derive(Debug, Deserialize)]
+struct RollbackRequest {
+    #[serde(default)]
+    dry_run: bool,
+}
+
 #[derive(Debug, Serialize)]
 struct ApiErrorBody {
     error: String,
@@ -259,6 +265,22 @@ struct ResetApiReport {
 }
 
 #[derive(Debug, Serialize)]
+struct RollbackApiReport {
+    dry_run: bool,
+    phase: String,
+    package_actions: Vec<RollbackApiAction>,
+    service_actions: Vec<RollbackApiAction>,
+    metadata_reset: ResetApiReport,
+}
+
+#[derive(Debug, Serialize)]
+struct RollbackApiAction {
+    name: String,
+    status: String,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
 struct StatusApiReport {
     installed: bool,
     components: Vec<ComponentApiStatus>,
@@ -310,6 +332,7 @@ pub async fn run(config: WebSetupConfig) -> Result<()> {
         .route("/api/plan", post(api_plan))
         .route("/api/install/prepare", post(api_install_prepare))
         .route("/api/reset", post(api_reset))
+        .route("/api/rollback", post(api_rollback))
         .route("/api/status", get(api_status))
         .route("/api/report", get(api_report))
         .layer(TraceLayer::new_for_http())
@@ -698,6 +721,39 @@ async fn api_reset(
     }))
 }
 
+async fn api_rollback(
+    axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(request): Json<RollbackRequest>,
+) -> std::result::Result<impl IntoResponse, ApiError> {
+    let session = require_authenticated_session(&state, &headers, peer.ip())?;
+    require_csrf(&headers, &session)?;
+
+    if state.install_running.swap(true, Ordering::SeqCst) {
+        return Err(ApiError::conflict(
+            "rollback is blocked while another install action is running",
+        ));
+    }
+
+    emit_log(&state, "running package rollback");
+    let report = rollback::run(true, request.dry_run);
+    state.install_running.store(false, Ordering::SeqCst);
+
+    let report = match report {
+        Ok(report) => report,
+        Err(error) => {
+            emit_log(&state, format!("rollback failed: {error}"));
+            return Err(ApiError::bad_request(error).with_hint(
+                "운영 웹루트가 비어 있고, 설치 직후 패키지 기준 정보가 남아 있는지 확인하세요.",
+            ));
+        }
+    };
+    emit_log(&state, "package rollback completed");
+
+    Ok(Json(rollback_to_api(report)))
+}
+
 async fn api_status(
     axum::extract::State(state): axum::extract::State<WebState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -902,6 +958,31 @@ fn install_checks_to_api(checks: Vec<install::InstallCheck>) -> Vec<InstallApiCh
             name: check.name,
             status: check.status,
             message: check.message,
+        })
+        .collect()
+}
+
+fn rollback_to_api(report: rollback::RollbackReport) -> RollbackApiReport {
+    RollbackApiReport {
+        dry_run: report.dry_run,
+        phase: report.phase,
+        package_actions: rollback_actions_to_api(report.package_actions),
+        service_actions: rollback_actions_to_api(report.service_actions),
+        metadata_reset: ResetApiReport {
+            dry_run: report.metadata_reset.dry_run,
+            removed: report.metadata_reset.removed,
+            missing: report.metadata_reset.missing,
+        },
+    }
+}
+
+fn rollback_actions_to_api(actions: Vec<rollback::RollbackAction>) -> Vec<RollbackApiAction> {
+    actions
+        .into_iter()
+        .map(|action| RollbackApiAction {
+            name: action.name,
+            status: action.status,
+            message: action.message,
         })
         .collect()
 }

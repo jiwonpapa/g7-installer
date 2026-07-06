@@ -33,6 +33,22 @@ pub fn apt_install<R: CommandRunner>(
     )
 }
 
+pub fn apt_purge<R: CommandRunner>(
+    runner: &R,
+    packages: &[String],
+) -> Result<CommandOutput, CommandError> {
+    runner.run(
+        &apt_env()
+            .arg(APT_GET)
+            .arg("purge")
+            .arg("-y")
+            .arg("--auto-remove")
+            .arg("-o")
+            .arg("Dpkg::Use-Pty=0")
+            .args(packages.iter().cloned()),
+    )
+}
+
 pub fn apt_candidate_available<R: CommandRunner>(
     runner: &R,
     package: &str,
@@ -57,7 +73,7 @@ fn apt_env() -> CommandSpec {
 
 #[cfg(test)]
 mod tests {
-    use super::{apt_candidate_available, apt_install, apt_update};
+    use super::{apt_candidate_available, apt_install, apt_purge, apt_update};
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
 
@@ -95,6 +111,25 @@ mod tests {
         assert_eq!(recorded[0].program, OsString::from("env"));
         assert!(recorded[0].args.contains(&OsString::from("apt-get")));
         assert!(recorded[0].args.contains(&OsString::from("update")));
+        Ok(())
+    }
+
+    #[test]
+    fn apt_purge_is_noninteractive_and_auto_removes()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success(""));
+
+        let packages = vec!["nginx".to_string(), "php8.3-fpm".to_string()];
+        apt_purge(&runner, &packages)?;
+        let recorded = runner.recorded();
+
+        assert_eq!(recorded[0].program, OsString::from("env"));
+        assert!(recorded[0].args.contains(&OsString::from("apt-get")));
+        assert!(recorded[0].args.contains(&OsString::from("purge")));
+        assert!(recorded[0].args.contains(&OsString::from("--auto-remove")));
+        assert!(recorded[0].args.contains(&OsString::from("nginx")));
+        assert!(recorded[0].args.contains(&OsString::from("php8.3-fpm")));
         Ok(())
     }
 

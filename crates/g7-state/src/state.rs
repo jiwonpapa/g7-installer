@@ -31,6 +31,11 @@ pub fn write_state_file(path: &Path, state: &InstallerState) -> io::Result<()> {
     fs::write(path, payload)
 }
 
+pub fn read_state_file(path: &Path) -> io::Result<InstallerState> {
+    let payload = fs::read(path)?;
+    serde_json::from_slice(&payload).map_err(io::Error::other)
+}
+
 #[cfg(test)]
 mod tests {
     use super::InstallerState;
