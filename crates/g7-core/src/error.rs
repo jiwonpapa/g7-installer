@@ -60,6 +60,37 @@ pub enum Error {
     )]
     InstallBlocked { checks: String },
 
+    #[error("install command failed during {step}: {command} exited with status {status}")]
+    #[diagnostic(
+        code(g7::install::command_failed),
+        help(
+            "Check /var/log/g7-installer/report.json and retry after fixing the reported package or service failure."
+        )
+    )]
+    InstallCommandFailed {
+        step: &'static str,
+        command: String,
+        status: i32,
+        stdout: String,
+        stderr: String,
+    },
+
+    #[error("package is not available from current apt sources: {package}")]
+    #[diagnostic(
+        code(g7::install::package_unavailable),
+        help(
+            "Run with a package version available on this Ubuntu release, or add the required apt source before retrying."
+        )
+    )]
+    PackageUnavailable { package: String },
+
+    #[error("install verification failed: {checks}")]
+    #[diagnostic(
+        code(g7::install::verification_failed),
+        help("Review the failed package, service, or port checks in the install report.")
+    )]
+    InstallVerificationFailed { checks: String },
+
     #[error("failed to write installer file: {path}")]
     #[diagnostic(
         code(g7::install::file_write_failed),

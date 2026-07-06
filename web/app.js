@@ -77,7 +77,7 @@ const templates = {
     domain: null,
     deployment_mode: "public",
     web_server: "nginx",
-    php_version: "8.5",
+    php_version: "8.3",
     database: "mysql",
     redis: "enable",
     mail_mode: "none",
@@ -90,7 +90,7 @@ const templates = {
     domain: null,
     deployment_mode: "public",
     web_server: "apache",
-    php_version: "8.5",
+    php_version: "8.3",
     database: "mysql",
     redis: "enable",
     mail_mode: "none",
@@ -150,7 +150,28 @@ function formatError(error) {
 }
 
 function localizeMessage(message) {
-  return errorLabel[message] || message;
+  if (errorLabel[message]) {
+    return errorLabel[message];
+  }
+
+  if (message.startsWith("package is not available from current apt sources:")) {
+    return message.replace(
+      "package is not available from current apt sources:",
+      "현재 apt 소스에서 찾을 수 없는 패키지:",
+    );
+  }
+
+  if (message.startsWith("install command failed during")) {
+    return message
+      .replace("install command failed during", "설치 명령 실패:")
+      .replace("exited with status", "종료 코드");
+  }
+
+  if (message.startsWith("install verification failed:")) {
+    return message.replace("install verification failed:", "설치 검증 실패:");
+  }
+
+  return message;
 }
 
 function escapeHtml(value) {
@@ -362,7 +383,7 @@ function renderDoctor(report) {
     report.install_allowed ? "success" : "error",
     report.install_allowed ? "서버 점검 통과" : "서버 점검 실패",
     report.install_allowed
-      ? "설치 준비를 계속 진행할 수 있습니다."
+      ? "패키지 설치를 계속 진행할 수 있습니다."
       : "실패 항목을 해결한 뒤 다시 점검하세요.",
   );
 
@@ -505,7 +526,7 @@ async function apiFetch(path, options = {}) {
 
 function renderInstallReport(report) {
   nodes.reportOutput.textContent = [
-    "설치 준비 완료",
+    "패키지 설치 완료",
     `도메인: ${report.domain}`,
     `모드: ${report.deployment_mode === "local-test" ? "로컬 테스트" : "실제 도메인"}`,
     `웹서버: ${runtimeLabel(report.web_server)}`,
@@ -519,10 +540,30 @@ function renderInstallReport(report) {
     "",
     "완료된 작업:",
     ...report.completed_steps.map((step) => `- ${step}`),
+    "",
+    "패키지 검증:",
+    ...formatChecks(report.package_checks),
+    "",
+    "서비스 검증:",
+    ...formatChecks(report.service_checks),
+    "",
+    "포트 검증:",
+    ...formatChecks(report.port_checks),
   ].join("\n");
 
   ["preflight", "packages", "config", "services", "ports", "http", "report"].forEach((stage) => markStage(stage, "성공"));
   nodes.installProgress.value = 100;
+}
+
+function formatChecks(checks) {
+  if (!Array.isArray(checks) || checks.length === 0) {
+    return ["- 없음"];
+  }
+
+  return checks.map((check) => {
+    const label = check.status === "pass" ? "통과" : "실패";
+    return `- [${label}] ${check.name}: ${check.message}`;
+  });
 }
 
 function renderResetReport(report) {
@@ -679,23 +720,23 @@ function bindEvents() {
     nodes.installProgress.value = 0;
     hideAlert(nodes.installStatus);
 
-    await withBusy(event.currentTarget, "준비 중", async () => {
+    await withBusy(event.currentTarget, "설치 중", async () => {
       try {
         markStage("preflight", "진행");
-        setAlert(nodes.installStatus, "info", "설치 준비 진행 중", "서버 사전 점검과 설정 파일 생성을 진행합니다.");
-        log("설치 준비 시작");
+        setAlert(nodes.installStatus, "info", "패키지 설치 진행 중", "apt 패키지 설치와 서비스/포트 검증을 진행합니다.");
+        log("패키지 설치 시작");
         const report = await apiFetch("/api/install/prepare", {
           method: "POST",
           body: JSON.stringify(optionPayload()),
         });
         renderInstallReport(report);
-        setAlert(nodes.installStatus, "success", "설치 준비 완료", "결과 리포트에서 생성된 파일과 다음 작업을 확인하세요.");
+        setAlert(nodes.installStatus, "success", "패키지 설치 완료", "결과 리포트에서 패키지, 서비스, 포트 검증 결과를 확인하세요.");
         showStep("report");
-        log(`설치 준비 완료: ${report.phase}`);
+        log(`패키지 설치 완료: ${report.phase}`);
       } catch (error) {
-        markStage("preflight", "실패");
-        nodes.reportOutput.textContent = `${formatError(error)}\n\n해결 후 다시 서버 점검을 실행하세요. 테스트 흔적이면 reset을 사용하세요.`;
-        setAlert(nodes.installStatus, "error", "설치 준비 실패", formatError(error));
+        markStage("packages", "실패");
+        nodes.reportOutput.textContent = `${formatError(error)}\n\n리포트와 로그를 확인하세요. 패키지 버전 문제면 PHP 8.3 조합으로 다시 시도하세요.`;
+        setAlert(nodes.installStatus, "error", "패키지 설치 실패", formatError(error));
         log(formatError(error));
       }
     });
@@ -736,7 +777,7 @@ function bindEvents() {
           body: JSON.stringify({ dry_run: false }),
         });
         renderResetReport(report);
-        setAlert(nodes.reportStatus, "success", "리셋 완료", "설치 준비 흔적을 정리했습니다.");
+        setAlert(nodes.reportStatus, "success", "리셋 완료", "installer 메타데이터와 준비 흔적을 정리했습니다.");
         log("리셋 완료");
         await runDoctorCheck();
       } catch (error) {

@@ -21,6 +21,21 @@ impl CommandSpec {
         self.args.push(arg.into());
         self
     }
+
+    pub fn args<I, S>(mut self, args: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<OsString>,
+    {
+        self.args.extend(args.into_iter().map(Into::into));
+        self
+    }
+
+    pub fn display(&self) -> String {
+        let mut parts = vec![display_os(&self.program)];
+        parts.extend(self.args.iter().map(display_os));
+        parts.join(" ")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

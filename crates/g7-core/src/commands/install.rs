@@ -1,15 +1,16 @@
-//! Prepared install phase for G7 Installer.
+//! Server install phase for G7 Installer.
 //!
-//! This module persists the canonical plan into state/config/report files. It
-//! must not silently perform server changes that are not represented in
-//! `plan.rs`, `state.json`, and `owned-files.json`.
+//! This module persists the canonical plan into state/config/report files before
+//! performing server changes. Every applied package/service step must be
+//! represented in `plan.rs`, `state.json`, `owned-files.json`, and the report.
 //!
-//! Current phase rule: v0.1.x prepares installer metadata only. App web-root
-//! creation, package installation, database creation, Redis hardening, and SSH
-//! changes belong to later phases after explicit verification routines exist.
+//! Current phase rule: package installation and basic service/port verification
+//! are implemented. App web-root creation, web vhost activation, database user
+//! creation, Redis hardening, and SSH changes belong to later phases.
 
 use std::fs;
 use std::fs::OpenOptions;
+use std::io;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -21,6 +22,9 @@ use g7_state::owned_files::{OWNED_FILES_PATH, OwnedFiles, write_owned_files};
 use g7_state::state::{InstallerState, STATE_PATH, write_state_file};
 use g7_system::SystemProbe;
 use g7_system::command::CommandRunner;
+use g7_system::package::PackageStatus;
+use g7_system::port::PortStatus;
+use g7_system::service::ServiceActivity;
 
 const CONFIG_PATH: &str = "/etc/g7-installer/config.toml";
 const ETC_DIR: &str = "/etc/g7-installer";
@@ -52,6 +56,41 @@ pub struct InstallReport {
     pub owned_files_path: PathBuf,
     pub owned_files: Vec<String>,
     pub completed_steps: Vec<String>,
+    pub package_checks: Vec<InstallCheck>,
+    pub service_checks: Vec<InstallCheck>,
+    pub port_checks: Vec<InstallCheck>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstallCheck {
+    pub name: String,
+    pub status: String,
+    pub message: String,
+}
+
+impl InstallCheck {
+    fn pass(name: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            status: "pass".to_string(),
+            message: message.into(),
+        }
+    }
+
+    fn fail(name: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            status: "fail".to_string(),
+            message: message.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ApplySummary {
+    package_checks: Vec<InstallCheck>,
+    service_checks: Vec<InstallCheck>,
+    port_checks: Vec<InstallCheck>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -122,7 +161,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     write_new_file(
         paths,
         REPORT_PATH,
-        &report_content(&install_plan),
+        &report_content(&install_plan, "prepared", &ApplySummary::default(), None)?,
         &mut owned,
     )?;
     let mut optional_steps = Vec::new();
@@ -162,8 +201,10 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     ];
     completed_steps.extend(optional_steps);
     completed_steps.push("owned-files-written".to_string());
-    completed_steps.push("state-written".to_string());
-    let mut state = InstallerState::new(install_id(&install_plan.domain), install_plan.domain);
+    let mut state = InstallerState::new(
+        install_id(&install_plan.domain),
+        install_plan.domain.clone(),
+    );
     state.phase = "prepared".to_string();
     state.completed_steps = completed_steps.clone();
 
@@ -172,6 +213,49 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         path: STATE_PATH.to_string(),
         source,
     })?;
+    completed_steps.push("state-written".to_string());
+
+    let apply_summary = match apply_package_phase(probe, &install_plan) {
+        Ok(summary) => summary,
+        Err(err) => {
+            state.phase = "package-failed".to_string();
+            state.completed_steps = completed_steps.clone();
+            write_state_file(&state_path, &state).map_err(|source| Error::FileWriteFailed {
+                path: STATE_PATH.to_string(),
+                source,
+            })?;
+            write_existing_file(
+                paths,
+                REPORT_PATH,
+                &report_content(
+                    &install_plan,
+                    &state.phase,
+                    &ApplySummary::default(),
+                    Some(&err.to_string()),
+                )?,
+            )?;
+            return Err(err);
+        }
+    };
+
+    completed_steps.push("apt-updated".to_string());
+    completed_steps.push("package-candidates-checked".to_string());
+    completed_steps.push("packages-installed".to_string());
+    completed_steps.push("services-enabled".to_string());
+    completed_steps.push("package-verification-passed".to_string());
+    completed_steps.push("service-verification-passed".to_string());
+    completed_steps.push("port-verification-passed".to_string());
+    state.phase = "packages-installed".to_string();
+    state.completed_steps = completed_steps.clone();
+    write_state_file(&state_path, &state).map_err(|source| Error::FileWriteFailed {
+        path: STATE_PATH.to_string(),
+        source,
+    })?;
+    write_existing_file(
+        paths,
+        REPORT_PATH,
+        &report_content(&install_plan, &state.phase, &apply_summary, None)?,
+    )?;
 
     Ok(InstallReport {
         domain: state.domain,
@@ -192,6 +276,9 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         owned_files_path,
         owned_files: owned_files.files,
         completed_steps,
+        package_checks: apply_summary.package_checks,
+        service_checks: apply_summary.service_checks,
+        port_checks: apply_summary.port_checks,
     })
 }
 
@@ -229,6 +316,207 @@ fn require_install_allowed(report: &doctor::DoctorReport) -> Result<()> {
     Err(Error::InstallBlocked { checks })
 }
 
+fn apply_package_phase<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    plan: &plan::InstallPlan,
+) -> Result<ApplySummary> {
+    let packages = package_names(plan);
+    let services = managed_services(plan);
+    let ports = managed_ports(plan);
+
+    let output = probe
+        .apt_update()
+        .map_err(|err| command_error("apt-update", "apt-get update", err))?;
+    require_success("apt-update", "apt-get update", output)?;
+
+    for package in &packages {
+        let available = probe.apt_candidate_available(package).map_err(|err| {
+            command_error("apt-candidate", format!("apt-cache policy {package}"), err)
+        })?;
+        if !available {
+            return Err(Error::PackageUnavailable {
+                package: package.clone(),
+            });
+        }
+    }
+
+    let install_command = format!("apt-get install -y {}", packages.join(" "));
+    let output = probe
+        .apt_install(&packages)
+        .map_err(|err| command_error("apt-install", &install_command, err))?;
+    require_success("apt-install", install_command, output)?;
+
+    for service in &services {
+        let command = format!("systemctl enable --now {service}");
+        let output = probe
+            .enable_service_now(service)
+            .map_err(|err| command_error("service-enable", &command, err))?;
+        require_success("service-enable", command, output)?;
+    }
+
+    let package_checks = verify_packages(probe, &packages)?;
+    let service_checks = verify_services(probe, &services)?;
+    let port_checks = verify_ports(probe, &ports)?;
+    require_checks_passed(&package_checks, &service_checks, &port_checks)?;
+
+    Ok(ApplySummary {
+        package_checks,
+        service_checks,
+        port_checks,
+    })
+}
+
+fn package_names(plan: &plan::InstallPlan) -> Vec<String> {
+    plan.packages
+        .iter()
+        .flat_map(|package| package.name.split_whitespace())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn managed_services(plan: &plan::InstallPlan) -> Vec<String> {
+    plan.services
+        .iter()
+        .filter(|service| !service.name.starts_with("g7-"))
+        .map(|service| service.name.clone())
+        .collect()
+}
+
+fn managed_ports(plan: &plan::InstallPlan) -> Vec<u16> {
+    plan.ports
+        .iter()
+        .filter_map(|port| match port.port {
+            80 | 3306 | 6379 => Some(port.port),
+            _ => None,
+        })
+        .collect()
+}
+
+fn verify_packages<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    packages: &[String],
+) -> Result<Vec<InstallCheck>> {
+    packages
+        .iter()
+        .map(|package| match probe.package_status(package) {
+            Ok(PackageStatus::Installed) => Ok(InstallCheck::pass(package, "package installed")),
+            Ok(PackageStatus::NotInstalled) => {
+                Ok(InstallCheck::fail(package, "package is not installed"))
+            }
+            Ok(PackageStatus::Unknown) => {
+                Ok(InstallCheck::fail(package, "package status is unknown"))
+            }
+            Err(err) => Err(command_error(
+                "package-verify",
+                format!("dpkg-query {package}"),
+                err,
+            )),
+        })
+        .collect()
+}
+
+fn verify_services<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    services: &[String],
+) -> Result<Vec<InstallCheck>> {
+    services
+        .iter()
+        .map(|service| match probe.service_activity(service) {
+            Ok(ServiceActivity::Active) => Ok(InstallCheck::pass(service, "service is active")),
+            Ok(ServiceActivity::Inactive) => Ok(InstallCheck::fail(service, "service is inactive")),
+            Ok(ServiceActivity::NotFound) => {
+                Ok(InstallCheck::fail(service, "service was not found"))
+            }
+            Ok(ServiceActivity::Unknown) => {
+                Ok(InstallCheck::fail(service, "service state is unknown"))
+            }
+            Err(err) => Err(command_error(
+                "service-verify",
+                format!("systemctl is-active {service}"),
+                err,
+            )),
+        })
+        .collect()
+}
+
+fn verify_ports<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    ports: &[u16],
+) -> Result<Vec<InstallCheck>> {
+    ports
+        .iter()
+        .map(|port| match probe.tcp_port_status(*port) {
+            Ok(PortStatus::InUse) => Ok(InstallCheck::pass(
+                port.to_string(),
+                "TCP port is listening",
+            )),
+            Ok(PortStatus::Free) => Ok(InstallCheck::fail(
+                port.to_string(),
+                "TCP port is not listening",
+            )),
+            Ok(PortStatus::Unknown) => Ok(InstallCheck::fail(
+                port.to_string(),
+                "TCP port status is unknown",
+            )),
+            Err(err) => Err(command_error(
+                "port-verify",
+                format!("ss -H -tulpn for port {port}"),
+                err,
+            )),
+        })
+        .collect()
+}
+
+fn require_checks_passed(
+    package_checks: &[InstallCheck],
+    service_checks: &[InstallCheck],
+    port_checks: &[InstallCheck],
+) -> Result<()> {
+    let failed = package_checks
+        .iter()
+        .chain(service_checks)
+        .chain(port_checks)
+        .filter(|check| check.status == "fail")
+        .map(|check| format!("{}: {}", check.name, check.message))
+        .collect::<Vec<String>>();
+
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(Error::InstallVerificationFailed {
+            checks: failed.join(", "),
+        })
+    }
+}
+
+fn require_success(
+    step: &'static str,
+    command: impl Into<String>,
+    output: g7_system::command::CommandOutput,
+) -> Result<()> {
+    if output.status == 0 {
+        Ok(())
+    } else {
+        Err(Error::InstallCommandFailed {
+            step,
+            command: command.into(),
+            status: output.status,
+            stdout: output.stdout,
+            stderr: output.stderr,
+        })
+    }
+}
+
+fn command_error(step: &'static str, command: impl Into<String>, err: impl ToString) -> Error {
+    Error::InstallCommandFailed {
+        step,
+        command: command.into(),
+        status: 128,
+        stdout: String::new(),
+        stderr: err.to_string(),
+    }
+}
+
 fn create_owned_dir(paths: &InstallPaths, path: &str, owned: &mut Vec<String>) -> Result<()> {
     let target = paths.resolve(path);
     fs::create_dir_all(&target).map_err(|source| Error::FileWriteFailed {
@@ -262,6 +550,14 @@ fn write_new_file(
         })?;
     owned.push(path.to_string());
     Ok(())
+}
+
+fn write_existing_file(paths: &InstallPaths, path: &str, content: &str) -> Result<()> {
+    let target = paths.resolve(path);
+    fs::write(&target, content).map_err(|source| Error::FileWriteFailed {
+        path: path.to_string(),
+        source,
+    })
 }
 
 fn config_content(plan: &plan::InstallPlan) -> String {
@@ -319,11 +615,49 @@ fn rollback_content(owned: &[String]) -> String {
     format!("{{\n  \"version\": 1,\n  \"created_paths\": [\n{files}\n  ]\n}}\n")
 }
 
-fn report_content(plan: &plan::InstallPlan) -> String {
-    format!(
-        "{{\n  \"version\": 1,\n  \"domain\": \"{}\",\n  \"phase\": \"prepared\",\n  \"site_user\": \"{}\",\n  \"web_root\": \"{}\",\n  \"security_profile\": \"{}\",\n  \"ssh_policy\": \"{}\",\n  \"problem\": null\n}}\n",
-        plan.domain, plan.site_user, plan.web_root, plan.security_profile, plan.ssh_policy
-    )
+fn report_content(
+    plan: &plan::InstallPlan,
+    phase: &str,
+    summary: &ApplySummary,
+    problem: Option<&str>,
+) -> Result<String> {
+    let value = serde_json::json!({
+        "version": 1,
+        "domain": &plan.domain,
+        "phase": phase,
+        "deployment_mode": &plan.deployment_mode,
+        "web_server": &plan.web_server,
+        "php_version": &plan.php_version,
+        "database": &plan.database_engine,
+        "site_user": &plan.site_user,
+        "web_root": &plan.web_root,
+        "security_profile": &plan.security_profile,
+        "ssh_policy": &plan.ssh_policy,
+        "package_checks": checks_json(&summary.package_checks),
+        "service_checks": checks_json(&summary.service_checks),
+        "port_checks": checks_json(&summary.port_checks),
+        "problem": problem,
+    });
+    let mut payload =
+        serde_json::to_string_pretty(&value).map_err(|source| Error::FileWriteFailed {
+            path: REPORT_PATH.to_string(),
+            source: io::Error::other(source),
+        })?;
+    payload.push('\n');
+    Ok(payload)
+}
+
+fn checks_json(checks: &[InstallCheck]) -> Vec<serde_json::Value> {
+    checks
+        .iter()
+        .map(|check| {
+            serde_json::json!({
+                "name": &check.name,
+                "status": &check.status,
+                "message": &check.message,
+            })
+        })
+        .collect()
 }
 
 fn local_hosts_content(domain: &str) -> String {
@@ -373,7 +707,7 @@ mod tests {
         assert_eq!(report.domain, "example.com");
         assert_eq!(report.deployment_mode, "public");
         assert_eq!(report.web_server, "nginx");
-        assert_eq!(report.php_version, "8.5");
+        assert_eq!(report.php_version, "8.3");
         assert_eq!(report.database_engine, "mysql");
         assert_eq!(report.site_user, "g7");
         assert_eq!(report.web_root_mode, "public-html");
@@ -381,12 +715,12 @@ mod tests {
         assert_eq!(report.redis_mode, "enable");
         assert_eq!(report.security_profile, "standard");
         assert_eq!(report.ssh_policy, "audit-only");
-        assert_eq!(report.phase, "prepared");
+        assert_eq!(report.phase, "packages-installed");
         assert!(fs_root.join("etc/g7-installer/config.toml").exists());
         let config = fs::read_to_string(fs_root.join("etc/g7-installer/config.toml"))?;
         assert!(config.contains("deployment_mode = \"public\""));
         assert!(config.contains("web_server = \"nginx\""));
-        assert!(config.contains("php_version = \"8.5\""));
+        assert!(config.contains("php_version = \"8.3\""));
         assert!(config.contains("database = \"mysql\""));
         assert!(config.contains("database_password_policy = \"generate-random-store-root-only\""));
         assert!(config.contains("site_user = \"g7\""));
@@ -405,6 +739,29 @@ mod tests {
             !report
                 .owned_files
                 .contains(&"/home/g7/public_html".to_string())
+        );
+        assert!(
+            report
+                .completed_steps
+                .contains(&"packages-installed".to_string())
+        );
+        assert!(
+            report
+                .package_checks
+                .iter()
+                .any(|check| { check.name == "nginx" && check.status == "pass" })
+        );
+        assert!(
+            report
+                .service_checks
+                .iter()
+                .any(|check| { check.name == "nginx" && check.status == "pass" })
+        );
+        assert!(
+            report
+                .port_checks
+                .iter()
+                .any(|check| { check.name == "80" && check.status == "pass" })
         );
 
         fs::remove_file(os_release_path)?;
@@ -467,14 +824,15 @@ mod tests {
     -> std::result::Result<(), Box<dyn std::error::Error>> {
         let os_release_path = write_temp_os_release()?;
         let fs_root = create_temp_fs_root()?;
-        let probe = clean_root_probe(&os_release_path, &fs_root)?;
-        let paths = InstallPaths::with_root(&fs_root);
         let options = super::plan::PlanOptions {
             local_test: true,
             dns_check: true,
             www_mode: "none".to_string(),
             ..super::plan::PlanOptions::default()
         };
+        let probe =
+            clean_root_probe_for_options(&os_release_path, &fs_root, "g7-test.local", &options)?;
+        let paths = InstallPaths::with_root(&fs_root);
 
         let report =
             run_with_probe_and_paths("g7-test.local".to_string(), options, &probe, &paths)?;
@@ -493,6 +851,52 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn install_fails_before_install_when_package_candidate_is_missing()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let os_release_path = write_temp_os_release()?;
+        let fs_root = create_temp_fs_root()?;
+        fs::create_dir_all(fs_root.join("etc/nginx/sites-enabled"))?;
+        fs::create_dir_all(fs_root.join("etc/nginx/conf.d"))?;
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success("0\n"));
+        runner.push_output(CommandOutput::success("inactive\n"));
+        runner.push_output(CommandOutput::success("inactive\n"));
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success("apt update ok\n"));
+        runner.push_output(CommandOutput::success("nginx:\n  Candidate: 1\n"));
+        runner.push_output(CommandOutput::success("php8.5-fpm:\n  Candidate: (none)\n"));
+        let probe = SystemProbe::new(runner)
+            .with_os_release_path(&os_release_path)
+            .with_fs_root(&fs_root);
+        let paths = InstallPaths::with_root(&fs_root);
+        let options = super::plan::PlanOptions {
+            php_version: "8.5".to_string(),
+            ..super::plan::PlanOptions::default()
+        };
+
+        let err = match run_with_probe_and_paths("example.com".to_string(), options, &probe, &paths)
+        {
+            Ok(_) => {
+                return Err(std::io::Error::other("missing package should fail").into());
+            }
+            Err(err) => err,
+        };
+
+        let report = fs::read_to_string(fs_root.join("var/log/g7-installer/report.json"))?;
+        let state = fs::read_to_string(fs_root.join(strip_root(STATE_PATH)))?;
+
+        assert!(matches!(err, Error::PackageUnavailable { package } if package == "php8.5-fpm"));
+        assert!(report.contains("\"phase\": \"package-failed\""));
+        assert!(report.contains("php8.5-fpm"));
+        assert!(state.contains("\"phase\": \"package-failed\""));
+
+        fs::remove_file(os_release_path)?;
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
     fn clean_root_probe(
         os_release_path: &Path,
         fs_root: &Path,
@@ -505,6 +909,31 @@ mod tests {
         fs_root: &Path,
         uid: &str,
     ) -> std::result::Result<SystemProbe<FakeCommandRunner>, Box<dyn std::error::Error>> {
+        clean_probe_with_uid_for_options(
+            os_release_path,
+            fs_root,
+            uid,
+            "example.com",
+            &super::plan::PlanOptions::default(),
+        )
+    }
+
+    fn clean_root_probe_for_options(
+        os_release_path: &Path,
+        fs_root: &Path,
+        domain: &str,
+        options: &super::plan::PlanOptions,
+    ) -> std::result::Result<SystemProbe<FakeCommandRunner>, Box<dyn std::error::Error>> {
+        clean_probe_with_uid_for_options(os_release_path, fs_root, "0\n", domain, options)
+    }
+
+    fn clean_probe_with_uid_for_options(
+        os_release_path: &Path,
+        fs_root: &Path,
+        uid: &str,
+        domain: &str,
+        options: &super::plan::PlanOptions,
+    ) -> std::result::Result<SystemProbe<FakeCommandRunner>, Box<dyn std::error::Error>> {
         fs::create_dir_all(fs_root.join("etc/nginx/sites-enabled"))?;
         fs::create_dir_all(fs_root.join("etc/nginx/conf.d"))?;
         let runner = FakeCommandRunner::default();
@@ -513,10 +942,43 @@ mod tests {
         runner.push_output(CommandOutput::success("inactive\n"));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
+        let plan = super::plan::build_with_options(domain.to_string(), options.clone())?;
+        push_successful_apply_outputs(&runner, &plan);
 
         Ok(SystemProbe::new(runner)
             .with_os_release_path(os_release_path)
             .with_fs_root(fs_root))
+    }
+
+    fn push_successful_apply_outputs(
+        runner: &FakeCommandRunner,
+        install_plan: &super::plan::InstallPlan,
+    ) {
+        let packages = super::package_names(install_plan);
+        let services = super::managed_services(install_plan);
+        let ports = super::managed_ports(install_plan);
+
+        runner.push_output(CommandOutput::success("apt update ok\n"));
+        for package in &packages {
+            runner.push_output(CommandOutput::success(format!(
+                "{package}:\n  Candidate: 1\n"
+            )));
+        }
+        runner.push_output(CommandOutput::success("apt install ok\n"));
+        for _service in &services {
+            runner.push_output(CommandOutput::success(""));
+        }
+        for _package in &packages {
+            runner.push_output(CommandOutput::success("install ok installed"));
+        }
+        for _service in &services {
+            runner.push_output(CommandOutput::success("active\n"));
+        }
+        for port in &ports {
+            runner.push_output(CommandOutput::success(format!(
+                "tcp LISTEN 0 4096 127.0.0.1:{port} 0.0.0.0:*\n"
+            )));
+        }
     }
 
     fn write_temp_os_release() -> std::result::Result<PathBuf, Box<dyn std::error::Error>> {

@@ -1,6 +1,6 @@
 [package]
 name = "g7-core"
-version = "0.2.4"
+version = "0.2.5"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -11,4 +11,5 @@ rust-version.workspace = true
 g7-state = { path = "../g7-state" }
 g7-system = { path = "../g7-system" }
 miette.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true

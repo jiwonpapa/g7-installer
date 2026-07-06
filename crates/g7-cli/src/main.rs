@@ -51,7 +51,7 @@ enum Command {
         /// Web server: nginx or apache.
         #[arg(long, default_value_t = plan::DEFAULT_WEB_SERVER.to_string())]
         web_server: String,
-        /// PHP-FPM version. Default is 8.5. Use 8.3 for compatibility.
+        /// PHP-FPM version. Default is 8.3. Use 8.5 only when available from apt sources.
         #[arg(long, default_value_t = plan::DEFAULT_PHP_VERSION.to_string())]
         php_version: String,
         /// Database engine: mysql or mariadb.
@@ -114,7 +114,7 @@ enum Command {
         /// Web server: nginx or apache.
         #[arg(long, default_value_t = plan::DEFAULT_WEB_SERVER.to_string())]
         web_server: String,
-        /// PHP-FPM version. Default is 8.5. Use 8.3 for compatibility.
+        /// PHP-FPM version. Default is 8.3. Use 8.5 only when available from apt sources.
         #[arg(long, default_value_t = plan::DEFAULT_PHP_VERSION.to_string())]
         php_version: String,
         /// Database engine: mysql or mariadb.
@@ -502,6 +502,24 @@ fn print_install(report: install::InstallReport) {
     for step in report.completed_steps {
         println!("- {step}");
     }
+
+    print_install_checks("Package checks", &report.package_checks);
+    print_install_checks("Service checks", &report.service_checks);
+    print_install_checks("Port checks", &report.port_checks);
+}
+
+fn print_install_checks(title: &str, checks: &[install::InstallCheck]) {
+    println!();
+    println!("{title}:");
+
+    if checks.is_empty() {
+        println!("- none");
+        return;
+    }
+
+    for check in checks {
+        println!("- [{}] {} - {}", check.status, check.name, check.message);
+    }
 }
 
 fn print_logs(location: logs::LogLocation) {
@@ -555,7 +573,7 @@ mod tests {
         assert!(output.contains("- 3306/tcp: Localhost-only SQL database."));
         assert!(output.contains("deployment_mode: public"));
         assert!(output.contains("web_server: nginx"));
-        assert!(output.contains("php_version: 8.5"));
+        assert!(output.contains("php_version: 8.3"));
         assert!(output.contains("database: mysql"));
         assert!(output.contains("redis: enable"));
         assert!(output.contains("rollback: true"));

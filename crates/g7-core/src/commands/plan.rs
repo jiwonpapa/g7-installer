@@ -1049,7 +1049,7 @@ mod tests {
         assert_eq!(plan.domain, "example.com");
         assert_eq!(plan.deployment_mode, "public");
         assert_eq!(plan.web_server, "nginx");
-        assert_eq!(plan.php_version, "8.5");
+        assert_eq!(plan.php_version, "8.3");
         assert_eq!(plan.database_engine, "mysql");
         assert_eq!(plan.site_user, "g7");
         assert_eq!(plan.web_root_mode, "public-html");
@@ -1185,18 +1185,18 @@ mod tests {
     }
 
     #[test]
-    fn plan_allows_php_83_compat_option() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    fn plan_allows_php_85_next_option() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let options = PlanOptions {
-            php_version: "8.3".to_string(),
+            php_version: "8.5".to_string(),
             ..PlanOptions::default()
         };
         let plan = build_with_options("example.com".to_string(), options)?;
 
-        assert_eq!(plan.php_version, "8.3");
+        assert_eq!(plan.php_version, "8.5");
         assert!(
             plan.packages
                 .iter()
-                .any(|package| package.name == "php8.3-fpm")
+                .any(|package| package.name == "php8.5-fpm")
         );
         Ok(())
     }

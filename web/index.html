@@ -13,7 +13,7 @@
         <div>
           <p class="text-sm font-semibold text-primary">G7 Installer</p>
           <h1 class="mt-1 text-2xl font-semibold tracking-normal sm:text-3xl">G7 설치 마법사</h1>
-          <p class="mt-2 text-sm text-base-content/60">서버 점검부터 설치 준비 리포트까지 단계별로 진행합니다.</p>
+          <p class="mt-2 text-sm text-base-content/60">서버 점검부터 패키지 설치 리포트까지 단계별로 진행합니다.</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <span class="status-pill">
@@ -26,7 +26,7 @@
       </header>
 
       <section class="alert alert-warning">
-        <span>현재 버전은 실제 패키지 설치 전 단계입니다. 설치 준비 파일, 계획, 리포트 생성까지 수행합니다.</span>
+        <span>현재 버전은 apt 패키지 설치와 기본 서비스/포트 검증까지 수행합니다. vhost, DB 계정 생성, 인증서 발급은 다음 단계입니다.</span>
       </section>
 
       <nav class="wizard-progress" aria-label="설치 단계">
@@ -35,7 +35,7 @@
           <li class="step" data-progress="check">서버 점검</li>
           <li class="step" data-progress="options">설치 방식</li>
           <li class="step" data-progress="plan">사양 확정</li>
-          <li class="step" data-progress="install">설치 준비</li>
+          <li class="step" data-progress="install">패키지 설치</li>
           <li class="step" data-progress="report">결과</li>
         </ul>
       </nav>
@@ -47,7 +47,7 @@
               <div>
                 <span class="step-eyebrow">1단계</span>
                 <h2>서버 계정으로 로그인</h2>
-                <p>설치 준비 작업은 root 또는 sudo 권한이 있는 서버 계정으로만 진행합니다.</p>
+                <p>패키지 설치 작업은 root 또는 sudo 권한이 있는 서버 계정으로만 진행합니다.</p>
               </div>
               <span class="badge badge-outline">서버 계정</span>
             </div>
@@ -202,12 +202,12 @@
                       PHP 실행기
                       <span class="help-wrap">
                     <button class="help-circle" type="button" aria-label="PHP 실행기 도움말">?</button>
-                    <span class="help-text">그누보드7을 실행할 PHP-FPM 버전입니다. 최신 테스트는 8.5, 호환성은 8.3을 선택합니다.</span>
+                    <span class="help-text">그누보드7을 실행할 PHP-FPM 버전입니다. Ubuntu 24.04 기본 설치는 8.3을 권장합니다. 8.5는 apt 소스에 있을 때만 선택하세요.</span>
                   </span>
                     </span>
                     <select name="php_version" class="select select-bordered w-full">
-                      <option value="8.5">PHP 8.5</option>
                       <option value="8.3">PHP 8.3</option>
+                      <option value="8.5">PHP 8.5</option>
                     </select>
                   </label>
                   <label class="field">
@@ -345,7 +345,7 @@
               <div>
                 <span class="step-eyebrow">4단계</span>
                 <h2>설치 사양 확정</h2>
-                <p>선택한 사양과 변경 예정 항목을 확인한 뒤 설치 준비 단계로 넘어갑니다.</p>
+                <p>선택한 사양과 변경 예정 항목을 확인한 뒤 패키지 설치 단계로 넘어갑니다.</p>
               </div>
               <button id="plan-button" class="btn btn-primary" type="button">계획 생성</button>
             </div>
@@ -361,20 +361,20 @@
             <div class="section-heading">
               <div>
                 <span class="step-eyebrow">5단계</span>
-                <h2>설치 준비 실행</h2>
-                <p>현재 단계는 설치 메타데이터와 리포트 생성입니다. 실제 패키지 설치는 아직 실행하지 않습니다.</p>
+                <h2>패키지 설치 실행</h2>
+                <p>apt 패키지를 설치하고 기본 서비스와 포트가 살아나는지 확인합니다.</p>
               </div>
-              <button id="install-button" class="btn btn-error" type="button">설치 준비 시작</button>
+              <button id="install-button" class="btn btn-error" type="button">패키지 설치 시작</button>
             </div>
             <div id="install-status" class="mt-5 hidden"></div>
             <progress id="install-progress" class="progress progress-primary mt-5 w-full" value="0" max="100"></progress>
             <div class="mt-5 space-y-3" id="install-stages">
               <div class="stage-row" data-stage="preflight"><span>서버 사전 점검</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="packages"><span>패키지 계획</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="packages"><span>패키지 설치</span><strong>대기</strong></div>
               <div class="stage-row" data-stage="config"><span>설정 파일 생성</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="services"><span>서비스 계획</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="ports"><span>포트 확인 계획</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="http"><span>HTTP 확인 계획</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="services"><span>서비스 시작</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="ports"><span>포트 확인</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="http"><span>기본 검증</span><strong>대기</strong></div>
               <div class="stage-row" data-stage="report"><span>리포트 생성</span><strong>대기</strong></div>
             </div>
             <div class="wizard-actions">
@@ -388,7 +388,7 @@
               <div>
                 <span class="step-eyebrow">6단계</span>
                 <h2>결과 리포트</h2>
-                <p>설치 준비 결과, 검증 상태, 재시도 명령을 확인합니다.</p>
+                <p>패키지 설치 결과, 검증 상태, 재시도 명령을 확인합니다.</p>
               </div>
               <div class="flex flex-wrap gap-2">
                 <button id="report-button" class="btn btn-outline" type="button">리포트 새로고침</button>

@@ -1,4 +1,4 @@
-use crate::command::{CommandError, CommandRunner, CommandSpec};
+use crate::command::{CommandError, CommandOutput, CommandRunner, CommandSpec};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServiceActivity {
@@ -23,6 +23,18 @@ pub fn is_active<R: CommandRunner>(
         (_, _, stderr) if stderr.contains("could not be found") => Ok(ServiceActivity::NotFound),
         _ => Ok(ServiceActivity::Unknown),
     }
+}
+
+pub fn enable_now<R: CommandRunner>(
+    runner: &R,
+    service: &str,
+) -> Result<CommandOutput, CommandError> {
+    runner.run(
+        &CommandSpec::new("systemctl")
+            .arg("enable")
+            .arg("--now")
+            .arg(service),
+    )
 }
 
 #[cfg(test)]

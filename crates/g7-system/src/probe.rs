@@ -2,12 +2,13 @@ use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use crate::command::{CommandError, CommandRunner, RealCommandRunner};
+use crate::apt::{apt_candidate_available, apt_install, apt_update};
+use crate::command::{CommandError, CommandOutput, CommandRunner, RealCommandRunner};
 use crate::os::{OsRelease, OsReleaseError, read_os_release};
 use crate::package::{PackageStatus, package_status};
 use crate::port::{PortStatus, tcp_port_status};
 use crate::privilege::{Privilege, current_privilege};
-use crate::service::{ServiceActivity, is_active};
+use crate::service::{ServiceActivity, enable_now, is_active};
 
 #[derive(Debug)]
 pub struct SystemProbe<R> {
@@ -57,12 +58,28 @@ impl<R: CommandRunner> SystemProbe<R> {
         package_status(&self.runner, package).map_err(SystemProbeError::Command)
     }
 
+    pub fn apt_update(&self) -> Result<CommandOutput, SystemProbeError> {
+        apt_update(&self.runner).map_err(SystemProbeError::Command)
+    }
+
+    pub fn apt_install(&self, packages: &[String]) -> Result<CommandOutput, SystemProbeError> {
+        apt_install(&self.runner, packages).map_err(SystemProbeError::Command)
+    }
+
+    pub fn apt_candidate_available(&self, package: &str) -> Result<bool, SystemProbeError> {
+        apt_candidate_available(&self.runner, package).map_err(SystemProbeError::Command)
+    }
+
     pub fn tcp_port_status(&self, port: u16) -> Result<PortStatus, SystemProbeError> {
         tcp_port_status(&self.runner, port).map_err(SystemProbeError::Command)
     }
 
     pub fn current_privilege(&self) -> Result<Privilege, SystemProbeError> {
         current_privilege(&self.runner).map_err(SystemProbeError::Command)
+    }
+
+    pub fn enable_service_now(&self, service: &str) -> Result<CommandOutput, SystemProbeError> {
+        enable_now(&self.runner, service).map_err(SystemProbeError::Command)
     }
 
     pub fn path_exists(&self, path: &Path) -> bool {

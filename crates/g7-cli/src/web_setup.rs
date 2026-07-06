@@ -239,6 +239,16 @@ struct InstallApiReport {
     state_path: String,
     owned_files_path: String,
     completed_steps: Vec<String>,
+    package_checks: Vec<InstallApiCheck>,
+    service_checks: Vec<InstallApiCheck>,
+    port_checks: Vec<InstallApiCheck>,
+}
+
+#[derive(Debug, Serialize)]
+struct InstallApiCheck {
+    name: String,
+    status: String,
+    message: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -624,22 +634,31 @@ async fn api_install_prepare(
     match result {
         Ok(report) => {
             emit_stage(&state, "preflight", "성공", "preflight passed");
+            emit_stage(&state, "packages", "성공", "packages installed");
             emit_stage(&state, "config", "성공", "configuration prepared");
+            emit_stage(&state, "services", "성공", "services enabled");
+            emit_stage(&state, "ports", "성공", "ports verified");
+            emit_stage(
+                &state,
+                "http",
+                "성공",
+                "basic service verification completed",
+            );
             emit_stage(&state, "report", "성공", "problem report prepared");
-            emit_log(&state, "install preparation completed");
+            emit_log(&state, "package install completed");
             Ok(Json(install_to_api(report)))
         }
         Err(error) => {
             let details = failed_doctor_details(doctor::run());
             emit_stage(
                 &state,
-                "preflight",
+                "packages",
                 "실패",
                 format!("install failed: {error}"),
             );
             Err(ApiError::bad_request(error)
                 .with_hint(
-                    "서버 점검 실패 항목을 해결하거나 테스트 흔적이면 reset 후 다시 시도하세요.",
+                    "리포트의 실패 항목을 확인하세요. 패키지 버전 문제면 PHP 8.3 같은 Ubuntu 기본 패키지 조합으로 다시 시도하세요.",
                 )
                 .with_details(details))
         }
@@ -870,7 +889,21 @@ fn install_to_api(report: install::InstallReport) -> InstallApiReport {
         state_path: report.state_path.display().to_string(),
         owned_files_path: report.owned_files_path.display().to_string(),
         completed_steps: report.completed_steps,
+        package_checks: install_checks_to_api(report.package_checks),
+        service_checks: install_checks_to_api(report.service_checks),
+        port_checks: install_checks_to_api(report.port_checks),
     }
+}
+
+fn install_checks_to_api(checks: Vec<install::InstallCheck>) -> Vec<InstallApiCheck> {
+    checks
+        .into_iter()
+        .map(|check| InstallApiCheck {
+            name: check.name,
+            status: check.status,
+            message: check.message,
+        })
+        .collect()
 }
 
 fn create_session(state: &WebState, client_ip: IpAddr) -> std::result::Result<String, ApiError> {

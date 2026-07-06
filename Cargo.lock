@@ -327,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "g7-cli"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "axum",
  "clap",
@@ -342,25 +342,26 @@ dependencies = [
 
 [[package]]
 name = "g7-core"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "g7-state",
  "g7-system",
  "miette",
+ "serde_json",
  "thiserror",
 ]
 
 [[package]]
 name = "g7-release"
-version = "0.2.4"
+version = "0.2.5"
 
 [[package]]
 name = "g7-render"
-version = "0.2.4"
+version = "0.2.5"
 
 [[package]]
 name = "g7-state"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "serde",
  "serde_json",
@@ -368,7 +369,7 @@ dependencies = [
 
 [[package]]
 name = "g7-system"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "thiserror",
 ]
