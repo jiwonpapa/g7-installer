@@ -420,7 +420,7 @@ function setReportReady(ready) {
   state.reportReady = ready;
   if (nodes.installResultButton) {
     nodes.installResultButton.disabled = !ready;
-    setButtonLabel(nodes.installResultButton, ready ? "결과 보기" : "설치 완료 후 결과 보기");
+    setButtonLabel(nodes.installResultButton, ready ? "결과 보기" : "기본 구성 후 결과 보기");
   }
 }
 
@@ -437,12 +437,12 @@ function refreshInstallButtonState(label = null) {
 
   if (state.installCompleted) {
     nodes.installButton.disabled = true;
-    setButtonLabel(nodes.installButton, "설치 완료");
+    setButtonLabel(nodes.installButton, "기본 구성 완료");
     return;
   }
 
   nodes.installButton.disabled = false;
-  setButtonLabel(nodes.installButton, label || "서버 설치 시작");
+  setButtonLabel(nodes.installButton, label || "기본 구성 시작");
 }
 
 function setDoctorPassed(passed) {
@@ -536,7 +536,7 @@ function showStep(nextStep, options = {}) {
       nodes.installStatus,
       "warning",
       "설치 결과가 아직 없습니다",
-      "서버 설치 시작을 완료해야 결과 리포트를 볼 수 있습니다.",
+      "기본 서버 구성을 완료해야 결과 리포트를 볼 수 있습니다.",
     );
     step = "install";
   }
@@ -1217,7 +1217,7 @@ function restoreInstallStateFromReport(report) {
 function renderInstallReport(report) {
   const link = accessLink(report.domain, report.phase);
   nodes.reportOutput.innerHTML = [
-    reportSummaryCard("서버 설치 완료", [
+    reportSummaryCard("기본 서버 구성 완료", [
       ["도메인", report.domain],
       ["접속 주소", link.html],
       ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / PHP ${report.php_version}`],
@@ -1476,6 +1476,14 @@ function renderPlanReport(report) {
   const ports = report.ports.length
     ? report.ports.map((item) => `- ${item.port}/${item.protocol}: ${item.purpose}`).join("\n")
     : "- 없음";
+  const provisioning = Array.isArray(report.provisioning) && report.provisioning.length
+    ? report.provisioning.map((section) => {
+        const settings = Array.isArray(section.settings) && section.settings.length
+          ? section.settings.map((item) => `  - ${item.key}: ${item.value}`).join("\n")
+          : "  - 설정 없음";
+        return `- ${section.title}: ${section.summary}\n${settings}`;
+      }).join("\n")
+    : "- 없음";
   const stopConditions = report.stop_conditions.length
     ? report.stop_conditions.map((item) => `- ${item}`).join("\n")
     : "- 없음";
@@ -1502,6 +1510,9 @@ function renderPlanReport(report) {
     "",
     "포트 계획:",
     ports,
+    "",
+    "프로비저닝 계획:",
+    provisioning,
     "",
     "중단 조건:",
     stopConditions,
@@ -1547,7 +1558,7 @@ function installConfirmSummaryHtml(payload) {
 function confirmInstallStart() {
   const payload = optionPayload();
   if (!nodes.installConfirmDialog?.showModal) {
-    return Promise.resolve(window.confirm("서버 설치를 시작할까요?"));
+    return Promise.resolve(window.confirm("기본 서버 구성을 시작할까요?"));
   }
 
   nodes.installConfirmSummary.innerHTML = installConfirmSummaryHtml(payload);
@@ -1930,7 +1941,7 @@ function bindEvents() {
 
     const confirmed = await confirmInstallStart();
     if (!confirmed) {
-      log("서버 설치 취소");
+      log("기본 서버 구성 취소");
       return;
     }
 
@@ -1946,22 +1957,22 @@ function bindEvents() {
 
     try {
       markStage("preflight", "진행");
-      setAlert(nodes.installStatus, "info", "서버 설치 진행 중", "apt 패키지 설치, Nginx 도메인 연결 설정 생성, HTTP 검증을 진행합니다.");
-      log("서버 설치 시작");
+      setAlert(nodes.installStatus, "info", "기본 서버 구성 진행 중", "apt 패키지 설치, Nginx 도메인 연결 설정 생성, HTTP 검증을 진행합니다.");
+      log("기본 서버 구성 시작");
       const report = await apiFetch("/api/install/prepare", {
         method: "POST",
         body: JSON.stringify(optionPayload()),
       });
       renderInstallReport(report);
       await refreshRecoveryStatus();
-      setAlert(nodes.installStatus, "success", "서버 설치 완료", "결과 리포트에서 패키지, 서비스, 포트, 도메인 연결 검증 결과를 확인하세요.");
+      setAlert(nodes.installStatus, "success", "기본 서버 구성 완료", "결과 리포트에서 패키지, 서비스, 포트, 도메인 연결 검증 결과와 프로비저닝 계획을 확인하세요.");
       showStep("report");
-      log(`서버 설치 완료: ${report.phase}`);
+      log(`기본 서버 구성 완료: ${report.phase}`);
     } catch (error) {
       markStage("packages", "실패");
       stopPackageTicker();
-      renderErrorReport("서버 설치 실패", `${formatError(error)}\n\n리포트와 로그를 확인하세요. 패키지 버전 문제면 PHP 8.3 조합으로 다시 시도하세요.`);
-      setAlert(nodes.installStatus, "error", "서버 설치 실패", formatError(error));
+      renderErrorReport("기본 서버 구성 실패", `${formatError(error)}\n\n리포트와 로그를 확인하세요. 패키지 버전 문제면 PHP 8.3 조합으로 다시 시도하세요.`);
+      setAlert(nodes.installStatus, "error", "기본 서버 구성 실패", formatError(error));
       setReportReady(true);
       await refreshRecoveryStatus();
       showStep("report");

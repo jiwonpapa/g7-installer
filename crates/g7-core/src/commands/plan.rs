@@ -78,6 +78,7 @@ pub struct InstallPlan {
     pub security_checks: Vec<PlanSecurityCheck>,
     pub app_requirements: Vec<AppRequirement>,
     pub app_followup_steps: Vec<AppFollowupStep>,
+    pub provisioning: Vec<ProvisioningSection>,
     pub stop_conditions: Vec<PlanStopCondition>,
 }
 
@@ -137,6 +138,29 @@ impl PlanStopCondition {
     fn new(reason: impl Into<String>) -> Self {
         Self {
             reason: reason.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProvisioningSection {
+    pub name: &'static str,
+    pub title: &'static str,
+    pub summary: String,
+    pub settings: Vec<ProvisioningSetting>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProvisioningSetting {
+    pub key: &'static str,
+    pub value: String,
+}
+
+impl ProvisioningSetting {
+    fn new(key: &'static str, value: impl Into<String>) -> Self {
+        Self {
+            key,
+            value: value.into(),
         }
     }
 }
@@ -290,6 +314,25 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         options.local_test,
     );
     let app_followup_steps = app_profile.followup_steps();
+    let provisioning = provisioning_sections(ProvisioningInput {
+        domain: &domain,
+        app_profile: app_profile.id,
+        app_document_root: &app_document_root,
+        web_server: &web_server,
+        php_version: &php_version,
+        database_engine: &database_engine,
+        database_name: &database_name,
+        database_user: &database_user,
+        site_user: &site_user,
+        web_root: &web_root,
+        www_mode: &www_mode,
+        redis_mode: &redis_mode,
+        mail_mode: &mail_mode,
+        smtp_port,
+        security_profile: &security_profile,
+        ssh_policy: &ssh_policy,
+        local_test: options.local_test,
+    });
     let stop_conditions = stop_conditions(&web_server, &web_root, options.local_test);
 
     Ok(InstallPlan {
@@ -331,6 +374,7 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         security_checks,
         app_requirements,
         app_followup_steps,
+        provisioning,
         stop_conditions,
     })
 }
@@ -872,6 +916,281 @@ fn package_phase_php_extension_package(extension: &str, php_version: &str) -> Op
     };
 
     Some(format!("php{php_version}-{package}"))
+}
+
+struct ProvisioningInput<'a> {
+    domain: &'a str,
+    app_profile: &'a str,
+    app_document_root: &'a str,
+    web_server: &'a str,
+    php_version: &'a str,
+    database_engine: &'a str,
+    database_name: &'a str,
+    database_user: &'a str,
+    site_user: &'a str,
+    web_root: &'a str,
+    www_mode: &'a str,
+    redis_mode: &'a str,
+    mail_mode: &'a str,
+    smtp_port: u16,
+    security_profile: &'a str,
+    ssh_policy: &'a str,
+    local_test: bool,
+}
+
+fn provisioning_sections(input: ProvisioningInput<'_>) -> Vec<ProvisioningSection> {
+    let mut sections = vec![
+        ProvisioningSection {
+            name: "server-sizing",
+            title: "서버 사양 기반 튜닝",
+            summary:
+                "적용 시점에 RAM/CPU/디스크를 감지해 1GB/2GB급 VPS에 맞는 보수적 값을 선택합니다."
+                    .to_string(),
+            settings: vec![
+                ProvisioningSetting::new("size_probe", "RAM, vCPU, disk, swap 상태를 먼저 감지"),
+                ProvisioningSetting::new(
+                    "swap",
+                    "1GB/2GB Lightsail급 서버는 2GB swap을 기본 후보로 계산",
+                ),
+                ProvisioningSetting::new(
+                    "memory_budget",
+                    "OS reserve, DB, Redis, PHP-FPM 순서로 메모리 예산 분배",
+                ),
+                ProvisioningSetting::new(
+                    "profile_floor",
+                    "1GB RAM / 2 vCPU / 40GB SSD 기준에서도 과부하를 피하는 값 우선",
+                ),
+            ],
+        },
+        ProvisioningSection {
+            name: "web-server",
+            title: "웹서버 호스트 설정",
+            summary: format!(
+                "{} vhost를 {} 문서 루트에 맞춰 생성하고 root/www 정책을 적용합니다.",
+                runtime_label(input.web_server),
+                input.app_document_root
+            ),
+            settings: vec![
+                ProvisioningSetting::new("server_name", server_names(input.domain, input.www_mode)),
+                ProvisioningSetting::new(
+                    "redirect_source",
+                    redirect_source(input.domain, input.www_mode),
+                ),
+                ProvisioningSetting::new("document_root", input.app_document_root),
+                ProvisioningSetting::new("site_root", input.web_root),
+                ProvisioningSetting::new(
+                    "php_socket",
+                    format!("/run/php/php{}-fpm.sock", input.php_version),
+                ),
+                ProvisioningSetting::new("rewrite_policy", rewrite_policy(input.app_profile)),
+                ProvisioningSetting::new(
+                    "security_headers",
+                    "HTTPS 적용 후 HSTS, nosniff, frame deny, referrer policy 후보 적용",
+                ),
+            ],
+        },
+        ProvisioningSection {
+            name: "php-runtime",
+            title: "PHP 런타임 설정",
+            summary: format!(
+                "PHP {} FPM pool, php.ini, opcache를 앱과 서버 사양 기준으로 조정합니다.",
+                input.php_version
+            ),
+            settings: vec![
+                ProvisioningSetting::new("pool_user", input.site_user),
+                ProvisioningSetting::new(
+                    "pm_policy",
+                    "dynamic; max_children은 감지 RAM과 vCPU로 계산",
+                ),
+                ProvisioningSetting::new(
+                    "max_children",
+                    "1GB: 4-6, 2GB: 8-12 범위에서 메모리 예산 기반 산정",
+                ),
+                ProvisioningSetting::new("memory_limit", "256M 기본 후보"),
+                ProvisioningSetting::new(
+                    "upload_max_filesize",
+                    "64M 기본 후보, 앱 프로필별 상향 가능",
+                ),
+                ProvisioningSetting::new("post_max_size", "64M 기본 후보"),
+                ProvisioningSetting::new("max_execution_time", "120초 기본 후보"),
+                ProvisioningSetting::new("opcache", "1GB: 64M, 2GB: 128M 후보로 적용"),
+            ],
+        },
+        ProvisioningSection {
+            name: "database",
+            title: "DB 생성 및 계정 설정",
+            summary: format!(
+                "{}에 앱 전용 DB와 최소 권한 계정을 만들고 localhost 전용으로 묶습니다.",
+                database_label(input.database_engine)
+            ),
+            settings: vec![
+                ProvisioningSetting::new("database", input.database_name),
+                ProvisioningSetting::new("user", input.database_user),
+                ProvisioningSetting::new(
+                    "password_policy",
+                    "무작위 생성 후 root-only 파일에 저장, 화면/로그 출력 금지",
+                ),
+                ProvisioningSetting::new("bind", "127.0.0.1 또는 unix socket 전용"),
+                ProvisioningSetting::new("buffer_pool", "1GB: 128-256M, 2GB: 384-512M 후보로 산정"),
+                ProvisioningSetting::new(
+                    "backup_note",
+                    "앱 설치 후 DB 백업/복구 경로를 리포트에 표시",
+                ),
+            ],
+        },
+        ProvisioningSection {
+            name: "firewall",
+            title: "방화벽 및 포트 정책",
+            summary:
+                "SSH, HTTP, HTTPS만 외부 공개하고 DB/Redis/설치 UI 포트는 외부 공개를 차단합니다."
+                    .to_string(),
+            settings: vec![
+                ProvisioningSetting::new("allow", "active SSH port, 80/tcp, 443/tcp"),
+                ProvisioningSetting::new("deny", "7717/tcp, 3306/tcp, 6379/tcp inbound"),
+                ProvisioningSetting::new(
+                    "owner",
+                    "Lightsail 방화벽을 1차 기준으로 보고 UFW는 서버 내부 보조 정책으로 적용",
+                ),
+                ProvisioningSetting::new(
+                    "verify",
+                    "적용 후 ss/ufw/외부 포트 검사 결과를 리포트에 기록",
+                ),
+            ],
+        },
+        ProvisioningSection {
+            name: "ssl",
+            title: "SSL 인증서 및 자동 갱신",
+            summary: if input.local_test {
+                "공개 도메인 설치가 아니면 인증서 발급은 건너뜁니다.".to_string()
+            } else {
+                "도메인 IP 일치 확인 후 Let's Encrypt 인증서를 발급하고 certbot.timer를 검증합니다."
+                    .to_string()
+            },
+            settings: vec![
+                ProvisioningSetting::new(
+                    "domain_check",
+                    "A/AAAA와 www 대상이 현재 VPS 공인 IP와 일치해야 진행",
+                ),
+                ProvisioningSetting::new("issuer", "Let's Encrypt / Certbot"),
+                ProvisioningSetting::new("renewal", "certbot.timer enable + renew dry-run 검증"),
+                ProvisioningSetting::new(
+                    "fallback",
+                    "DNS 불일치 시 HTTP vhost까지만 유지하고 인증서 단계 중단",
+                ),
+            ],
+        },
+    ];
+
+    if input.redis_mode == "enable" {
+        sections.push(ProvisioningSection {
+            name: "redis",
+            title: "Redis 캐시 설정",
+            summary: "Redis를 로컬 전용 캐시/세션 저장소로 구성하고 서버 RAM에 맞춰 maxmemory를 제한합니다."
+                .to_string(),
+            settings: vec![
+                ProvisioningSetting::new("bind", "127.0.0.1/::1 또는 unix socket 전용"),
+                ProvisioningSetting::new("protected_mode", "yes"),
+                ProvisioningSetting::new("maxmemory", "1GB: 64M, 2GB: 128M 후보로 산정"),
+                ProvisioningSetting::new("policy", "allkeys-lru 기본 후보"),
+            ],
+        });
+    } else {
+        sections.push(ProvisioningSection {
+            name: "redis",
+            title: "Redis 캐시 설정",
+            summary: "Redis 비활성 선택에 따라 설치와 앱 연결 설정을 생략합니다.".to_string(),
+            settings: vec![ProvisioningSetting::new("status", "disabled")],
+        });
+    }
+
+    if input.mail_mode != "none" {
+        sections.push(ProvisioningSection {
+            name: "mail",
+            title: "메일 발송 설정",
+            summary:
+                "회원 인증/알림 메일 발송만 설정하고 수신 메일 서버는 기본 범위에서 제외합니다."
+                    .to_string(),
+            settings: vec![
+                ProvisioningSetting::new("mode", input.mail_mode),
+                ProvisioningSetting::new("smtp_port", input.smtp_port.to_string()),
+                ProvisioningSetting::new("inbound_mail", "25/465/587 inbound는 열지 않음"),
+                ProvisioningSetting::new(
+                    "dns_note",
+                    "SPF/DKIM/DMARC/PTR은 발송 방식에 따라 리포트에서 안내",
+                ),
+            ],
+        });
+    }
+
+    sections.push(ProvisioningSection {
+        name: "security-baseline",
+        title: "사이트 보안 기본값",
+        summary: format!(
+            "{} 보안 수준과 {} SSH 정책 기준으로 변경 전 점검, 적용, 검증을 나눕니다.",
+            input.security_profile, input.ssh_policy
+        ),
+        settings: vec![
+            ProvisioningSetting::new(
+                "file_ownership",
+                "웹파일은 사이트 계정 소유, 쓰기 디렉터리만 제한적으로 허용",
+            ),
+            ProvisioningSetting::new(
+                "fail2ban",
+                "SSH jail 상태 점검 후 standard/hardened 정책에서 적용 후보",
+            ),
+            ProvisioningSetting::new(
+                "ssh",
+                "audit-only는 리포트만, harden은 현재 세션 보존 후 적용",
+            ),
+            ProvisioningSetting::new(
+                "config_preserve",
+                "기존 설정은 백업 후 installer-owned 범위만 변경",
+            ),
+        ],
+    });
+
+    sections
+}
+
+fn runtime_label(web_server: &str) -> &'static str {
+    if web_server == "apache" {
+        "Apache"
+    } else {
+        "Nginx"
+    }
+}
+
+fn database_label(database_engine: &str) -> &'static str {
+    if database_engine == "mariadb" {
+        "MariaDB"
+    } else {
+        "MySQL"
+    }
+}
+
+fn server_names(domain: &str, www_mode: &str) -> String {
+    match www_mode {
+        "redirect-to-www" => format!("www.{domain}"),
+        "include" => format!("{domain} www.{domain}"),
+        "none" => domain.to_string(),
+        _ => domain.to_string(),
+    }
+}
+
+fn redirect_source(domain: &str, www_mode: &str) -> String {
+    match www_mode {
+        "redirect-to-root" if !domain.starts_with("www.") => format!("www.{domain} -> {domain}"),
+        "redirect-to-www" if !domain.starts_with("www.") => format!("{domain} -> www.{domain}"),
+        _ => "none".to_string(),
+    }
+}
+
+fn rewrite_policy(app_profile: &str) -> &'static str {
+    match app_profile {
+        "wordpress" => "WordPress permalink rewrite to /index.php",
+        "laravel" => "Laravel public/ front controller rewrite",
+        _ => "Gnuboard public/ front controller and PHP path handling",
+    }
 }
 
 fn php_version_at_least(selected: &str, minimum: &str) -> bool {

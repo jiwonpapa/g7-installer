@@ -501,6 +501,17 @@ pub(crate) fn format_plan(plan: &plan::InstallPlan) -> String {
         output.push_str(&format!("- {}: {}\n", step.name, step.description));
     }
 
+    output.push_str("\nProvisioning plan:\n");
+    for section in &plan.provisioning {
+        output.push_str(&format!(
+            "- {} [{}]: {}\n",
+            section.title, section.name, section.summary
+        ));
+        for setting in &section.settings {
+            output.push_str(&format!("  - {}: {}\n", setting.key, setting.value));
+        }
+    }
+
     output.push_str("\nInstall stops if:\n");
     for condition in &plan.stop_conditions {
         output.push_str(&format!("- {}\n", condition.reason));
@@ -683,6 +694,11 @@ mod tests {
         assert!(output.contains("database: mysql"));
         assert!(output.contains("redis: enable"));
         assert!(output.contains("rollback: true"));
+        assert!(output.contains("Provisioning plan:"));
+        assert!(output.contains("- PHP 런타임 설정 [php-runtime]:"));
+        assert!(output.contains("  - max_children: 1GB: 4-6, 2GB: 8-12"));
+        assert!(output.contains("- DB 생성 및 계정 설정 [database]:"));
+        assert!(output.contains("  - password_policy: 무작위 생성 후 root-only"));
         assert!(output.contains("- Apache is running."));
         Ok(())
     }

@@ -193,6 +193,7 @@ struct PlanApiReport {
     security_checks: Vec<SecurityCheckPlan>,
     app_requirements: Vec<RequirementPlan>,
     app_followup_steps: Vec<FollowupStepPlan>,
+    provisioning: Vec<ProvisioningSectionPlan>,
     stop_conditions: Vec<String>,
 }
 
@@ -239,6 +240,20 @@ struct RequirementPlan {
 struct FollowupStepPlan {
     name: &'static str,
     description: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct ProvisioningSectionPlan {
+    name: &'static str,
+    title: &'static str,
+    summary: String,
+    settings: Vec<ProvisioningSettingPlan>,
+}
+
+#[derive(Debug, Serialize)]
+struct ProvisioningSettingPlan {
+    key: &'static str,
+    value: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -1097,6 +1112,23 @@ fn plan_to_api(install_plan: plan::InstallPlan, database_version: String) -> Pla
             .map(|step| FollowupStepPlan {
                 name: step.name,
                 description: step.description,
+            })
+            .collect(),
+        provisioning: install_plan
+            .provisioning
+            .into_iter()
+            .map(|section| ProvisioningSectionPlan {
+                name: section.name,
+                title: section.title,
+                summary: section.summary,
+                settings: section
+                    .settings
+                    .into_iter()
+                    .map(|setting| ProvisioningSettingPlan {
+                        key: setting.key,
+                        value: setting.value,
+                    })
+                    .collect(),
             })
             .collect(),
         stop_conditions: install_plan
@@ -2142,6 +2174,17 @@ mod tests {
                 .iter()
                 .any(|requirement| requirement.name == "php-version")
         );
+        assert!(
+            api.provisioning
+                .iter()
+                .any(|section| section.name == "php-runtime")
+        );
+        assert!(api.provisioning.iter().any(|section| {
+            section
+                .settings
+                .iter()
+                .any(|setting| setting.key == "password_policy")
+        }));
         assert!(
             api.stop_conditions
                 .iter()
