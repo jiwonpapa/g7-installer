@@ -8,7 +8,7 @@ Date: 2026-07-07
 - Local gate covers shell syntax, web static smoke, setup auth smoke, JS syntax, `cargo fmt --check`, `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo doc --no-deps`, `cargo llvm-cov --fail-under-lines 75`, and web CSS build.
 - Current measured line coverage is 77.46%.
 - Web controller line coverage is 76.63%.
-- Release `v0.2.7` has both Linux musl assets and `checksums.txt`.
+- Release `v0.2.8` has both Linux musl assets and `checksums.txt`.
 - `scripts/ops-harness.sh` now verifies a disposable Ubuntu 24.04 server through install, report validation, rollback, removed-package checks, and reinstall. Current install reaches the Nginx HTTP vhost phase.
 - GitHub Actions workflow file exists at `.github/workflows/quality-gate.yml`; it runs the local quality gate on push to `main` and pull requests after it is pushed to GitHub.
 
