@@ -96,8 +96,8 @@ OS 업데이트, 보안 업데이트, swap, UFW, fail2ban, SSH 보안 점검, Ng
 `g7inst setup` 실행은 시작 스크립트에 넣지 않습니다. 웹 컨트롤러 token URL이 부팅 로그에 남고, DNS/고정 IP/도메인 준비 전에 설치 흐름이 시작될 수 있기 때문입니다.
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7-installer/main/scripts/lightsail-init.sh | bash
 ```
 
