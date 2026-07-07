@@ -134,10 +134,17 @@ g7inst doctor
    - HTTP 80/tcp: 전체 허용
    - HTTPS 443/tcp: 전체 허용
 4. `g7inst` 웹 컨트롤러 포트 `7717`은 외부 공개하지 않습니다.
-5. 설치기 웹 UI는 SSH 터널로 엽니다.
+5. DB, Redis, 메일 수신 포트도 외부 공개하지 않습니다.
+6. 설치기 웹 UI는 SSH 터널로 엽니다.
 
 ```bash
 ssh -i ~/.ssh/lightsail_g7inst.pem -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP
+```
+
+SSH alias를 등록했다면 더 짧게 접속합니다.
+
+```bash
+ssh -L 7717:127.0.0.1:7717 g7installer
 ```
 
 ## g7inst 실행
@@ -170,6 +177,12 @@ sudo g7inst setup --domain example.com
 ```
 
 터미널에 출력된 token URL을 Mac 브라우저에서 엽니다.
+
+```text
+http://127.0.0.1:7717/?token=...
+```
+
+설치가 끝날 때까지 SSH 터널 터미널을 닫지 않습니다. 설치가 끝나면 `Ctrl+C`로 `g7inst setup`을 종료합니다.
 
 ## DNS 체크리스트
 

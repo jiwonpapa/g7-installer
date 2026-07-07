@@ -90,6 +90,39 @@ sudo g7inst setup --domain example.com
 
 터미널에 출력된 token URL을 Mac 브라우저에서 엽니다.
 
+### Lightsail 배포/접속 절차
+
+실서버 설치는 7717 포트를 외부에 열지 않고 SSH 터널로 접속합니다. Lightsail 방화벽은 22/tcp, 80/tcp, 443/tcp만 엽니다.
+
+1. 도메인 DNS A 레코드를 Lightsail 고정 IP로 지정합니다. 설치 중에는 Cloudflare 프록시를 끄고 DNS only로 둡니다.
+2. Mac에서 SSH 터널을 포함해 서버에 접속합니다.
+
+```bash
+ssh -i ~/.ssh/lightsail_g7inst.pem -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP
+```
+
+SSH alias를 등록했다면 더 짧게 접속합니다.
+
+```bash
+ssh -L 7717:127.0.0.1:7717 g7installer
+```
+
+3. 열린 SSH 세션 안에서 설치 웹 UI를 시작합니다.
+
+```bash
+sudo g7inst setup --domain example.com
+```
+
+4. 터미널에 출력된 URL을 Mac 브라우저에서 엽니다.
+
+```text
+http://127.0.0.1:7717/?token=...
+```
+
+5. 설치가 끝날 때까지 SSH 터널 터미널을 닫지 않습니다. 설치가 끝나면 `Ctrl+C`로 `g7inst setup`을 종료합니다.
+
+`7717/tcp`는 설치 관리자 UI 포트입니다. 인터넷에 직접 공개하지 않습니다. DB, Redis, 메일 수신 포트도 외부에 열지 않습니다.
+
 ## 빠른 설치
 
 Ubuntu VPS에서 Rust/Cargo 없이 설치기만 바로 설치합니다.
@@ -128,13 +161,7 @@ http://127.0.0.1:7717/?token=...
 원격 VPS는 SSH 터널로 접속합니다.
 
 ```bash
-ssh -L 7717:127.0.0.1:7717 root@SERVER_IP
-```
-
-서버 계정 비밀번호가 없으면 먼저 설정합니다.
-
-```bash
-sudo passwd root
+ssh -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP
 ```
 
 로컬 테스트 도메인으로 반복 테스트할 때:
