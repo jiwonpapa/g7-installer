@@ -46,27 +46,34 @@ Lightsail에는 같은 2GB 메모리, 2 vCPU, 60GB SSD, 3TB 전송 조건의 IPv
 5. OS는 `Ubuntu 24.04 LTS`를 선택합니다.
 6. 네트워크는 `Dual-stack` 또는 공인 IPv4가 포함된 옵션을 선택합니다.
 7. 플랜은 `2GB RAM / 2 vCPU / 60GB SSD / 3TB transfer`, 월 12 USD 공인 IPv4 번들을 선택합니다.
-8. SSH 키는 새로 만들거나 Mac의 공개키를 업로드합니다.
+8. SSH 키는 Lightsail 화면에서 만들고 `.pem` 개인키를 다운로드하거나, Mac에서 만든 공개키를 업로드합니다.
 9. 이 문서의 시작 스크립트를 추가합니다.
 10. 인스턴스 이름은 `g7-prod-01`, `g7-test-01`처럼 용도를 알 수 있게 정합니다.
 11. 인스턴스를 생성합니다.
 
 ## SSH 키 권장 방식
 
-서버별 또는 프로젝트별 전용 키를 권장합니다. 모든 VPS에 개인 공용 키 하나를 계속 재사용하지 않는 편이 좋습니다.
+기본 추천은 Lightsail 인스턴스 생성 화면에서 SSH 키를 만들고 다운로드한 `.pem` 개인키를 Mac `~/.ssh`에 보관하는 방식입니다. 이 경우 공개키는 Lightsail이 인스턴스에 넣어주므로 시작 스크립트에 키를 적을 필요가 없습니다.
 
-Mac에서 새 키를 만들 때:
+Mac에 저장:
 
 ```bash
-ssh-keygen -t rsa -b 4096 -f ~/.ssh/lightsail_g7inst_202607 -C "lightsail-g7inst"
+mkdir -p ~/.ssh
+mv ~/Downloads/YOUR_LIGHTSAIL_KEY.pem ~/.ssh/lightsail_g7inst.pem
+chmod 600 ~/.ssh/lightsail_g7inst.pem
 ```
-
-Lightsail 콘솔에서 `.pub` 파일을 업로드하거나, 인스턴스 생성 화면에서 SSH 키 변경 기능이 있으면 해당 키를 선택합니다.
 
 생성 후 Mac에서 접속:
 
 ```bash
-chmod 600 ~/.ssh/lightsail_g7inst_202607
+ssh -i ~/.ssh/lightsail_g7inst.pem ubuntu@SERVER_IP
+```
+
+직접 키를 만들고 싶으면 Mac에서 키를 만든 뒤 `.pub` 공개키만 Lightsail에 업로드합니다.
+
+```bash
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/lightsail_g7inst_202607 -C "lightsail-g7inst"
+cat ~/.ssh/lightsail_g7inst_202607.pub
 ssh -i ~/.ssh/lightsail_g7inst_202607 ubuntu@SERVER_IP
 ```
 
@@ -76,21 +83,13 @@ root 권한이 필요할 때만 전환합니다.
 sudo -i
 ```
 
-루트 비밀번호, DB 비밀번호, 앱 secret, SMTP 비밀번호는 Lightsail 시작 스크립트에 넣지 않습니다.
-
-추가 SSH 키를 시작 스크립트로 넣을 수도 있지만, 넣는 값은 반드시 `.pub` 공개키여야 합니다. 개인키는 Mac에만 두고 서버, Git, 문서, 시작 스크립트에 넣지 않습니다.
-
-```bash
-cat ~/.ssh/lightsail_g7inst_202607.pub
-```
-
-출력값을 아래 시작 스크립트의 `EXTRA_SSH_PUBLIC_KEY`에 넣으면 `ubuntu` 계정에 추가됩니다. Lightsail 콘솔에서 SSH 키를 선택했다면 이 값은 비워둡니다.
+개인키, 루트 비밀번호, DB 비밀번호, 앱 secret, SMTP 비밀번호는 Lightsail 시작 스크립트에 넣지 않습니다.
 
 ## 시작 스크립트
 
-Lightsail 생성 화면의 `Add launch script`에 아래 내용을 넣습니다.
+Lightsail 생성 화면의 `Add launch script`에는 아래 짧은 스크립트만 넣습니다.
 
-이 스크립트는 `g7inst` 바이너리를 받을 최소 발판만 만듭니다. `curl`, `ca-certificates` 같은 부트스트랩 의존성 외에는 서버 설정을 건드리지 않습니다.
+긴 스크립트를 콘솔에 직접 붙여넣지 않고, GitHub에 버전 관리되는 `scripts/lightsail-init.sh`를 받아 실행합니다. 이 스크립트는 `g7inst` 바이너리를 받을 최소 발판만 만듭니다. `curl`, `ca-certificates` 같은 부트스트랩 의존성 외에는 서버 설정을 건드리지 않습니다.
 
 OS 업데이트, 보안 업데이트, swap, UFW, fail2ban, SSH 보안 점검, Nginx, Apache, PHP, MySQL, MariaDB, Redis, Certbot은 `g7inst setup`이 처리하고 리포트해야 합니다. 시작 스크립트가 먼저 처리하면 웹 UI, 진행률, 실패 리포트, 되돌리기 기준이 약해집니다.
 
@@ -98,49 +97,11 @@ OS 업데이트, 보안 업데이트, swap, UFW, fail2ban, SSH 보안 점검, Ng
 
 ```bash
 #!/usr/bin/env bash
-set -euxo pipefail
-
-export DEBIAN_FRONTEND=noninteractive
-LOG_FILE="/var/log/g7-lightsail-bootstrap.log"
-exec > >(tee -a "${LOG_FILE}") 2>&1
-
-EXTRA_SSH_PUBLIC_KEY=""
-
-echo "g7 Lightsail bootstrap started at $(date -Is)"
-
-timedatectl set-timezone Asia/Seoul || true
-
-apt-get update
-apt-get install -y \
-  ca-certificates \
-  curl
-
-if [ -n "${EXTRA_SSH_PUBLIC_KEY}" ]; then
-  install -d -m 700 -o ubuntu -g ubuntu /home/ubuntu/.ssh
-  touch /home/ubuntu/.ssh/authorized_keys
-  chown ubuntu:ubuntu /home/ubuntu/.ssh/authorized_keys
-  chmod 600 /home/ubuntu/.ssh/authorized_keys
-  if ! grep -qxF "${EXTRA_SSH_PUBLIC_KEY}" /home/ubuntu/.ssh/authorized_keys; then
-    echo "${EXTRA_SSH_PUBLIC_KEY}" >>/home/ubuntu/.ssh/authorized_keys
-  fi
-fi
-
-mkdir -p /opt/g7-bootstrap
-cat >/opt/g7-bootstrap/README.txt <<'README'
-This server was prepared for g7inst.
-The launch script only installed minimal bootstrap dependencies and g7inst.
-OS updates, security baseline, swap, firewall, fail2ban, web server, PHP,
-database, Redis, Certbot, and app files should be installed by g7inst.
-README
-
-apt-get clean
-
-curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7-installer/main/scripts/bootstrap.sh | bash
-g7inst --version
-g7inst doctor || true
-
-echo "g7 Lightsail bootstrap completed at $(date -Is)"
+set -euo pipefail
+curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7-installer/main/scripts/lightsail-init.sh | bash
 ```
+
+운영 서버에서 재현성을 더 엄격하게 보려면 `main` 대신 릴리스 태그나 커밋 해시가 들어간 raw URL로 고정합니다. `bootstrap.sh`가 내려받는 `g7inst` 바이너리는 GitHub Release의 `checksums.txt`로 SHA256 검증합니다.
 
 ## 생성 직후 확인
 
@@ -169,7 +130,7 @@ g7inst doctor
 5. 설치기 웹 UI는 SSH 터널로 엽니다.
 
 ```bash
-ssh -i ~/.ssh/lightsail_g7inst_202607 -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP
+ssh -i ~/.ssh/lightsail_g7inst.pem -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP
 ```
 
 ## g7inst 실행
@@ -231,6 +192,7 @@ dig +short example.com AAAA
 - DB 비밀번호
 - SMTP 비밀번호
 - 앱 secret key
+- SSH 개인키
 - Nginx, Apache, PHP, MySQL, MariaDB, Redis, Certbot 설치
 - `7717` 포트 외부 공개
 - DNS가 준비되기 전 SSL 인증서 발급
