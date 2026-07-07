@@ -19,11 +19,43 @@
 
 @layer components {
   .app-shell {
-    @apply bg-base-200;
+    @apply mx-auto flex min-h-screen w-full max-w-7xl flex-col overflow-hidden border-base-300 bg-base-100 shadow-xl sm:my-4 sm:min-h-[calc(100vh-2rem)] sm:rounded-xl sm:border;
   }
 
   .app-header {
-    @apply sticky top-0 z-30 flex flex-col gap-4 rounded-lg border border-base-300 bg-base-100/95 px-4 py-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between;
+    @apply z-30 flex flex-col gap-4 border-b border-base-300 bg-base-100/95 px-4 py-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between;
+  }
+
+  .titlebar-left {
+    @apply flex min-w-0 items-start gap-4;
+  }
+
+  .window-dots {
+    @apply mt-2 hidden shrink-0 gap-2 sm:flex;
+  }
+
+  .window-dots span {
+    @apply h-3 w-3 rounded-full border border-base-300 bg-base-300;
+  }
+
+  .window-dots span:nth-child(1) {
+    @apply bg-error/70;
+  }
+
+  .window-dots span:nth-child(2) {
+    @apply bg-warning/70;
+  }
+
+  .window-dots span:nth-child(3) {
+    @apply bg-success/70;
+  }
+
+  .system-banner {
+    @apply border-b border-warning/30 bg-warning/10 px-4 py-3 text-sm leading-6 text-base-content;
+  }
+
+  .app-workspace {
+    @apply grid min-h-0 flex-1 lg:grid-cols-[13.5rem_minmax(0,1fr)];
   }
 
   .command-bar {
@@ -55,19 +87,23 @@
   }
 
   .wizard-progress {
-    @apply rounded-lg border border-base-300 bg-base-100 px-3 py-4 shadow-sm;
+    @apply overflow-x-auto border-b border-base-300 bg-base-200/70 px-3 py-3 lg:overflow-visible lg:border-b-0 lg:border-r lg:px-4 lg:py-5;
   }
 
   .step-copy {
-    @apply inline-flex items-center gap-2 text-xs font-semibold sm:flex-col sm:gap-1;
+    @apply inline-flex items-center justify-center gap-2 text-xs font-semibold lg:flex-row;
   }
 
   .step-copy .icon {
-    @apply h-4 w-4;
+    @apply hidden h-4 w-4 lg:block;
+  }
+
+  .step-copy span {
+    @apply sr-only lg:not-sr-only;
   }
 
   .view-panel {
-    @apply hidden rounded-lg border border-base-300 bg-base-100 p-5 shadow-sm;
+    @apply hidden bg-base-100 px-4 py-5 sm:px-6;
   }
 
   .view-panel.is-visible {
@@ -136,19 +172,23 @@
   }
 
   .wizard-actions {
-    @apply mt-6 flex flex-wrap items-center justify-end gap-2;
+    @apply sticky bottom-0 mt-6 flex flex-wrap items-center justify-end gap-2 border-t border-base-300 bg-base-100/95 px-1 py-3 backdrop-blur;
+  }
+
+  .workspace-grid {
+    @apply grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_20rem];
   }
 
   .side-panel {
-    @apply space-y-4;
+    @apply min-h-0 border-t border-base-300 bg-base-200/60 lg:border-l lg:border-t-0;
   }
 
   .summary-panel {
-    @apply rounded-lg border border-base-300 bg-base-100 p-5 shadow-sm;
+    @apply border-b border-base-300 bg-base-100/70 p-5;
   }
 
   .metric {
-    @apply rounded-md border border-base-300 bg-base-200 p-4;
+    @apply border-b border-base-300 py-3 last:border-b-0;
   }
 
   .metric dt {
@@ -166,6 +206,18 @@
   .log-box {
     @apply max-h-80 min-h-64 overflow-x-hidden whitespace-pre-wrap break-words font-mono;
     overflow-wrap: anywhere;
+  }
+
+  .log-dock {
+    @apply rounded-none border-0 border-t border-base-300 bg-base-100/70;
+  }
+
+  .log-dock .collapse-title {
+    @apply min-h-12 px-5 py-3;
+  }
+
+  .log-dock .collapse-content {
+    @apply px-5 pb-5;
   }
 
   .empty-state {

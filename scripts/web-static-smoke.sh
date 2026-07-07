@@ -41,6 +41,9 @@ need_pattern "web/index.html" "id=\"install-confirm-dialog\""
 need_pattern "web/index.html" "id=\"recovery-confirm-dialog\""
 need_pattern "web/index.html" "id=\"recovery-confirm-yes\""
 need_pattern "web/index.html" "id=\"floating-help\""
+need_pattern "web/index.html" "class=\"app-workspace\""
+need_pattern "web/index.html" "class=\"workspace-grid\""
+need_pattern "web/index.html" "class=\"log-dock collapse collapse-arrow\""
 
 need_pattern "web/app.js" "formatError"
 need_pattern "web/app.js" "localizeMessage"
@@ -73,12 +76,20 @@ need_pattern "web/app.js" "기존 보존"
 need_pattern "web/app.js" "신규 설치"
 need_pattern "web/input.css" "whitespace-pre-wrap"
 need_pattern "web/input.css" "overflow-wrap: anywhere"
+need_pattern "web/input.css" ".app-workspace"
+need_pattern "web/input.css" ".workspace-grid"
+need_pattern "web/input.css" ".log-dock"
 need_pattern "web/input.css" "data-status=\"info\""
 need_pattern "crates/g7-cli/src/web_setup.rs" "CACHE_CONTROL"
 need_pattern "crates/g7-cli/src/web_setup.rs" "emit_progress"
 
 if rg -q "installButton\\.textContent|installResultButton\\.textContent|checkNextButton\\.textContent|themeToggle\\.textContent|button\\.textContent" "${ROOT_DIR}/web/app.js"; then
   echo "web UI contract regression: stateful buttons must use setButtonLabel" >&2
+  exit 1
+fi
+
+if rg -q "로그인 없이 점검만 보기" "${ROOT_DIR}/web/index.html"; then
+  echo "web UI contract regression: login must stay as a single clear entry path" >&2
   exit 1
 fi
 
