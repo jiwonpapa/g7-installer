@@ -1,101 +1,66 @@
-# Amazon Lightsail Ubuntu 24.04 인스턴스 준비 매뉴얼
+# Lightsail Ubuntu 24.04 상세 안내
 
-작성일: 2026-07-07
+`g7inst` 실서버 테스트용 Ubuntu VPS를 만드는 상세 설명입니다.
 
-이 문서는 `g7inst`로 새 VPS를 세팅하기 전에 Amazon Lightsail에서 Ubuntu 24.04 인스턴스를 안전하게 만드는 절차입니다.
+짧은 순서만 필요하면 [초보용 설치 안내](beginner-install.md)를 먼저 봅니다.
 
-## 권장 사양
+## 빠르게 설정하기
 
-- 서비스: Amazon Lightsail
-- 이미지: Linux/Unix, OS 전용, Ubuntu 24.04 LTS
-- 네트워크: 공인 IPv4 포함 듀얼 스택
-- 번들: 범용, 2GB 메모리, 2 vCPU, 60GB SSD, 3TB 전송
-- 현재 공인 IPv4 포함 번들 가격: 월 12 USD
-- 리전: 한국 사용자 대상이면 콘솔에서 선택 가능한 가까운 리전을 우선합니다.
+이미 서버, 고정 IP, 도메인 A 레코드가 준비됐으면 바로 진행합니다.
 
-`g7inst` 테스트나 실제 설치에는 WordPress, LAMP 같은 앱 포함 이미지를 고르지 않습니다. 깨끗한 Ubuntu OS 전용 인스턴스여야 설치기가 기존 서비스와 설치기 소유 서비스를 구분할 수 있습니다.
+1. SSH 터널을 엽니다.
 
-## 무료 크레딧과 비용 기준
+```bash
+ssh -L 7717:127.0.0.1:7717 g7installer
+```
 
-AWS 공식 안내 기준으로 신규 AWS 계정은 Free Tier 가입 시 100 USD 크레딧을 즉시 받을 수 있고, 활동 조건에 따라 최대 200 USD까지 6개월 동안 사용할 수 있습니다. Lightsail 가격표에는 Linux/Unix 공인 IPv4 번들 중 월 12 USD 플랜이 3개월 무료 대상에 포함된다고 안내되어 있습니다.
+2. 서버 안에서 설치 UI를 시작합니다.
 
-다만 콘솔의 인스턴스 카드에는 무료 표시가 안 보일 수 있습니다. 실제 적용 여부는 계정의 Free Tier/크레딧 상태와 최종 생성 전 결제 안내를 기준으로 확인합니다. 무료/가격 정책은 바뀔 수 있으므로 실제 생성 전 AWS 콘솔과 공식 가격표를 다시 확인합니다. 이 프로젝트는 비용, 트래픽, 운영 난도를 함께 봤을 때 Lightsail 월 12 USD 듀얼 스택 Ubuntu 24.04 구성을 기본 배포 기준으로 둡니다.
+```bash
+sudo g7inst setup --domain g7devops.com
+```
 
-> 주의: AWS Free Tier, 크레딧, Lightsail 무료 제공, 번들 가격은 AWS가 언제든 변경할 수 있는 정책입니다. 이 문서의 금액과 무료 조건은 설치 기준을 잡기 위한 참고이며, 실제 과금 여부는 인스턴스 생성 시점의 AWS 콘솔과 결제 안내가 기준입니다.
+3. 브라우저에서 token URL을 엽니다.
 
-## IPv6 전용 대신 듀얼 스택을 쓰는 이유
+```text
+http://127.0.0.1:7717/?token=...
+```
 
-Lightsail에는 같은 2GB 메모리, 2 vCPU, 60GB SSD, 3TB 전송 조건의 IPv6 전용 Linux 번들도 더 낮은 가격으로 표시됩니다.
+## 1. AWS 콘솔을 한글로 바꾸기
 
-하지만 일반 웹서비스는 아직 공인 IPv4가 있는 구성이 운영 난도가 낮습니다. 도메인 A 레코드, SSL 발급, 외부 모니터링, 사용자 접속 환경까지 고려하면 형님이 고른 월 12 USD 듀얼 스택 구성이 맞습니다.
+1. AWS 콘솔에 로그인합니다.
+2. 우측 상단 톱니바퀴를 누릅니다.
+3. `언어`에서 `한국어`를 선택합니다.
+4. 필요하면 `모든 사용자 설정 보기`에서 기본 리전도 바꿉니다.
 
-## AWS 계정 준비
+## 2. 권장 인스턴스
 
-1. AWS 계정을 생성합니다.
-2. 루트 계정에 MFA를 켭니다.
-3. 인스턴스 생성 전에 AWS Budgets 또는 결제 알림을 설정합니다.
-4. Lightsail 콘솔로 이동합니다: <https://lightsail.aws.amazon.com/>
-5. 루트 계정은 결제와 계정 복구용으로 두고, 가능하면 관리용 IAM 사용자 또는 IAM Identity Center 계정을 따로 씁니다.
+> **권장값**
+>
+> - 서비스: Amazon Lightsail
+> - 이미지: Linux/Unix, OS 전용
+> - OS: Ubuntu 24.04 LTS
+> - 네트워크: 듀얼 스택, 공인 IPv4 포함
+> - 크기: 월 12 USD, 2GB 메모리, 2 vCPU, 60GB SSD, 3TB 전송
+> - 이름 예시: `g7installer`, `g7-prod-01`
 
-## 인스턴스 생성 순서
+무료 크레딧, 무료 기간, 번들 가격은 AWS가 언제든 바꿀 수 있습니다. 실제 과금은 인스턴스 생성 화면과 결제 안내를 기준으로 확인합니다.
 
-1. Lightsail 콘솔에서 `Create instance`를 누릅니다.
-2. 리전과 가용 영역을 선택합니다.
+## 3. 인스턴스 만들기
+
+1. Lightsail 콘솔로 갑니다.
+2. `인스턴스 생성`을 누릅니다.
 3. 플랫폼은 `Linux/Unix`를 선택합니다.
-4. 블루프린트는 `OS Only`를 선택합니다.
+4. 블루프린트는 `OS 전용`을 선택합니다.
 5. OS는 `Ubuntu 24.04 LTS`를 선택합니다.
-6. 네트워크는 `Dual-stack` 또는 공인 IPv4가 포함된 옵션을 선택합니다.
-7. 플랜은 `2GB RAM / 2 vCPU / 60GB SSD / 3TB transfer`, 월 12 USD 공인 IPv4 번들을 선택합니다.
-8. SSH 키는 Lightsail 화면에서 만들고 `.pem` 개인키를 다운로드하거나, Mac에서 만든 공개키를 업로드합니다.
-9. 이 문서의 시작 스크립트를 추가합니다.
-10. 인스턴스 이름은 `g7-prod-01`, `g7-test-01`처럼 용도를 알 수 있게 정합니다.
-11. 인스턴스를 생성합니다.
+6. 네트워크는 `듀얼 스택`을 선택합니다.
+7. 크기는 권장 인스턴스를 선택합니다.
+8. SSH 키를 생성하고 `.pem` 파일을 다운로드합니다.
+9. `시작 스크립트 추가`에 아래 스크립트를 넣습니다.
+10. 인스턴스 이름을 입력합니다.
+11. `인스턴스 생성`을 누릅니다.
 
-## SSH 키 권장 방식
-
-기본 추천은 Lightsail 인스턴스 생성 화면에서 SSH 키를 만들고 다운로드한 `.pem` 개인키를 Mac `~/.ssh`에 보관하는 방식입니다. 이 경우 공개키는 Lightsail이 인스턴스에 넣어주므로 시작 스크립트에 키를 적을 필요가 없습니다.
-
-Mac에 저장:
-
-```bash
-mkdir -p ~/.ssh
-mv ~/Downloads/YOUR_LIGHTSAIL_KEY.pem ~/.ssh/lightsail_g7inst.pem
-chmod 600 ~/.ssh/lightsail_g7inst.pem
-```
-
-생성 후 Mac에서 접속:
-
-```bash
-ssh -i ~/.ssh/lightsail_g7inst.pem ubuntu@SERVER_IP
-```
-
-직접 키를 만들고 싶으면 Mac에서 키를 만든 뒤 `.pub` 공개키만 Lightsail에 업로드합니다.
-
-```bash
-ssh-keygen -t rsa -b 4096 -f ~/.ssh/lightsail_g7inst_202607 -C "lightsail-g7inst"
-cat ~/.ssh/lightsail_g7inst_202607.pub
-ssh -i ~/.ssh/lightsail_g7inst_202607 ubuntu@SERVER_IP
-```
-
-root 권한이 필요할 때만 전환합니다.
-
-```bash
-sudo -i
-```
-
-개인키, 루트 비밀번호, DB 비밀번호, 앱 secret, SMTP 비밀번호는 Lightsail 시작 스크립트에 넣지 않습니다.
-
-## 시작 스크립트
-
-Lightsail 생성 화면의 `Add launch script`에는 아래 짧은 스크립트만 넣습니다.
-
-긴 스크립트를 콘솔에 직접 붙여넣지 않고, GitHub에 버전 관리되는 `scripts/lightsail-init.sh`를 받아 실행합니다. 이 스크립트는 `g7inst` 바이너리를 받을 최소 발판만 만듭니다. `curl`, `ca-certificates` 같은 부트스트랩 의존성 외에는 서버 설정을 건드리지 않습니다.
-
-OS 업데이트, 보안 업데이트, swap, UFW, fail2ban, SSH 보안 점검, Nginx, Apache, PHP, MySQL, MariaDB, Redis, Certbot은 `g7inst setup`이 처리하고 리포트해야 합니다. 시작 스크립트가 먼저 처리하면 웹 UI, 진행률, 실패 리포트, 되돌리기 기준이 약해집니다.
-
-`g7inst setup` 실행은 시작 스크립트에 넣지 않습니다. 웹 컨트롤러 token URL이 부팅 로그에 남고, DNS/고정 IP/도메인 준비 전에 설치 흐름이 시작될 수 있기 때문입니다.
-
-```bash
+```sh
 #!/bin/sh
 set -eu
 apt-get update
@@ -106,129 +71,200 @@ curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7-installer/main/scripts
 bash "$tmp"
 ```
 
-Lightsail은 사용자 시작 스크립트를 자체 `/bin/sh` 초기화 스크립트에 이어 붙여 실행할 수 있습니다. 그래서 `bash` 전용 `pipefail`이나 `curl ... | bash` 형태를 쓰지 않고, `sh` 호환 명령으로 파일을 내려받은 뒤 `bash "$tmp"`로 실행합니다.
+이 스크립트는 `g7inst` 설치까지만 합니다. OS 업데이트, swap, UFW, fail2ban, 웹서버, PHP, DB, Redis, Certbot, 앱 설치는 `g7inst setup` 웹 UI가 처리합니다.
 
-운영 서버에서 재현성을 더 엄격하게 보려면 `main` 대신 릴리스 태그나 커밋 해시가 들어간 raw URL로 고정합니다. `bootstrap.sh`가 내려받는 `g7inst` 바이너리는 GitHub Release의 `checksums.txt`로 SHA256 검증합니다.
+Lightsail은 시작 스크립트를 자체 `/bin/sh` 스크립트 뒤에 붙여 실행할 수 있습니다. 그래서 `pipefail`과 `curl ... | bash`를 쓰지 않습니다.
 
-## 생성 직후 확인
+## 4. SSH 키 저장하기
 
-브라우저 SSH 또는 Mac 터미널로 접속한 뒤 확인합니다.
+개인키는 Git, 문서, 시작 스크립트에 넣지 않습니다.
+
+### Mac
 
 ```bash
-sudo tail -120 /var/log/g7-lightsail-bootstrap.log
-lsb_release -a
-g7inst --version
-g7inst doctor
+mkdir -p ~/.ssh
+mv ~/Downloads/YOUR_LIGHTSAIL_KEY.pem ~/.ssh/lightsail_g7inst.pem
+chmod 600 ~/.ssh/lightsail_g7inst.pem
+ssh -i ~/.ssh/lightsail_g7inst.pem ubuntu@SERVER_IP
 ```
 
-시작 스크립트가 아직 실행 중이면 몇 분 기다린 뒤 다시 확인합니다.
+### Windows PowerShell
 
-## Lightsail 네트워크 체크리스트
+```powershell
+mkdir $env:USERPROFILE\.ssh
+Move-Item "$env:USERPROFILE\Downloads\YOUR_LIGHTSAIL_KEY.pem" "$env:USERPROFILE\.ssh\lightsail_g7inst.pem"
+icacls "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" /inheritance:r /grant:r "$($env:USERNAME):(R)"
+ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" ubuntu@SERVER_IP
+```
 
-인스턴스 생성 후 바로 확인합니다.
+### SSH alias 선택 설정
 
-1. Lightsail 고정 IP를 생성하고 인스턴스에 연결합니다.
-2. 고정 IP는 서버를 쓰는 동안 계속 연결해둡니다. 연결되지 않은 고정 IP는 비용이 발생할 수 있습니다.
-3. Lightsail 방화벽에서 포트를 엽니다.
-   - SSH 22/tcp: 가능하면 형님 IP만 허용
-   - HTTP 80/tcp: 전체 허용
-   - HTTPS 443/tcp: 전체 허용
-4. `g7inst` 웹 컨트롤러 포트 `7717`은 외부 공개하지 않습니다.
-5. DB, Redis, 메일 수신 포트도 외부 공개하지 않습니다.
-6. 설치기 웹 UI는 SSH 터널로 엽니다.
+Mac은 `~/.ssh/config`, Windows는 `%USERPROFILE%\.ssh\config`에 저장합니다.
+
+```sshconfig
+Host g7installer
+  HostName SERVER_IP
+  User ubuntu
+  IdentityFile ~/.ssh/lightsail_g7inst.pem
+  IdentitiesOnly yes
+```
+
+접속:
+
+```bash
+ssh g7installer
+```
+
+## 5. 방화벽 설정
+
+메뉴 위치:
+
+1. Lightsail 콘솔
+2. 인스턴스 선택
+3. `네트워킹`
+4. `IPv4 방화벽`
+
+열 포트:
+
+| 포트 | 용도 | 대상 |
+| --- | --- | --- |
+| 22/tcp | SSH | 가능하면 내 IP |
+| 80/tcp | HTTP, 인증서 발급 | 전체 |
+| 443/tcp | HTTPS | 전체 |
+
+열지 않을 포트:
+
+| 포트 | 이유 |
+| --- | --- |
+| 7717/tcp | 설치 관리자 UI |
+| 3306/tcp | MySQL 외부 공개 금지 |
+| 6379/tcp | Redis 외부 공개 금지 |
+| 25/465/587/tcp inbound | 메일 수신 안 하면 불필요 |
+
+## 6. 고정 IP 연결
+
+1. Lightsail 콘솔에서 `네트워킹`으로 이동합니다.
+2. `고정 IP 생성`을 누릅니다.
+3. 인스턴스에 연결합니다.
+4. 도메인 A 레코드에 이 IP를 넣습니다.
+
+고정 IP는 인스턴스에 연결해 둡니다. 연결하지 않고 방치하면 비용이 발생할 수 있습니다.
+
+## 7. DNS 설정
+
+Cloudflare를 쓰면 설치 중에는 프록시를 끕니다.
+
+| 타입 | 이름 | 값 | 상태 |
+| --- | --- | --- | --- |
+| A | `@` | 서버 고정 IP | DNS only |
+| CNAME | `www` | 루트 도메인 | DNS only |
+| A | `mail` | 서버 고정 IP | DNS only |
+
+확인:
+
+```bash
+dig +short example.com A
+dig +short www.example.com A
+```
+
+## 8. g7inst 확인
+
+서버에 접속합니다.
+
+```bash
+ssh g7installer
+```
+
+설치 여부를 확인합니다.
+
+```bash
+g7inst --version
+g7inst doctor
+sudo tail -120 /var/log/g7-lightsail-bootstrap.log
+```
+
+## 9. 설치 웹 UI 열기
+
+Mac:
 
 ```bash
 ssh -i ~/.ssh/lightsail_g7inst.pem -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP
 ```
 
-SSH alias를 등록했다면 더 짧게 접속합니다.
+Windows PowerShell:
+
+```powershell
+ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP
+```
+
+SSH alias가 있으면:
 
 ```bash
 ssh -L 7717:127.0.0.1:7717 g7installer
 ```
 
-## g7inst 실행
-
-시작 스크립트가 정상 완료되면 `g7inst` 바이너리는 이미 설치되어 있습니다. 서버 접속 후 상태를 확인합니다.
-
-```bash
-g7inst --version
-g7inst doctor
-```
-
-이후 작업은 `g7inst setup` 웹 마법사에서 처리합니다.
-
-`g7inst setup`이 맡아야 할 항목:
-
-- apt update/upgrade
-- 필수 운영 패키지 설치
-- unattended-upgrades 설정
-- swap 설정
-- UFW 방화벽 설정
-- fail2ban 설치와 상태 리포트
-- SSH 보안 점검
-- 웹서버, PHP, DB, Redis, Certbot 설치
-- 앱 설치와 최종 리포트
-
-서버에서는 설치기를 실행합니다.
+서버 안에서 실행합니다.
 
 ```bash
 sudo g7inst setup --domain example.com
 ```
 
-터미널에 출력된 token URL을 Mac 브라우저에서 엽니다.
+브라우저에서 token URL을 엽니다.
 
 ```text
 http://127.0.0.1:7717/?token=...
 ```
 
-설치가 끝날 때까지 SSH 터널 터미널을 닫지 않습니다. 설치가 끝나면 `Ctrl+C`로 `g7inst setup`을 종료합니다.
+설치 중에는 이 SSH 터널 창을 닫지 않습니다.
 
-## DNS 체크리스트
+## 10. 다른 Ubuntu VPS에서 쓰기
 
-실도메인을 쓸 때:
+Lightsail이 아니어도 Ubuntu 24.04 서버면 같은 초기 스크립트를 쓸 수 있습니다.
 
-1. 도메인 A 레코드를 Lightsail 고정 IPv4로 지정합니다.
-2. IPv6도 쓸 경우 AAAA 레코드를 인스턴스 IPv6로 지정합니다.
-3. DNS 전파를 기다립니다.
-4. Mac에서 확인합니다.
+서버 접속 후 실행합니다.
 
 ```bash
-dig +short example.com A
-dig +short example.com AAAA
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl
+tmp="$(mktemp)"
+curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7-installer/main/scripts/lightsail-init.sh -o "$tmp"
+sudo bash "$tmp"
+rm -f "$tmp"
 ```
 
-## 백업 체크리스트
+## 11. 메일 보내기만 쓸 때
 
-실제 데이터를 넣기 전 확인합니다.
+메일 수신은 하지 않습니다. 인바운드 25번은 열지 않습니다.
 
-1. 운영 서버라면 자동 스냅샷을 켭니다.
-2. 큰 설치나 변경 전에는 수동 스냅샷을 남깁니다.
-3. 스냅샷은 별도 비용이 발생할 수 있습니다.
+| 설정 | 값 |
+| --- | --- |
+| SPF | `v=spf1 ip4:SERVER_IP -all` |
+| DMARC | `v=DMARC1; p=none; adkim=r; aspf=r` |
+| DKIM | Postfix/OpenDKIM 설정 후 생성 |
+| PTR | AWS에 reverse DNS 요청 |
 
-## 시작 스크립트에 넣지 말 것
+AWS에서 outbound 25 제한이 있으면 해제 요청이 필요합니다.
 
-- 루트 비밀번호 설정
-- DB 비밀번호
-- SMTP 비밀번호
-- 앱 secret key
-- SSH 개인키
-- Nginx, Apache, PHP, MySQL, MariaDB, Redis, Certbot 설치
-- `7717` 포트 외부 공개
-- DNS가 준비되기 전 SSL 인증서 발급
+## 12. 용어 설명
 
-이 항목들은 `g7inst` 또는 후속 배포 단계에서 통제하는 편이 맞습니다.
+| 용어 | 뜻 |
+| --- | --- |
+| VPS | 클라우드 가상 서버 |
+| 고정 IP | 서버 재시작 후에도 유지되는 공인 IP |
+| A 레코드 | 도메인을 IP에 연결하는 DNS 기록 |
+| DNS only | Cloudflare 프록시 없이 실제 서버 IP를 보여주는 상태 |
+| SSH 키 | 비밀번호 대신 쓰는 접속 키 |
+| SSH 터널 | 서버 내부 포트를 내 PC 브라우저로 안전하게 연결하는 방법 |
+| 시작 스크립트 | 서버 최초 생성 때 자동 실행되는 스크립트 |
+| UFW | Ubuntu 방화벽 |
+| fail2ban | 반복 로그인 공격 차단 도구 |
+| PTR | IP에서 도메인을 확인하는 reverse DNS |
+| SPF/DKIM/DMARC | 메일 발송 인증용 DNS 레코드 |
 
-## 참고한 공식 문서
+## 공식 참고
 
-- AWS Lightsail 계정 준비: <https://docs.aws.amazon.com/lightsail/latest/userguide/setting-up.html>
+- AWS 콘솔 언어 변경: <https://docs.aws.amazon.com/awsconsolehelpdocs/latest/gsg/change-language.html>
 - AWS Lightsail 인스턴스 생성: <https://docs.aws.amazon.com/lightsail/latest/userguide/getting-started.html>
 - AWS Lightsail 시작 스크립트: <https://docs.aws.amazon.com/lightsail/latest/userguide/lightsail-how-to-configure-server-additional-data-shell-script.html>
-- AWS Free Tier: <https://aws.amazon.com/free/>
-- AWS Lightsail Free Tier: <https://aws.amazon.com/free/compute/lightsail/>
-- AWS Lightsail 가격: <https://aws.amazon.com/lightsail/pricing/>
-- AWS Lightsail SSH 키: <https://docs.aws.amazon.com/lightsail/latest/userguide/lightsail-how-to-set-up-ssh.html>
-- AWS Lightsail IPv6/듀얼 스택: <https://docs.aws.amazon.com/lightsail/latest/userguide/amazon-lightsail-ipv6-only-plans.html>
-- AWS Lightsail 고정 IP: <https://docs.aws.amazon.com/lightsail/latest/userguide/lightsail-create-static-ip.html>
 - AWS Lightsail 방화벽: <https://docs.aws.amazon.com/lightsail/latest/userguide/understanding-firewall-and-port-mappings-in-amazon-lightsail.html>
-- AWS Lightsail 스냅샷: <https://docs.aws.amazon.com/lightsail/latest/userguide/understanding-snapshots-in-amazon-lightsail.html>
+- AWS Lightsail 고정 IP: <https://docs.aws.amazon.com/lightsail/latest/userguide/lightsail-create-static-ip.html>
