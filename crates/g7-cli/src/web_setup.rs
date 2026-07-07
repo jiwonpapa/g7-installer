@@ -105,6 +105,7 @@ struct BootstrapAuth {
 #[derive(Debug, Deserialize)]
 struct SetupRequest {
     domain: String,
+    #[serde(default)]
     local_test: bool,
     web_server: String,
     php_version: String,

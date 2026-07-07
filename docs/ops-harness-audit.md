@@ -38,7 +38,7 @@ Date: 2026-07-07
   - release bootstrap or local binary install
   - expected `g7inst --version`
   - pre-install `doctor` must report `install_allowed: true`
-  - local-test plan generation
+  - install plan generation
   - install phase must finish as `vhost-enabled`
   - `/var/log/g7-installer/report.json` must pass JSON contract checks
   - post-install `doctor` must report `install_allowed: false`

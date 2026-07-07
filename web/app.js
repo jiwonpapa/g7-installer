@@ -25,7 +25,6 @@ const nodes = {
   themeToggle: document.querySelector("#theme-toggle"),
   log: document.querySelector("#live-log"),
   domain: document.querySelector("#domain-input"),
-  mode: document.querySelector("#deployment-mode"),
   customWebRoot: document.querySelector("#custom-web-root"),
   webRootMode: document.querySelector("#web-root-mode"),
   mailMode: document.querySelector("#mail-mode"),
@@ -62,7 +61,6 @@ const nodes = {
   summaryPanel: document.querySelector("#summary-panel"),
   floatingHelp: document.querySelector("#floating-help"),
   summaryDomain: document.querySelector("#summary-domain"),
-  summaryMode: document.querySelector("#summary-mode"),
   summaryRuntime: document.querySelector("#summary-runtime"),
   summaryData: document.querySelector("#summary-data"),
   summaryApp: document.querySelector("#summary-app"),
@@ -570,13 +568,11 @@ function showStep(nextStep, options = {}) {
 
 function optionPayload() {
   const form = new FormData(nodes.optionsForm);
-  const mode = form.get("deployment_mode") || "public";
   const mailMode = form.get("mail_mode");
   const customWebRoot = form.get("web_root")?.trim();
 
   return {
     domain: form.get("domain")?.trim() || "example.com",
-    local_test: mode === "local-test",
     web_server: form.get("web_server"),
     php_version: form.get("php_version"),
     database: form.get("database"),
@@ -596,7 +592,7 @@ function optionPayload() {
     ssh_policy: form.get("ssh_policy"),
     rollback: true,
     preserve_config: true,
-    dns_check: mode !== "local-test",
+    dns_check: true,
   };
 }
 
@@ -673,7 +669,6 @@ function refreshSummary() {
 
   const payload = optionPayload();
   nodes.summaryDomain.textContent = payload.domain;
-  nodes.summaryMode.textContent = payload.local_test ? "개발 테스트" : "실제 도메인";
   nodes.summaryRuntime.textContent = `${runtimeLabel(payload.web_server)} / PHP ${payload.php_version}`;
   nodes.summaryData.textContent = `${databaseLabel(payload.database)} / Redis ${payload.redis === "enable" ? "사용" : "미사용"}`;
   nodes.summaryApp.textContent = appPackageLabel(payload.app_package);
@@ -684,7 +679,6 @@ function renderDraftPlan() {
   nodes.planOutput.textContent = [
     "설치 계획 요청값",
     `도메인: ${payload.domain}`,
-    `모드: ${payload.local_test ? "개발 테스트" : "실제 도메인"}`,
     `웹서버: ${runtimeLabel(payload.web_server)}`,
     `PHP: ${payload.php_version}`,
     `데이터베이스: ${databaseLabel(payload.database)} (${databaseVersionLabel(payload.database_version)})`,
@@ -1221,12 +1215,11 @@ function restoreInstallStateFromReport(report) {
 }
 
 function renderInstallReport(report) {
-  const link = accessLink(report.domain, report.deployment_mode, report.phase);
+  const link = accessLink(report.domain, report.phase);
   nodes.reportOutput.innerHTML = [
     reportSummaryCard("서버 설치 완료", [
       ["도메인", report.domain],
       ["접속 주소", link.html],
-      ["모드", report.deployment_mode === "local-test" ? "개발 테스트" : "실제 도메인"],
       ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / PHP ${report.php_version}`],
       ["데이터베이스", `${databaseLabel(report.database)} (${databaseVersionLabel(report.database_version)})`],
       ["앱 패키지", appPackageLabel(report.app_package)],
@@ -1291,14 +1284,13 @@ function renderSavedReport(payload) {
     return;
   }
 
-  const link = accessLink(report.domain || "example.com", report.deployment_mode || "public", report.phase);
+  const link = accessLink(report.domain || "example.com", report.phase);
   nodes.reportOutput.innerHTML = [
     reportSummaryCard("저장된 설치 리포트", [
       ["리포트 파일", payload.path],
       ["도메인", report.domain || "-"],
       ["접속 주소", link.html],
       ["단계", report.phase || "-"],
-      ["모드", report.deployment_mode === "local-test" ? "개발 테스트" : "실제 도메인"],
       ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / PHP ${report.php_version || "-"}`],
       ["데이터베이스", databaseLabel(report.database)],
       ["앱 패키지", appPackageLabel(report.app_package || report.app_profile)],
@@ -1456,23 +1448,18 @@ function actionStatus(status) {
   return "fail";
 }
 
-function accessLink(domain, mode, phase = "packages-installed") {
+function accessLink(domain, phase = "packages-installed") {
   if (["prepared", "package-failed", "packages-installed"].includes(phase)) {
     return {
       html: `<span class="text-base-content/60">사이트 페이지는 아직 생성 전입니다.</span>`,
-      hint: mode === "local-test"
-        ? "개발 테스트는 SSH 터널과 hosts 매핑 상태에 따라 브라우저 접속이 달라질 수 있습니다."
-        : "HTTP 도메인 연결 검증이 끝나면 도메인 접속 링크를 제공합니다. HTTPS는 인증서 단계 후 활성화됩니다.",
+      hint: "HTTP 도메인 연결 검증이 끝나면 도메인 접속 링크를 제공합니다. HTTPS는 인증서 단계 후 활성화됩니다.",
     };
   }
 
-  const protocol = mode === "local-test" ? "http" : "https";
-  const href = `${protocol}://${domain}`;
+  const href = `http://${domain}`;
   return {
     html: `<a class="link link-primary" href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${escapeHtml(href)}</a>`,
-    hint: mode === "local-test"
-      ? "개발 테스트 주소는 Mac/PC hosts 파일에 도메인을 서버 IP로 매핑해야 열립니다."
-      : "인증서 발급 전이면 임시로 http 접속이 먼저 필요할 수 있습니다.",
+    hint: "인증서 발급 전까지는 HTTP 주소로 먼저 접속합니다.",
   };
 }
 
@@ -1496,7 +1483,6 @@ function renderPlanReport(report) {
   return [
     "설치 계획 요약",
     `도메인: ${report.domain}`,
-    `모드: ${report.deployment_mode === "local-test" ? "개발 테스트" : "실제 도메인"}`,
     `웹서버: ${runtimeLabel(report.web_server)}`,
     `PHP: ${report.php_version}`,
     `데이터베이스: ${databaseLabel(report.database)} (${databaseVersionLabel(report.database_version)})`,
@@ -1543,7 +1529,6 @@ function resetInstallStages() {
 function installConfirmSummaryHtml(payload) {
   const entries = [
     ["도메인", payload.domain],
-    ["모드", payload.local_test ? "개발 테스트" : "실제 도메인"],
     ["웹서버 / PHP", `${runtimeLabel(payload.web_server)} / PHP ${payload.php_version}`],
     ["데이터베이스", `${databaseLabel(payload.database)} (${databaseVersionLabel(payload.database_version)})`],
     ["앱 패키지", appPackageLabel(payload.app_package)],
@@ -2057,7 +2042,6 @@ async function boot() {
     if (state.bootstrap.domain) {
       nodes.domain.value = state.bootstrap.domain;
     }
-    nodes.mode.value = state.bootstrap.local_test ? "local-test" : "public";
     refreshFormState({ preservePlan: true, persist: false });
     restoreWizardState();
     await syncServerState();
