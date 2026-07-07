@@ -28,10 +28,17 @@ Lightsail `Add launch script`에는 짧은 부트스트랩만 넣습니다. 긴 
 ```bash
 #!/bin/sh
 set -eu
-curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7-installer/main/scripts/lightsail-init.sh | bash
+apt-get update
+apt-get install -y ca-certificates curl
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT HUP INT TERM
+curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7-installer/main/scripts/lightsail-init.sh -o "$tmp"
+bash "$tmp"
 ```
 
 이 스크립트는 `g7inst` 설치까지만 처리합니다. OS 업데이트, swap, UFW, fail2ban, SSH 보안 점검, 웹서버, PHP, DB, Redis, Certbot, 앱 설치는 `g7inst setup` 웹 UI가 처리합니다.
+
+Lightsail은 사용자 시작 스크립트를 자체 `/bin/sh` 초기화 스크립트에 이어 붙여 실행할 수 있습니다. 그래서 `bash` 전용 `pipefail`이나 `curl ... | bash` 형태를 쓰지 않고, `sh` 호환 명령으로 파일을 내려받은 뒤 `bash "$tmp"`로 실행합니다.
 
 운영 서버에서 재현성을 더 엄격하게 보려면 `main` 대신 릴리스 태그나 커밋 해시가 들어간 raw URL로 고정합니다. `bootstrap.sh`가 내려받는 `g7inst` 바이너리는 GitHub Release의 `checksums.txt`로 SHA256 검증합니다.
 

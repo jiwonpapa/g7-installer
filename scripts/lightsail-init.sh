@@ -11,8 +11,10 @@ export DEBIAN_FRONTEND=noninteractive
 LOG_FILE="${G7_LIGHTSAIL_BOOTSTRAP_LOG:-/var/log/g7-lightsail-bootstrap.log}"
 TIMEZONE="${G7_TIMEZONE:-Asia/Seoul}"
 BOOTSTRAP_URL="${G7_BOOTSTRAP_URL:-https://raw.githubusercontent.com/jiwonpapa/g7-installer/main/scripts/bootstrap.sh}"
+BOOTSTRAP_SCRIPT="$(mktemp)"
 
 exec > >(tee -a "${LOG_FILE}") 2>&1
+trap 'rm -f "${BOOTSTRAP_SCRIPT}"' EXIT
 
 echo "g7 Lightsail bootstrap started at $(date -Is)"
 
@@ -33,7 +35,8 @@ README
 
 apt-get clean
 
-curl -fsSL "${BOOTSTRAP_URL}" | bash
+curl -fsSL "${BOOTSTRAP_URL}" -o "${BOOTSTRAP_SCRIPT}"
+bash "${BOOTSTRAP_SCRIPT}"
 g7inst --version
 g7inst doctor || true
 
