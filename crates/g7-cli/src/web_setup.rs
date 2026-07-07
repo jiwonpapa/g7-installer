@@ -200,6 +200,9 @@ struct PlanApiReport {
     text: String,
     domain: String,
     deployment_mode: String,
+    app_profile: String,
+    app_profile_label: &'static str,
+    app_document_root: String,
     web_server: String,
     php_version: String,
     database: String,
@@ -212,6 +215,8 @@ struct PlanApiReport {
     services: Vec<ServicePlan>,
     ports: Vec<PortPlan>,
     security_checks: Vec<SecurityCheckPlan>,
+    app_requirements: Vec<RequirementPlan>,
+    app_followup_steps: Vec<FollowupStepPlan>,
     stop_conditions: Vec<String>,
 }
 
@@ -248,9 +253,25 @@ struct SecurityCheckPlan {
 }
 
 #[derive(Debug, Serialize)]
+struct RequirementPlan {
+    name: String,
+    status: &'static str,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+struct FollowupStepPlan {
+    name: &'static str,
+    description: &'static str,
+}
+
+#[derive(Debug, Serialize)]
 struct InstallApiReport {
     domain: String,
     deployment_mode: String,
+    app_profile: String,
+    app_profile_label: &'static str,
+    app_document_root: String,
     web_server: String,
     php_version: String,
     database: String,
@@ -275,6 +296,7 @@ struct InstallApiReport {
     network_checks: Vec<InstallApiCheck>,
     mail_checks: Vec<InstallApiCheck>,
     certbot_checks: Vec<InstallApiCheck>,
+    app_requirements: Vec<InstallApiCheck>,
 }
 
 #[derive(Debug, Serialize)]
@@ -678,7 +700,6 @@ async fn api_plan(
     emit_log(&state, "building install plan");
     let domain = request.domain.clone();
     let database_version = normalize_database_version(&request.database_version);
-    let app_package = normalize_app_package(&request.app_package);
     let options = options_from_request(request);
     let install_plan = match plan::build_with_options(domain, options) {
         Ok(install_plan) => install_plan,
@@ -690,11 +711,7 @@ async fn api_plan(
     };
     emit_log(&state, "install plan ready");
 
-    Ok(Json(plan_to_api(
-        install_plan,
-        database_version,
-        app_package,
-    )))
+    Ok(Json(plan_to_api(install_plan, database_version)))
 }
 
 async fn api_install_prepare(
@@ -715,7 +732,6 @@ async fn api_install_prepare(
     emit_stage(&state, "preflight", "진행", "preflight started");
     let domain = request.domain.clone();
     let database_version = normalize_database_version(&request.database_version);
-    let app_package = normalize_app_package(&request.app_package);
     let options = options_from_request(request);
     emit_progress(
         &state,
@@ -757,7 +773,7 @@ async fn api_install_prepare(
             emit_stage(&state, "report", "성공", "problem report prepared");
             emit_progress(&state, "install", 100, "install progress: report ready");
             emit_log(&state, "package install completed");
-            Ok(Json(install_to_api(report, database_version, app_package)))
+            Ok(Json(install_to_api(report, database_version)))
         }
         Err(error) => {
             let details = failed_doctor_details(doctor::run());
@@ -985,6 +1001,7 @@ fn installer_metadata_paths() -> [&'static str; 6] {
 fn options_from_request(request: SetupRequest) -> plan::PlanOptions {
     crate::plan_options(
         request.local_test,
+        request.app_package,
         request.web_server,
         request.php_version,
         request.database,
@@ -1051,22 +1068,21 @@ fn failed_doctor_details(report: doctor::DoctorReport) -> Vec<String> {
         .collect()
 }
 
-fn plan_to_api(
-    install_plan: plan::InstallPlan,
-    database_version: String,
-    app_package: String,
-) -> PlanApiReport {
+fn plan_to_api(install_plan: plan::InstallPlan, database_version: String) -> PlanApiReport {
     let text = crate::format_plan(&install_plan);
 
     PlanApiReport {
         text,
         domain: install_plan.domain,
         deployment_mode: install_plan.deployment_mode,
+        app_profile: install_plan.app_profile.clone(),
+        app_profile_label: install_plan.app_profile_label,
+        app_document_root: install_plan.app_document_root.clone(),
         web_server: install_plan.web_server,
         php_version: install_plan.php_version,
         database: install_plan.database_engine,
         database_version,
-        app_package,
+        app_package: install_plan.app_profile,
         site_user: install_plan.site_user,
         web_root: install_plan.web_root,
         packages: install_plan
@@ -1111,6 +1127,23 @@ fn plan_to_api(
                 description: check.description,
             })
             .collect(),
+        app_requirements: install_plan
+            .app_requirements
+            .into_iter()
+            .map(|requirement| RequirementPlan {
+                name: requirement.name,
+                status: requirement.status,
+                message: requirement.message,
+            })
+            .collect(),
+        app_followup_steps: install_plan
+            .app_followup_steps
+            .into_iter()
+            .map(|step| FollowupStepPlan {
+                name: step.name,
+                description: step.description,
+            })
+            .collect(),
         stop_conditions: install_plan
             .stop_conditions
             .into_iter()
@@ -1119,19 +1152,18 @@ fn plan_to_api(
     }
 }
 
-fn install_to_api(
-    report: install::InstallReport,
-    database_version: String,
-    app_package: String,
-) -> InstallApiReport {
+fn install_to_api(report: install::InstallReport, database_version: String) -> InstallApiReport {
     InstallApiReport {
         domain: report.domain,
         deployment_mode: report.deployment_mode,
+        app_profile: report.app_profile.clone(),
+        app_profile_label: report.app_profile_label,
+        app_document_root: report.app_document_root.clone(),
         web_server: report.web_server,
         php_version: report.php_version,
         database: report.database_engine,
         database_version,
-        app_package,
+        app_package: report.app_profile,
         site_user: report.site_user,
         web_root: report.web_root,
         mail_mode: report.mail_mode,
@@ -1151,6 +1183,7 @@ fn install_to_api(
         network_checks: install_checks_to_api(report.network_checks),
         mail_checks: install_checks_to_api(report.mail_checks),
         certbot_checks: install_checks_to_api(report.certbot_checks),
+        app_requirements: install_checks_to_api(report.app_requirements),
     }
 }
 
@@ -1158,13 +1191,6 @@ fn normalize_database_version(value: &str) -> String {
     match value {
         "mysql-8.0" | "mysql-8.4" => value.to_string(),
         _ => "apt-default".to_string(),
-    }
-}
-
-fn normalize_app_package(value: &str) -> String {
-    match value {
-        "wordpress" | "laravel" => value.to_string(),
-        _ => "gnuboard7".to_string(),
     }
 }
 
@@ -2057,6 +2083,9 @@ mod tests {
             install::InstallReport {
                 domain: "g7-test.local".to_string(),
                 deployment_mode: "local-test".to_string(),
+                app_profile: "gnuboard7".to_string(),
+                app_profile_label: "Gnuboard 7",
+                app_document_root: "/home/g7/public_html/public".to_string(),
                 web_server: "nginx".to_string(),
                 php_version: "8.3".to_string(),
                 database_engine: "mysql".to_string(),
@@ -2093,13 +2122,18 @@ mod tests {
                 network_checks: Vec::new(),
                 mail_checks: Vec::new(),
                 certbot_checks: Vec::new(),
+                app_requirements: vec![install::InstallCheck {
+                    name: "php-version".to_string(),
+                    status: "pass".to_string(),
+                    message: "PHP 8.3 satisfies app minimum PHP 8.2.".to_string(),
+                }],
             },
             "apt-default".to_string(),
-            "gnuboard7".to_string(),
         );
         assert_eq!(install_api.phase, "packages-installed");
         assert_eq!(install_api.database_version, "apt-default");
         assert_eq!(install_api.app_package, "gnuboard7");
+        assert_eq!(install_api.app_document_root, "/home/g7/public_html/public");
         assert_eq!(install_api.mail_mode, "none");
         assert!(!install_api.dns_check);
         assert_eq!(
@@ -2354,15 +2388,12 @@ mod tests {
             "example.com".to_string(),
             options_from_request(setup_request("example.com")),
         )?;
-        let api = super::plan_to_api(
-            install_plan,
-            "apt-default".to_string(),
-            "gnuboard7".to_string(),
-        );
+        let api = super::plan_to_api(install_plan, "apt-default".to_string());
 
         assert_eq!(api.domain, "example.com");
         assert_eq!(api.database_version, "apt-default");
         assert_eq!(api.app_package, "gnuboard7");
+        assert_eq!(api.app_document_root, "/home/g7/public_html/public");
         assert_eq!(api.web_root, "/home/g7/public_html");
         assert!(api.text.contains("G7 Installer Plan"));
         assert!(
@@ -2375,6 +2406,11 @@ mod tests {
             api.security_checks
                 .iter()
                 .any(|check| check.name == "redis-local-only")
+        );
+        assert!(
+            api.app_requirements
+                .iter()
+                .any(|requirement| requirement.name == "php-version")
         );
         assert!(
             api.stop_conditions

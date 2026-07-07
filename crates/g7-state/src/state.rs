@@ -5,6 +5,55 @@ use std::path::Path;
 
 pub const STATE_PATH: &str = "/var/lib/g7-installer/state.json";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallerPhase {
+    Initialized,
+    Prepared,
+    PackageFailed,
+    PackagesInstalled,
+    RuntimeConfigured,
+    DatabaseConfigured,
+    AppFetched,
+    AppConfigured,
+    VhostEnabled,
+    TlsEnabled,
+    HealthChecked,
+    Completed,
+}
+
+impl InstallerPhase {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Initialized => "initialized",
+            Self::Prepared => "prepared",
+            Self::PackageFailed => "package-failed",
+            Self::PackagesInstalled => "packages-installed",
+            Self::RuntimeConfigured => "runtime-configured",
+            Self::DatabaseConfigured => "database-configured",
+            Self::AppFetched => "app-fetched",
+            Self::AppConfigured => "app-configured",
+            Self::VhostEnabled => "vhost-enabled",
+            Self::TlsEnabled => "tls-enabled",
+            Self::HealthChecked => "health-checked",
+            Self::Completed => "completed",
+        }
+    }
+
+    pub fn app_mutates_server(self) -> bool {
+        matches!(
+            self,
+            Self::RuntimeConfigured
+                | Self::DatabaseConfigured
+                | Self::AppFetched
+                | Self::AppConfigured
+                | Self::VhostEnabled
+                | Self::TlsEnabled
+                | Self::HealthChecked
+                | Self::Completed
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstallerState {
     pub version: u32,
@@ -20,9 +69,13 @@ impl InstallerState {
             version: 1,
             install_id,
             domain,
-            phase: "initialized".to_string(),
+            phase: InstallerPhase::Initialized.as_str().to_string(),
             completed_steps: Vec::new(),
         }
+    }
+
+    pub fn set_phase(&mut self, phase: InstallerPhase) {
+        self.phase = phase.as_str().to_string();
     }
 }
 
@@ -38,14 +91,20 @@ pub fn read_state_file(path: &Path) -> io::Result<InstallerState> {
 
 #[cfg(test)]
 mod tests {
-    use super::InstallerState;
+    use super::{InstallerPhase, InstallerState};
 
     #[test]
     fn new_state_starts_initialized() {
         let state = InstallerState::new("test-id".to_string(), "example.com".to_string());
 
         assert_eq!(state.version, 1);
-        assert_eq!(state.phase, "initialized");
+        assert_eq!(state.phase, InstallerPhase::Initialized.as_str());
         assert!(state.completed_steps.is_empty());
+    }
+
+    #[test]
+    fn app_mutation_phase_marks_rollback_boundary() {
+        assert!(!InstallerPhase::PackagesInstalled.app_mutates_server());
+        assert!(InstallerPhase::AppConfigured.app_mutates_server());
     }
 }

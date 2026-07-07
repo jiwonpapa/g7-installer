@@ -48,6 +48,9 @@ enum Command {
         /// Use local test mode without public DNS or Let's Encrypt.
         #[arg(long, default_value_t = false)]
         local_test: bool,
+        /// App profile: gnuboard7, wordpress, or laravel.
+        #[arg(long = "app", visible_alias = "app-package", default_value_t = plan::DEFAULT_APP_PROFILE.to_string())]
+        app_profile: String,
         /// Web server: nginx or apache.
         #[arg(long, default_value_t = plan::DEFAULT_WEB_SERVER.to_string())]
         web_server: String,
@@ -111,6 +114,9 @@ enum Command {
         /// Use local test mode without public DNS or Let's Encrypt.
         #[arg(long, default_value_t = false)]
         local_test: bool,
+        /// App profile: gnuboard7, wordpress, or laravel.
+        #[arg(long = "app", visible_alias = "app-package", default_value_t = plan::DEFAULT_APP_PROFILE.to_string())]
+        app_profile: String,
         /// Web server: nginx or apache.
         #[arg(long, default_value_t = plan::DEFAULT_WEB_SERVER.to_string())]
         web_server: String,
@@ -217,6 +223,7 @@ async fn main() -> Result<()> {
         Command::Plan {
             domain,
             local_test,
+            app_profile,
             web_server,
             php_version,
             database,
@@ -240,6 +247,7 @@ async fn main() -> Result<()> {
                 domain,
                 plan_options(
                     local_test,
+                    app_profile,
                     web_server,
                     php_version,
                     database,
@@ -265,6 +273,7 @@ async fn main() -> Result<()> {
         Command::Install {
             domain,
             local_test,
+            app_profile,
             web_server,
             php_version,
             database,
@@ -289,6 +298,7 @@ async fn main() -> Result<()> {
                     domain,
                     plan_options(
                         local_test,
+                        app_profile,
                         web_server,
                         php_version,
                         database,
@@ -334,6 +344,7 @@ async fn main() -> Result<()> {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn plan_options(
     local_test: bool,
+    app_profile: String,
     web_server: String,
     php_version: String,
     database: String,
@@ -355,6 +366,7 @@ pub(crate) fn plan_options(
 ) -> plan::PlanOptions {
     plan::PlanOptions {
         local_test,
+        app_profile,
         web_server,
         php_version,
         database_engine: database,
@@ -401,6 +413,9 @@ pub(crate) fn format_plan(plan: &plan::InstallPlan) -> String {
     output.push_str("G7 Installer Plan\n");
     output.push_str(&format!("domain: {}\n", plan.domain));
     output.push_str(&format!("deployment_mode: {}\n", plan.deployment_mode));
+    output.push_str(&format!("app_profile: {}\n", plan.app_profile));
+    output.push_str(&format!("app_profile_label: {}\n", plan.app_profile_label));
+    output.push_str(&format!("app_document_root: {}\n", plan.app_document_root));
     output.push_str(&format!("web_server: {}\n", plan.web_server));
     output.push_str(&format!("php_version: {}\n", plan.php_version));
     output.push_str(&format!("database: {}\n", plan.database_engine));
@@ -473,6 +488,19 @@ pub(crate) fn format_plan(plan: &plan::InstallPlan) -> String {
         ));
     }
 
+    output.push_str("\nApp requirements:\n");
+    for requirement in &plan.app_requirements {
+        output.push_str(&format!(
+            "- [{}] {}: {}\n",
+            requirement.status, requirement.name, requirement.message
+        ));
+    }
+
+    output.push_str("\nApp follow-up steps:\n");
+    for step in &plan.app_followup_steps {
+        output.push_str(&format!("- {}: {}\n", step.name, step.description));
+    }
+
     output.push_str("\nInstall stops if:\n");
     for condition in &plan.stop_conditions {
         output.push_str(&format!("- {}\n", condition.reason));
@@ -494,6 +522,9 @@ fn print_install(report: install::InstallReport) {
     println!("G7 Installer Install");
     println!("domain: {}", report.domain);
     println!("deployment_mode: {}", report.deployment_mode);
+    println!("app_profile: {}", report.app_profile);
+    println!("app_profile_label: {}", report.app_profile_label);
+    println!("app_document_root: {}", report.app_document_root);
     println!("web_server: {}", report.web_server);
     println!("php_version: {}", report.php_version);
     println!("database: {}", report.database_engine);
@@ -538,6 +569,7 @@ fn print_install(report: install::InstallReport) {
     print_install_checks("Network checks", &report.network_checks);
     print_install_checks("Mail checks", &report.mail_checks);
     print_install_checks("Certbot checks", &report.certbot_checks);
+    print_install_checks("App requirements", &report.app_requirements);
 }
 
 fn print_install_checks(title: &str, checks: &[install::InstallCheck]) {

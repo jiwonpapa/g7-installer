@@ -12,13 +12,13 @@ use std::path::{Path, PathBuf};
 
 use crate::commands::reset::{self, ResetPaths, ResetReport};
 use crate::{Error, Result};
-use g7_state::state::{STATE_PATH, read_state_file};
+use g7_state::state::{InstallerPhase, STATE_PATH, read_state_file};
 use g7_system::SystemProbe;
 use g7_system::command::{CommandOutput, CommandRunner};
 use g7_system::package::PackageStatus;
 
 const REPORT_PATH: &str = "/var/log/g7-installer/report.json";
-const REQUIRED_PHASE: &str = "packages-installed";
+const REQUIRED_PHASE: &str = InstallerPhase::PackagesInstalled.as_str();
 const SAFE_BASELINE_STATUS: &str = "not-installed";
 const APP_MUTATION_STEPS: [&str; 11] = [
     "web-root-created",

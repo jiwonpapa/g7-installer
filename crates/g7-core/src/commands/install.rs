@@ -20,7 +20,7 @@ use crate::commands::doctor::{self, DoctorCheckStatus};
 use crate::commands::plan;
 use crate::{Error, Result};
 use g7_state::owned_files::{OWNED_FILES_PATH, OwnedFiles, write_owned_files};
-use g7_state::state::{InstallerState, STATE_PATH, write_state_file};
+use g7_state::state::{InstallerPhase, InstallerState, STATE_PATH, write_state_file};
 use g7_system::SystemProbe;
 use g7_system::command::CommandRunner;
 use g7_system::package::PackageStatus;
@@ -41,6 +41,9 @@ const LOCAL_HOSTS_PATH: &str = "/etc/g7-installer/local-hosts.txt";
 pub struct InstallReport {
     pub domain: String,
     pub deployment_mode: String,
+    pub app_profile: String,
+    pub app_profile_label: &'static str,
+    pub app_document_root: String,
     pub web_server: String,
     pub php_version: String,
     pub database_engine: String,
@@ -69,6 +72,7 @@ pub struct InstallReport {
     pub network_checks: Vec<InstallCheck>,
     pub mail_checks: Vec<InstallCheck>,
     pub certbot_checks: Vec<InstallCheck>,
+    pub app_requirements: Vec<InstallCheck>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -219,7 +223,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         install_id(&install_plan.domain),
         install_plan.domain.clone(),
     );
-    state.phase = "prepared".to_string();
+    state.set_phase(InstallerPhase::Prepared);
     state.completed_steps = completed_steps.clone();
 
     let state_path = paths.resolve(STATE_PATH);
@@ -232,7 +236,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     let apply_summary = match apply_package_phase(probe, &install_plan) {
         Ok(summary) => summary,
         Err(err) => {
-            state.phase = "package-failed".to_string();
+            state.set_phase(InstallerPhase::PackageFailed);
             state.completed_steps = completed_steps.clone();
             write_state_file(&state_path, &state).map_err(|source| Error::FileWriteFailed {
                 path: STATE_PATH.to_string(),
@@ -262,7 +266,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     completed_steps.push("network-readiness-checked".to_string());
     completed_steps.push("mail-readiness-checked".to_string());
     completed_steps.push("certbot-readiness-checked".to_string());
-    state.phase = "packages-installed".to_string();
+    state.set_phase(InstallerPhase::PackagesInstalled);
     state.completed_steps = completed_steps.clone();
     write_state_file(&state_path, &state).map_err(|source| Error::FileWriteFailed {
         path: STATE_PATH.to_string(),
@@ -277,6 +281,9 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     Ok(InstallReport {
         domain: state.domain,
         deployment_mode: install_plan.deployment_mode,
+        app_profile: install_plan.app_profile,
+        app_profile_label: install_plan.app_profile_label,
+        app_document_root: install_plan.app_document_root,
         web_server: install_plan.web_server,
         php_version: install_plan.php_version,
         database_engine: install_plan.database_engine,
@@ -305,6 +312,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         network_checks: apply_summary.network_checks,
         mail_checks: apply_summary.mail_checks,
         certbot_checks: apply_summary.certbot_checks,
+        app_requirements: app_requirements_to_checks(install_plan.app_requirements),
     })
 }
 
@@ -411,9 +419,23 @@ fn package_names(plan: &plan::InstallPlan) -> Vec<String> {
 fn managed_services(plan: &plan::InstallPlan) -> Vec<String> {
     plan.services
         .iter()
-        .filter(|service| !service.name.starts_with("g7-"))
+        .filter(|service| package_phase_manages_service(&service.name, plan))
         .map(|service| service.name.clone())
         .collect()
+}
+
+fn package_phase_manages_service(service: &str, plan: &plan::InstallPlan) -> bool {
+    service == plan.web_server
+        || service == format!("php{}-fpm", plan.php_version)
+        || service
+            == if plan.database_engine == "mysql" {
+                "mysql"
+            } else {
+                "mariadb"
+            }
+        || service == "certbot.timer"
+        || service == "redis-server"
+        || service == "postfix"
 }
 
 fn managed_ports(plan: &plan::InstallPlan) -> Vec<u16> {
@@ -846,6 +868,11 @@ fn config_content(plan: &plan::InstallPlan) -> String {
     content.push_str(&format!("domain = \"{}\"\n", plan.domain));
     content.push_str(&format!("deployment_mode = \"{}\"\n", plan.deployment_mode));
     content.push_str("phase = \"prepared\"\n");
+    content.push_str(&format!("app_profile = \"{}\"\n", plan.app_profile));
+    content.push_str(&format!(
+        "app_document_root = \"{}\"\n",
+        plan.app_document_root
+    ));
     content.push_str(&format!("web_server = \"{}\"\n", plan.web_server));
     content.push_str(&format!("php_version = \"{}\"\n", plan.php_version));
     content.push_str(&format!("database = \"{}\"\n", plan.database_engine));
@@ -907,6 +934,11 @@ fn report_content(
         "domain": &plan.domain,
         "phase": phase,
         "deployment_mode": &plan.deployment_mode,
+        "app_package": &plan.app_profile,
+        "app_profile": &plan.app_profile,
+        "app_profile_label": &plan.app_profile_label,
+        "app_summary": &plan.app_summary,
+        "app_document_root": &plan.app_document_root,
         "web_server": &plan.web_server,
         "php_version": &plan.php_version,
         "database": &plan.database_engine,
@@ -932,6 +964,8 @@ fn report_content(
         "network_checks": checks_json(&summary.network_checks),
         "mail_checks": checks_json(&summary.mail_checks),
         "certbot_checks": checks_json(&summary.certbot_checks),
+        "app_requirements": requirements_json(&plan.app_requirements),
+        "app_followup_steps": followup_steps_json(&plan.app_followup_steps),
         "problem": problem,
     });
     let mut payload =
@@ -952,6 +986,46 @@ fn checks_json(checks: &[InstallCheck]) -> Vec<serde_json::Value> {
                 "status": &check.status,
                 "message": &check.message,
             })
+        })
+        .collect()
+}
+
+fn requirements_json(
+    requirements: &[crate::app_profile::AppRequirement],
+) -> Vec<serde_json::Value> {
+    requirements
+        .iter()
+        .map(|requirement| {
+            serde_json::json!({
+                "name": &requirement.name,
+                "status": requirement.status,
+                "message": &requirement.message,
+            })
+        })
+        .collect()
+}
+
+fn followup_steps_json(steps: &[crate::app_profile::AppFollowupStep]) -> Vec<serde_json::Value> {
+    steps
+        .iter()
+        .map(|step| {
+            serde_json::json!({
+                "name": step.name,
+                "description": step.description,
+            })
+        })
+        .collect()
+}
+
+fn app_requirements_to_checks(
+    requirements: Vec<crate::app_profile::AppRequirement>,
+) -> Vec<InstallCheck> {
+    requirements
+        .into_iter()
+        .map(|requirement| InstallCheck {
+            name: requirement.name,
+            status: requirement.status.to_string(),
+            message: requirement.message,
         })
         .collect()
 }

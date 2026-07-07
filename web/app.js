@@ -82,6 +82,8 @@ const statusLabel = {
   unknown: "확인 필요",
   skipped: "건너뜀",
   deferred: "후속 단계",
+  planned: "계획됨",
+  manual: "수동 확인",
 };
 
 const checkLabel = {
@@ -1181,6 +1183,7 @@ function applyReportOptions(report) {
   applyFormValues({
     domain: report.domain,
     deployment_mode: report.deployment_mode,
+    app_package: report.app_package || report.app_profile,
     web_server: report.web_server,
     php_version: report.php_version,
     database: report.database,
@@ -1242,6 +1245,7 @@ function renderInstallReport(report) {
       ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / PHP ${report.php_version}`],
       ["데이터베이스", `${databaseLabel(report.database)} (${databaseVersionLabel(report.database_version)})`],
       ["앱 패키지", appPackageLabel(report.app_package)],
+      ["앱 문서 루트", report.app_document_root || "-"],
       ["사이트 계정", report.site_user],
       ["웹루트", report.web_root],
       ["메일", mailModeLabel(report.mail_mode)],
@@ -1259,6 +1263,7 @@ function renderInstallReport(report) {
     checksCard("DNS / 네트워크 검증", report.network_checks),
     checksCard("메일 발송 검증", report.mail_checks),
     checksCard("SSL / Certbot 검증", report.certbot_checks),
+    checksCard("앱 요구사항", report.app_requirements),
   ].join("");
 
   ["preflight", "packages", "config", "services", "ports", "http", "report"].forEach((stage) => markStage(stage, "성공"));
@@ -1309,6 +1314,8 @@ function renderSavedReport(payload) {
       ["모드", report.deployment_mode === "local-test" ? "로컬 테스트" : "실제 도메인"],
       ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / PHP ${report.php_version || "-"}`],
       ["데이터베이스", databaseLabel(report.database)],
+      ["앱 패키지", appPackageLabel(report.app_package || report.app_profile)],
+      ["앱 문서 루트", report.app_document_root || "-"],
       ["사이트 계정", report.site_user || "-"],
       ["웹루트", report.web_root || "-"],
       ["메일", mailModeLabel(report.mail_mode)],
@@ -1322,6 +1329,7 @@ function renderSavedReport(payload) {
     checksCard("DNS / 네트워크 검증", report.network_checks),
     checksCard("메일 발송 검증", report.mail_checks),
     checksCard("SSL / Certbot 검증", report.certbot_checks),
+    checksCard("앱 요구사항", report.app_requirements),
     report.problem ? listCard("문제", [report.problem]) : "",
   ].join("");
   setReportReady(true);
@@ -1427,7 +1435,7 @@ function checkStatus(status) {
   if (status === "pass") {
     return "pass";
   }
-  if (["installed", "not-installed", "skipped", "deferred", "pending"].includes(status)) {
+  if (["installed", "not-installed", "skipped", "deferred", "planned", "manual", "pending"].includes(status)) {
     return "info";
   }
   if (status === "warn" || status === "unknown") {
@@ -1504,6 +1512,7 @@ function renderPlanReport(report) {
     `PHP: ${report.php_version}`,
     `데이터베이스: ${databaseLabel(report.database)} (${databaseVersionLabel(report.database_version)})`,
     `설치할 앱: ${appPackageLabel(report.app_package)} - 서버 스택 준비 후 마지막 설치 대상`,
+    `앱 문서 루트: ${report.app_document_root || "-"}`,
     `사이트 계정: ${report.site_user}`,
     `웹루트: ${report.web_root}`,
     "",

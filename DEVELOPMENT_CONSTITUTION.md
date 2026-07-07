@@ -27,7 +27,7 @@ G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 ro
 - 서버에는 Rust toolchain을 설치하지 않는다.
 - 배포물은 static binary를 목표로 한다.
 - 코드가 정본 문서다. 설치 정책, 기본값, 보안 기준은 먼저 Rust 코드와 rustdoc 주석에 존재해야 한다.
-- `plan.rs`는 설치 범위, 기본값, 보안 정책, 파일/서비스/포트 계획의 SSOT이다. README/SPEC/웹 UI는 이를 설명하거나 표시만 한다.
+- `plan.rs`와 `app_profile.rs`는 설치 범위, 기본값, 앱 요구사항, 보안 정책, 파일/서비스/포트 계획의 SSOT이다. README/SPEC/웹 UI는 이를 설명하거나 표시만 한다.
 - 새 명령, 새 서버 변경, 새 보안 정책을 추가할 때 관련 Rust 모듈 상단에 `//!` module doc을 먼저 추가하거나 갱신한다.
 - `unwrap`, `expect`, `panic`은 금지한다.
 - 실패 가능성이 있는 모든 흐름은 typed error로 표현한다.
@@ -82,7 +82,8 @@ G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 ro
 - 오류 메시지는 해결 가능한 다음 명령을 포함한다.
 - plan은 실제 변경될 패키지, 파일, 서비스, 포트를 보여준다.
 - install 완료 출력은 domain, 설치 경로, HTTPS 상태, 다음 접속 URL을 포함한다.
-- PHP는 기본 8.5로 계획하고, 8.3은 명시 옵션으로만 사용한다.
+- PHP는 기본 8.3으로 계획하고, 8.5는 apt 소스에 있을 때만 명시 옵션으로 사용한다.
+- 앱 선택은 `AppProfile`을 통해 WordPress/G7/Laravel 요구사항, 문서 루트, 후속 설치 단계를 드러내야 한다.
 - www canonical 정책은 설치 전 plan에 반드시 드러나야 한다.
 - Redis, 메일 발송, Certbot 자동갱신, DNS/IP 검증은 전체 기능 설치 프로필의 일부로 본다.
 - SMTP 비밀번호/API key 같은 비밀값은 CLI 인자와 로그에 남기지 않는다.

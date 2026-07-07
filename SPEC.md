@@ -43,8 +43,9 @@ G7 본체와의 관계:
 OS: Ubuntu 24.04 LTS
 권한: root 또는 sudo
 웹서버: Nginx 기본, Apache 선택 옵션
-PHP: PHP-FPM 8.5 기본, 8.3 호환 옵션
-DB: MariaDB 기본, MySQL 선택 옵션
+PHP: PHP-FPM 8.3 기본, 8.5 선택 옵션
+DB: MySQL 기본, MariaDB 선택 옵션
+앱 프로파일: gnuboard7 기본, WordPress/Laravel 선택 옵션
 HTTPS: Certbot Let's Encrypt
 Cache/Queue: Redis 기본 지원
 메일: SMTP relay 기본 권장, local Postfix 선택
@@ -101,7 +102,8 @@ sudo g7inst self-update
 ```bash
 --local-test
 --web-server nginx|apache
---php-version 8.5|8.3
+--app gnuboard7|wordpress|laravel
+--php-version 8.3|8.5
 --database mariadb|mysql
 --site-user g7
 --web-root-mode public-html|www|system|custom

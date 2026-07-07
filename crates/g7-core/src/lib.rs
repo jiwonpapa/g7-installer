@@ -1,3 +1,4 @@
+pub mod app_profile;
 pub mod commands;
 pub mod error;
 

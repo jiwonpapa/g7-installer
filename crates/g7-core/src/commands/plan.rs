@@ -7,7 +7,10 @@
 //! Scope rule: plan may describe future server changes, but `install` must only
 //! execute the subset that is implemented and tracked in state/owned-files.
 
+use crate::app_profile::{AppFollowupStep, AppRequirement, resolve_app_profile};
 use crate::{Error, Result};
+
+pub use crate::app_profile::DEFAULT_APP_PROFILE;
 use g7_state::owned_files::OWNED_FILES_PATH;
 use g7_state::state::STATE_PATH;
 use g7_system::php::{DEFAULT_FPM_VERSION, SUPPORTED_FPM_VERSIONS};
@@ -39,6 +42,10 @@ const SUPPORTED_SSH_POLICIES: [&str; 2] = ["audit-only", "harden"];
 pub struct InstallPlan {
     pub domain: String,
     pub deployment_mode: String,
+    pub app_profile: String,
+    pub app_profile_label: &'static str,
+    pub app_summary: &'static str,
+    pub app_document_root: String,
     pub web_server: String,
     pub php_version: String,
     pub database_engine: String,
@@ -69,6 +76,8 @@ pub struct InstallPlan {
     pub services: Vec<PlanService>,
     pub ports: Vec<PlanPort>,
     pub security_checks: Vec<PlanSecurityCheck>,
+    pub app_requirements: Vec<AppRequirement>,
+    pub app_followup_steps: Vec<AppFollowupStep>,
     pub stop_conditions: Vec<PlanStopCondition>,
 }
 
@@ -135,6 +144,7 @@ impl PlanStopCondition {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanOptions {
     pub local_test: bool,
+    pub app_profile: String,
     pub web_server: String,
     pub php_version: String,
     pub database_engine: String,
@@ -159,6 +169,7 @@ impl Default for PlanOptions {
     fn default() -> Self {
         Self {
             local_test: false,
+            app_profile: DEFAULT_APP_PROFILE.to_string(),
             web_server: DEFAULT_WEB_SERVER.to_string(),
             php_version: DEFAULT_PHP_VERSION.to_string(),
             database_engine: DEFAULT_DATABASE_ENGINE.to_string(),
@@ -187,6 +198,7 @@ pub fn build(domain: String) -> Result<InstallPlan> {
 
 pub fn build_with_options(domain: String, options: PlanOptions) -> Result<InstallPlan> {
     let domain = normalize_domain(domain)?;
+    let app_profile = resolve_app_profile(&options.app_profile)?;
     let web_server =
         normalize_supported_option("web-server", options.web_server, &SUPPORTED_WEB_SERVERS)?;
     let php_version = normalize_php_version(options.php_version)?;
@@ -203,6 +215,7 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         &web_root_mode,
         options.custom_web_root.as_deref(),
     )?;
+    let app_document_root = app_profile.document_root_for(&web_root);
     let www_mode = normalize_supported_option("www-mode", options.www_mode, &SUPPORTED_WWW_MODES)?;
     let redis_mode =
         normalize_supported_option("redis", options.redis_mode, &SUPPORTED_REDIS_MODES)?;
@@ -226,8 +239,8 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         options.smtp_from.as_deref(),
     )?;
     let smtp_port = smtp_port_for_mode(&mail_mode, options.smtp_port);
-    let database_name = database_name_for_domain(&domain);
-    let database_user = database_user_for_site_user(&site_user);
+    let database_name = database_name_for_domain(&domain, app_profile.id);
+    let database_user = database_user_for_site_user(&site_user, app_profile.id);
 
     let dns_check_required = options.dns_check && !options.local_test;
     let deployment_mode = if options.local_test {
@@ -245,6 +258,7 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         options.local_test,
     );
     let files = files(
+        app_profile,
         &web_server,
         &web_root,
         &redis_mode,
@@ -252,6 +266,7 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         options.local_test,
     );
     let services = services(
+        app_profile,
         &web_server,
         &php_version,
         &database_engine,
@@ -267,11 +282,23 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         &ssh_policy,
         options.local_test,
     );
+    let app_requirements = app_requirements(
+        app_profile,
+        &php_version,
+        &database_engine,
+        &redis_mode,
+        options.local_test,
+    );
+    let app_followup_steps = app_profile.followup_steps();
     let stop_conditions = stop_conditions(&web_server, &web_root, options.local_test);
 
     Ok(InstallPlan {
         domain,
         deployment_mode,
+        app_profile: app_profile.id.to_string(),
+        app_profile_label: app_profile.label,
+        app_summary: app_profile.summary,
+        app_document_root,
         web_server,
         php_version: php_version.clone(),
         database_engine,
@@ -302,6 +329,8 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         services,
         ports,
         security_checks,
+        app_requirements,
+        app_followup_steps,
         stop_conditions,
     })
 }
@@ -398,7 +427,7 @@ fn packages(
         },
         PlanPackage {
             name: format!("php{php_version}-fpm"),
-            description: "PHP runtime for G7.",
+            description: "PHP-FPM runtime for the selected app.",
         },
         PlanPackage {
             name: format!("php{php_version}-mysql php{php_version}-mbstring php{php_version}-xml"),
@@ -414,7 +443,7 @@ fn packages(
         },
         PlanPackage {
             name: format!("php{php_version}-imagick"),
-            description: "Image processing extension for richer G7 media support.",
+            description: "Image processing extension for app media support.",
         },
         PlanPackage {
             name: database_package(database_engine).to_string(),
@@ -459,6 +488,7 @@ fn packages(
 }
 
 fn files(
+    app_profile: &crate::app_profile::AppProfile,
     web_server: &str,
     web_root: &str,
     redis_mode: &str,
@@ -484,20 +514,19 @@ fn files(
             "planned app web root; create or verify in install phase",
         ),
         PlanFile::new(
-            format!("{web_root}/.env"),
-            "create with DB/cache/mail settings using root-only secret handling",
+            app_config_file(app_profile, web_root),
+            "create app config with DB/cache/mail settings using root-only secret handling",
         ),
         web_server_available_file(web_server),
         web_server_enabled_file(web_server),
-        PlanFile::new(
-            "/etc/systemd/system/g7-queue.service",
-            "create when worker is enabled",
-        ),
-        PlanFile::new(
-            "/etc/systemd/system/g7-reverb.service",
-            "create when realtime server is enabled",
-        ),
     ];
+
+    for service in app_profile.services {
+        files.push(PlanFile::new(
+            format!("/etc/systemd/system/{service}"),
+            "create in app phase when enabled",
+        ));
+    }
 
     if redis_mode == "enable" {
         files.push(PlanFile::new(
@@ -524,6 +553,7 @@ fn files(
 }
 
 fn services(
+    app_profile: &crate::app_profile::AppProfile,
     web_server: &str,
     php_version: &str,
     database_engine: &str,
@@ -544,15 +574,14 @@ fn services(
             name: database_service(database_engine).to_string(),
             action: "bind locally, create app database/user, enable and start",
         },
-        PlanService {
-            name: "g7-queue.service".to_string(),
-            action: "optional enable and start",
-        },
-        PlanService {
-            name: "g7-reverb.service".to_string(),
-            action: "optional enable and start",
-        },
     ];
+
+    for service in app_profile.services {
+        services.push(PlanService {
+            name: (*service).to_string(),
+            action: "create and verify in app phase",
+        });
+    }
 
     if !local_test {
         services.push(PlanService {
@@ -697,6 +726,175 @@ fn security_checks(
     checks
 }
 
+fn app_requirements(
+    profile: &crate::app_profile::AppProfile,
+    php_version: &str,
+    database_engine: &str,
+    redis_mode: &str,
+    local_test: bool,
+) -> Vec<AppRequirement> {
+    let mut requirements = vec![
+        php_version_requirement(profile.min_php, php_version),
+        AppRequirement {
+            name: "database-version".to_string(),
+            status: "deferred",
+            message: format!(
+                "{} selected; app requires {}. Exact server version is verified in the database phase.",
+                database_engine, profile.database_requirement
+            ),
+        },
+        AppRequirement {
+            name: "document-root".to_string(),
+            status: "planned",
+            message: match profile.document_root {
+                crate::app_profile::DocumentRootStrategy::SiteRoot => {
+                    "web server document root uses the selected site root".to_string()
+                }
+                crate::app_profile::DocumentRootStrategy::PublicSubdir => {
+                    "web server document root must point to the app public/ directory".to_string()
+                }
+            },
+        },
+    ];
+
+    for extension in profile.php_extensions {
+        requirements.push(php_extension_requirement(
+            extension,
+            php_version,
+            redis_mode,
+        ));
+    }
+
+    for package in profile.system_packages {
+        requirements.push(AppRequirement {
+            name: format!("system-package:{package}"),
+            status: "deferred",
+            message: "required by the selected app profile; install in the app phase".to_string(),
+        });
+    }
+
+    for service in profile.services {
+        requirements.push(AppRequirement {
+            name: format!("service:{service}"),
+            status: "deferred",
+            message: "required by the selected app profile; create and verify in the app phase"
+                .to_string(),
+        });
+    }
+
+    for path in profile.writable_paths {
+        requirements.push(AppRequirement {
+            name: format!("writable:{path}"),
+            status: "deferred",
+            message: "must be owned by the site account with limited write permissions".to_string(),
+        });
+    }
+
+    for check in profile.health_checks {
+        requirements.push(AppRequirement {
+            name: format!("health:{check}"),
+            status: "deferred",
+            message: "run after app files, vhost, and database settings are applied".to_string(),
+        });
+    }
+
+    requirements.push(AppRequirement {
+        name: "https".to_string(),
+        status: if local_test { "skipped" } else { "deferred" },
+        message: if local_test {
+            "local-test mode skips public TLS issuance".to_string()
+        } else {
+            "issue and renew Let's Encrypt certificate after app/vhost phase".to_string()
+        },
+    });
+
+    requirements
+}
+
+fn php_version_requirement(min_php: &str, selected_php: &str) -> AppRequirement {
+    if php_version_at_least(selected_php, min_php) {
+        AppRequirement {
+            name: "php-version".to_string(),
+            status: "pass",
+            message: format!("PHP {selected_php} satisfies app minimum PHP {min_php}."),
+        }
+    } else {
+        AppRequirement {
+            name: "php-version".to_string(),
+            status: "fail",
+            message: format!("PHP {selected_php} is lower than app minimum PHP {min_php}."),
+        }
+    }
+}
+
+fn php_extension_requirement(
+    extension: &str,
+    php_version: &str,
+    redis_mode: &str,
+) -> AppRequirement {
+    if extension == "redis" && redis_mode == "disable" {
+        return AppRequirement {
+            name: "php-extension:redis".to_string(),
+            status: "fail",
+            message: "selected app profile requires Redis, but Redis is disabled".to_string(),
+        };
+    }
+
+    match package_phase_php_extension_package(extension, php_version) {
+        Some(package) => AppRequirement {
+            name: format!("php-extension:{extension}"),
+            status: "planned",
+            message: format!(
+                "{package} is included in the package phase; php -m verification belongs to the runtime phase"
+            ),
+        },
+        None => AppRequirement {
+            name: format!("php-extension:{extension}"),
+            status: "deferred",
+            message: "verify with php -m in the runtime/app compatibility phase".to_string(),
+        },
+    }
+}
+
+fn package_phase_php_extension_package(extension: &str, php_version: &str) -> Option<String> {
+    let package = match extension {
+        "bcmath" => "bcmath",
+        "curl" => "curl",
+        "dom" | "simplexml" | "xml" | "xmlwriter" => "xml",
+        "gd" => "gd",
+        "imagick" => "imagick",
+        "intl" => "intl",
+        "mbstring" => "mbstring",
+        "mysqli" | "mysqlnd" | "pdo_mysql" => "mysql",
+        "redis" => "redis",
+        "zip" => "zip",
+        _ => return None,
+    };
+
+    Some(format!("php{php_version}-{package}"))
+}
+
+fn php_version_at_least(selected: &str, minimum: &str) -> bool {
+    let selected = php_version_tuple(selected);
+    let minimum = php_version_tuple(minimum);
+
+    selected >= minimum
+}
+
+fn php_version_tuple(version: &str) -> (u16, u16) {
+    let mut parts = version.split('.');
+    let major = parts
+        .next()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or_default();
+    let minor = parts
+        .next()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or_default();
+
+    (major, minor)
+}
+
 fn stop_conditions(web_server: &str, web_root: &str, local_test: bool) -> Vec<PlanStopCondition> {
     let other_web_server = if web_server == "nginx" {
         "Apache is running."
@@ -799,6 +997,14 @@ fn web_server_enabled_file(web_server: &str) -> PlanFile {
         PlanFile::new("/etc/apache2/sites-enabled/g7.conf", "create symlink")
     } else {
         PlanFile::new("/etc/nginx/sites-enabled/g7.conf", "create symlink")
+    }
+}
+
+fn app_config_file(app_profile: &crate::app_profile::AppProfile, web_root: &str) -> String {
+    if app_profile.id == "wordpress" {
+        format!("{web_root}/wp-config.php")
+    } else {
+        format!("{web_root}/.env")
     }
 }
 
@@ -918,8 +1124,8 @@ fn normalize_custom_web_root(path: &str) -> Result<String> {
     Ok(path)
 }
 
-fn database_name_for_domain(domain: &str) -> String {
-    let mut name = String::from("g7_");
+fn database_name_for_domain(domain: &str, app_profile: &str) -> String {
+    let mut name = format!("{}_", database_prefix(app_profile));
     for ch in domain.chars() {
         if ch.is_ascii_alphanumeric() {
             name.push(ch);
@@ -931,14 +1137,23 @@ fn database_name_for_domain(domain: &str) -> String {
     name.trim_end_matches('_').to_string()
 }
 
-fn database_user_for_site_user(site_user: &str) -> String {
+fn database_user_for_site_user(site_user: &str, app_profile: &str) -> String {
+    let prefix = database_prefix(app_profile);
     let mut user = if site_user == DEFAULT_SITE_USER {
-        "g7_app".to_string()
+        format!("{prefix}_app")
     } else {
-        format!("g7_{site_user}")
+        format!("{prefix}_{site_user}")
     };
     user.truncate(32);
     user
+}
+
+fn database_prefix(app_profile: &str) -> &'static str {
+    match app_profile {
+        "wordpress" => "wp",
+        "laravel" => "laravel",
+        _ => "g7",
+    }
 }
 
 fn normalize_supported_option(
