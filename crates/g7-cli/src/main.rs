@@ -699,6 +699,10 @@ mod tests {
         assert!(output.contains("  - max_children_by_ram: 1GB=4, 2GB=8"));
         assert!(output.contains("32GB=96"));
         assert!(output.contains(">32GB=min(floor(php_budget/128M), 192 per site)"));
+        assert!(output.contains("  - cpu_guard_by_ram: 1GB=min(memory_budget, vCPU*4"));
+        assert!(output.contains("nginx_worker_processes_by_cpu_ram"));
+        assert!(output.contains("apache_max_request_workers_by_ram"));
+        assert!(output.contains(">32GB=min(vCPU*64, 800 per site)"));
         assert!(output.contains("- DB 생성 및 계정 설정 [database]:"));
         assert!(output.contains("  - buffer_pool_by_ram: 1GB=128M"));
         assert!(output.contains("  - password_policy: 무작위 생성 후 root-only"));

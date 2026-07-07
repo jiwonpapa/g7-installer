@@ -63,7 +63,7 @@ http://127.0.0.1:7717/?token=...
 > - 크기: 월 12 USD, 2GB 메모리, 2 vCPU, 60GB SSD, 3TB 전송
 > - 이름 예시: `g7installer`, `g7-prod-01`
 
-2GB는 기본 권장값입니다. `g7inst` 계획 화면은 1GB, 2GB, 4GB, 8GB, 16GB, 32GB와 32GB 초과 메모리 기준으로 PHP-FPM, DB, Redis, swap, Nginx 값을 나눠 보여줍니다.
+2GB는 기본 권장값입니다. `g7inst` 계획 화면은 1GB, 2GB, 4GB, 8GB, 16GB, 32GB와 32GB 초과 메모리 기준으로 PHP-FPM, DB, Redis, swap, Nginx worker, Apache `mpm_event` worker 값을 나눠 보여줍니다.
 
 무료 크레딧, 무료 기간, 번들 가격은 AWS가 언제든 바꿀 수 있습니다. 실제 과금은 인스턴스 생성 화면과 결제 안내를 기준으로 확인합니다.
 

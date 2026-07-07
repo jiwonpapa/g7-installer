@@ -50,7 +50,7 @@
 > - 네트워크: 듀얼 스택
 > - 크기: 2GB 메모리, 2 vCPU, 60GB SSD, 3TB 전송
 
-설치 계획 화면에는 1GB, 2GB, 4GB, 8GB, 16GB, 32GB와 32GB 초과 메모리 기준 튜닝값이 표시됩니다. 서버 사양이 커져도 PHP-FPM, DB, Redis, swap 값을 같은 기준으로 확인할 수 있습니다.
+설치 계획 화면에는 1GB, 2GB, 4GB, 8GB, 16GB, 32GB와 32GB 초과 메모리 기준 튜닝값이 표시됩니다. 서버 사양이 커져도 PHP-FPM, DB, Redis, swap, Nginx worker, Apache `mpm_event` worker 값을 같은 기준으로 확인할 수 있습니다.
 
 1. Lightsail에서 `인스턴스 생성`을 누릅니다.
 2. `Linux/Unix`를 선택합니다.

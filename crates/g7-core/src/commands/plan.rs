@@ -174,6 +174,7 @@ struct MemorySizingPreset {
     os_reserve: &'static str,
     php_max_children: &'static str,
     php_processes: &'static str,
+    php_cpu_guard: &'static str,
     php_memory_limit: &'static str,
     php_upload_limit: &'static str,
     opcache_memory: &'static str,
@@ -181,7 +182,18 @@ struct MemorySizingPreset {
     db_max_connections: &'static str,
     db_tmp_table_size: &'static str,
     redis_maxmemory: &'static str,
+    nginx_worker_processes: &'static str,
     nginx_worker_connections: &'static str,
+    nginx_worker_rlimit_nofile: &'static str,
+    nginx_keepalive_timeout: &'static str,
+    nginx_fastcgi_buffers: &'static str,
+    apache_mpm: &'static str,
+    apache_start_servers: &'static str,
+    apache_server_limit: &'static str,
+    apache_threads_per_child: &'static str,
+    apache_max_request_workers: &'static str,
+    apache_spare_threads: &'static str,
+    apache_max_connections_per_child: &'static str,
     note: &'static str,
 }
 
@@ -194,6 +206,7 @@ const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
         os_reserve: "384M",
         php_max_children: "4",
         php_processes: "start=1,min_spare=1,max_spare=2",
+        php_cpu_guard: "min(memory_budget, vCPU*4)",
         php_memory_limit: "192M",
         php_upload_limit: "32M",
         opcache_memory: "64M",
@@ -201,7 +214,18 @@ const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
         db_max_connections: "30",
         db_tmp_table_size: "32M",
         redis_maxmemory: "64M",
+        nginx_worker_processes: "1",
         nginx_worker_connections: "512",
+        nginx_worker_rlimit_nofile: "2048",
+        nginx_keepalive_timeout: "15s",
+        nginx_fastcgi_buffers: "8 16k",
+        apache_mpm: "event",
+        apache_start_servers: "1",
+        apache_server_limit: "2",
+        apache_threads_per_child: "25",
+        apache_max_request_workers: "50",
+        apache_spare_threads: "min=10,max=25",
+        apache_max_connections_per_child: "1000",
         note: "single small site, Redis optional under pressure",
     },
     MemorySizingPreset {
@@ -212,6 +236,7 @@ const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
         os_reserve: "512M",
         php_max_children: "8",
         php_processes: "start=2,min_spare=2,max_spare=4",
+        php_cpu_guard: "min(memory_budget, vCPU*4)",
         php_memory_limit: "256M",
         php_upload_limit: "64M",
         opcache_memory: "128M",
@@ -219,7 +244,18 @@ const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
         db_max_connections: "60",
         db_tmp_table_size: "64M",
         redis_maxmemory: "128M",
+        nginx_worker_processes: "min(vCPU,2)",
         nginx_worker_connections: "1024",
+        nginx_worker_rlimit_nofile: "4096",
+        nginx_keepalive_timeout: "20s",
+        nginx_fastcgi_buffers: "16 16k",
+        apache_mpm: "event",
+        apache_start_servers: "2",
+        apache_server_limit: "3",
+        apache_threads_per_child: "25",
+        apache_max_request_workers: "75",
+        apache_spare_threads: "min=25,max=50",
+        apache_max_connections_per_child: "2000",
         note: "default low-cost VPS target",
     },
     MemorySizingPreset {
@@ -230,6 +266,7 @@ const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
         os_reserve: "768M",
         php_max_children: "16",
         php_processes: "start=4,min_spare=4,max_spare=8",
+        php_cpu_guard: "min(memory_budget, vCPU*6)",
         php_memory_limit: "256M",
         php_upload_limit: "128M",
         opcache_memory: "192M",
@@ -237,7 +274,18 @@ const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
         db_max_connections: "100",
         db_tmp_table_size: "128M",
         redis_maxmemory: "256M",
+        nginx_worker_processes: "min(vCPU,2)",
         nginx_worker_connections: "2048",
+        nginx_worker_rlimit_nofile: "8192",
+        nginx_keepalive_timeout: "20s",
+        nginx_fastcgi_buffers: "16 16k",
+        apache_mpm: "event",
+        apache_start_servers: "2",
+        apache_server_limit: "4",
+        apache_threads_per_child: "25",
+        apache_max_request_workers: "100",
+        apache_spare_threads: "min=25,max=75",
+        apache_max_connections_per_child: "3000",
         note: "small production site baseline",
     },
     MemorySizingPreset {
@@ -248,6 +296,7 @@ const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
         os_reserve: "1G",
         php_max_children: "32",
         php_processes: "start=6,min_spare=6,max_spare=12",
+        php_cpu_guard: "min(memory_budget, vCPU*8)",
         php_memory_limit: "256M",
         php_upload_limit: "128M",
         opcache_memory: "256M",
@@ -255,7 +304,18 @@ const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
         db_max_connections: "150",
         db_tmp_table_size: "256M",
         redis_maxmemory: "512M",
+        nginx_worker_processes: "min(vCPU,4)",
         nginx_worker_connections: "4096",
+        nginx_worker_rlimit_nofile: "16384",
+        nginx_keepalive_timeout: "30s",
+        nginx_fastcgi_buffers: "32 16k",
+        apache_mpm: "event",
+        apache_start_servers: "3",
+        apache_server_limit: "8",
+        apache_threads_per_child: "25",
+        apache_max_request_workers: "200",
+        apache_spare_threads: "min=50,max=100",
+        apache_max_connections_per_child: "5000",
         note: "busy single site or light multi-site",
     },
     MemorySizingPreset {
@@ -266,6 +326,7 @@ const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
         os_reserve: "2G",
         php_max_children: "64",
         php_processes: "start=8,min_spare=8,max_spare=16",
+        php_cpu_guard: "min(memory_budget, vCPU*10)",
         php_memory_limit: "384M",
         php_upload_limit: "256M",
         opcache_memory: "512M",
@@ -273,7 +334,18 @@ const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
         db_max_connections: "250",
         db_tmp_table_size: "512M",
         redis_maxmemory: "1G",
+        nginx_worker_processes: "min(vCPU,4)",
         nginx_worker_connections: "8192",
+        nginx_worker_rlimit_nofile: "32768",
+        nginx_keepalive_timeout: "30s",
+        nginx_fastcgi_buffers: "32 32k",
+        apache_mpm: "event",
+        apache_start_servers: "4",
+        apache_server_limit: "12",
+        apache_threads_per_child: "25",
+        apache_max_request_workers: "300",
+        apache_spare_threads: "min=75,max=150",
+        apache_max_connections_per_child: "5000",
         note: "high traffic single site",
     },
     MemorySizingPreset {
@@ -284,6 +356,7 @@ const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
         os_reserve: "3G",
         php_max_children: "96",
         php_processes: "start=12,min_spare=12,max_spare=24",
+        php_cpu_guard: "min(memory_budget, vCPU*12, 96)",
         php_memory_limit: "512M",
         php_upload_limit: "256M",
         opcache_memory: "768M",
@@ -291,7 +364,18 @@ const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
         db_max_connections: "400",
         db_tmp_table_size: "512M",
         redis_maxmemory: "2G",
+        nginx_worker_processes: "min(vCPU,8)",
         nginx_worker_connections: "16384",
+        nginx_worker_rlimit_nofile: "65535",
+        nginx_keepalive_timeout: "30s",
+        nginx_fastcgi_buffers: "64 32k",
+        apache_mpm: "event",
+        apache_start_servers: "4",
+        apache_server_limit: "16",
+        apache_threads_per_child: "25",
+        apache_max_request_workers: "400",
+        apache_spare_threads: "min=100,max=200",
+        apache_max_connections_per_child: "10000",
         note: "large single site, cap PHP until real traffic is measured",
     },
     MemorySizingPreset {
@@ -302,6 +386,7 @@ const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
         os_reserve: "max(4GB, RAM*10%)",
         php_max_children: "min(floor(php_budget/128M), 192 per site)",
         php_processes: "start=min(16,max_children/8), spare=25%",
+        php_cpu_guard: "min(memory_budget, vCPU*12, 192 per site)",
         php_memory_limit: "512M default, app profile may raise",
         php_upload_limit: "256M default, app profile may raise",
         opcache_memory: "min(max(RAM*2%, 768M), 1G)",
@@ -309,7 +394,18 @@ const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
         db_max_connections: "min(800, RAM_GB*12)",
         db_tmp_table_size: "min(1G, RAM*2%)",
         redis_maxmemory: "min(RAM*6%, 4G)",
+        nginx_worker_processes: "min(vCPU,16)",
         nginx_worker_connections: "min(32768, RAM_GB*512)",
+        nginx_worker_rlimit_nofile: "min(131072, workers*connections*2)",
+        nginx_keepalive_timeout: "30s default, lower under L7 proxy pressure",
+        nginx_fastcgi_buffers: "64 32k, tune by response size",
+        apache_mpm: "event",
+        apache_start_servers: "min(vCPU,8)",
+        apache_server_limit: "ceil(max_request_workers/25)",
+        apache_threads_per_child: "25",
+        apache_max_request_workers: "min(vCPU*64, 800 per site)",
+        apache_spare_threads: "25% of max workers",
+        apache_max_connections_per_child: "10000",
         note: "formula mode; cap per site before multi-tenant support",
     },
 ];
@@ -1075,18 +1171,31 @@ fn memory_sizing_settings() -> Vec<ProvisioningSetting> {
             "os_reserve_by_ram",
             preset_matrix(|preset| preset.os_reserve),
         ),
+        ProvisioningSetting::new(
+            "php_cpu_guard_by_ram",
+            preset_matrix(|preset| preset.php_cpu_guard),
+        ),
+        ProvisioningSetting::new(
+            "nginx_worker_processes_by_cpu_ram",
+            preset_matrix(|preset| preset.nginx_worker_processes),
+        ),
+        ProvisioningSetting::new(
+            "apache_max_request_workers_by_ram",
+            preset_matrix(|preset| preset.apache_max_request_workers),
+        ),
     ];
 
     settings.extend(MEMORY_SIZING_PRESETS.iter().map(|preset| {
         ProvisioningSetting::new(
             preset.key,
             format!(
-                "ram={}, swap={}, os_reserve={}, php_max_children={}, php_pool={}, php_memory_limit={}, upload={}, opcache={}, db_buffer_pool={}, db_max_connections={}, db_tmp_table_size={}, redis_maxmemory={}, nginx_worker_connections={}, note={}",
+                "ram={}, swap={}, os_reserve={}, php_max_children={}, php_pool={}, php_cpu_guard={}, php_memory_limit={}, upload={}, opcache={}, db_buffer_pool={}, db_max_connections={}, db_tmp_table_size={}, redis_maxmemory={}, nginx_worker_processes={}, nginx_worker_connections={}, nginx_rlimit_nofile={}, nginx_keepalive_timeout={}, nginx_fastcgi_buffers={}, apache_mpm={}, apache_start_servers={}, apache_server_limit={}, apache_threads_per_child={}, apache_max_request_workers={}, apache_spare_threads={}, apache_max_connections_per_child={}, note={}",
                 preset.ram,
                 preset.swap,
                 preset.os_reserve,
                 preset.php_max_children,
                 preset.php_processes,
+                preset.php_cpu_guard,
                 preset.php_memory_limit,
                 preset.php_upload_limit,
                 preset.opcache_memory,
@@ -1094,7 +1203,18 @@ fn memory_sizing_settings() -> Vec<ProvisioningSetting> {
                 preset.db_max_connections,
                 preset.db_tmp_table_size,
                 preset.redis_maxmemory,
+                preset.nginx_worker_processes,
                 preset.nginx_worker_connections,
+                preset.nginx_worker_rlimit_nofile,
+                preset.nginx_keepalive_timeout,
+                preset.nginx_fastcgi_buffers,
+                preset.apache_mpm,
+                preset.apache_start_servers,
+                preset.apache_server_limit,
+                preset.apache_threads_per_child,
+                preset.apache_max_request_workers,
+                preset.apache_spare_threads,
+                preset.apache_max_connections_per_child,
                 preset.note
             ),
         )
@@ -1181,9 +1301,55 @@ fn provisioning_sections(input: ProvisioningInput<'_>) -> Vec<ProvisioningSectio
                     format!("/run/php/php{}-fpm.sock", input.php_version),
                 ),
                 ProvisioningSetting::new("rewrite_policy", rewrite_policy(input.app_profile)),
+                ProvisioningSetting::new("selected_runtime", web_runtime_model(input.web_server)),
                 ProvisioningSetting::new(
-                    "worker_connections_by_ram",
+                    "nginx_worker_processes_by_cpu_ram",
+                    preset_matrix(|preset| preset.nginx_worker_processes),
+                ),
+                ProvisioningSetting::new(
+                    "nginx_worker_connections_by_ram",
                     preset_matrix(|preset| preset.nginx_worker_connections),
+                ),
+                ProvisioningSetting::new(
+                    "nginx_worker_rlimit_nofile_by_ram",
+                    preset_matrix(|preset| preset.nginx_worker_rlimit_nofile),
+                ),
+                ProvisioningSetting::new(
+                    "nginx_keepalive_timeout_by_ram",
+                    preset_matrix(|preset| preset.nginx_keepalive_timeout),
+                ),
+                ProvisioningSetting::new(
+                    "nginx_fastcgi_buffers_by_ram",
+                    preset_matrix(|preset| preset.nginx_fastcgi_buffers),
+                ),
+                ProvisioningSetting::new("apache_mpm", "event + proxy_fcgi + PHP-FPM"),
+                ProvisioningSetting::new(
+                    "apache_start_servers_by_ram",
+                    preset_matrix(|preset| preset.apache_start_servers),
+                ),
+                ProvisioningSetting::new(
+                    "apache_server_limit_by_ram",
+                    preset_matrix(|preset| preset.apache_server_limit),
+                ),
+                ProvisioningSetting::new(
+                    "apache_threads_per_child",
+                    preset_matrix(|preset| preset.apache_threads_per_child),
+                ),
+                ProvisioningSetting::new(
+                    "apache_max_request_workers_by_ram",
+                    preset_matrix(|preset| preset.apache_max_request_workers),
+                ),
+                ProvisioningSetting::new(
+                    "apache_spare_threads_by_ram",
+                    preset_matrix(|preset| preset.apache_spare_threads),
+                ),
+                ProvisioningSetting::new(
+                    "apache_max_connections_per_child_by_ram",
+                    preset_matrix(|preset| preset.apache_max_connections_per_child),
+                ),
+                ProvisioningSetting::new(
+                    "apache_php_fpm_boundary",
+                    "Apache worker 수는 정적/keepalive 처리 여유이고 PHP 동시 실행 상한은 PHP-FPM max_children",
                 ),
                 ProvisioningSetting::new(
                     "security_headers",
@@ -1209,8 +1375,16 @@ fn provisioning_sections(input: ProvisioningInput<'_>) -> Vec<ProvisioningSectio
                     preset_matrix(|preset| preset.php_max_children),
                 ),
                 ProvisioningSetting::new(
+                    "cpu_guard_by_ram",
+                    preset_matrix(|preset| preset.php_cpu_guard),
+                ),
+                ProvisioningSetting::new(
                     "process_pool_by_ram",
                     preset_matrix(|preset| preset.php_processes),
+                ),
+                ProvisioningSetting::new(
+                    "web_server_boundary",
+                    "Nginx/Apache worker는 요청 수용 계층이고 PHP 동시 실행은 max_children으로 제한",
                 ),
                 ProvisioningSetting::new(
                     "memory_limit_by_ram",
@@ -1386,6 +1560,14 @@ fn runtime_label(web_server: &str) -> &'static str {
         "Apache"
     } else {
         "Nginx"
+    }
+}
+
+fn web_runtime_model(web_server: &str) -> &'static str {
+    if web_server == "apache" {
+        "Apache mpm_event/worker + proxy_fcgi + PHP-FPM"
+    } else {
+        "Nginx event worker + FastCGI PHP-FPM"
     }
 }
 
@@ -1885,6 +2067,11 @@ mod tests {
             .iter()
             .find(|section| section.name == "php-runtime")
             .expect("php runtime section");
+        let web = plan
+            .provisioning
+            .iter()
+            .find(|section| section.name == "web-server")
+            .expect("web server section");
         let database = plan
             .provisioning
             .iter()
@@ -1901,11 +2088,27 @@ mod tests {
             setting.key == "tier_32gb"
                 && setting.value.contains("db_buffer_pool=10G")
                 && setting.value.contains("php_max_children=96")
+                && setting.value.contains("apache_max_request_workers=400")
+                && setting.value.contains("nginx_worker_processes=min(vCPU,8)")
         }));
         assert!(sizing.settings.iter().any(|setting| {
             setting.key == "tier_gt32gb"
                 && setting.value.contains("db_buffer_pool=min(RAM*40%, 24G)")
                 && setting.value.contains("redis_maxmemory=min(RAM*6%, 4G)")
+                && setting
+                    .value
+                    .contains("apache_max_request_workers=min(vCPU*64, 800 per site)")
+        }));
+        assert!(web.settings.iter().any(|setting| {
+            setting.key == "nginx_worker_processes_by_cpu_ram"
+                && setting.value.contains("32GB=min(vCPU,8)")
+                && setting.value.contains(">32GB=min(vCPU,16)")
+        }));
+        assert!(web.settings.iter().any(|setting| {
+            setting.key == "apache_max_request_workers_by_ram"
+                && setting.value.contains("16GB=300")
+                && setting.value.contains("32GB=400")
+                && setting.value.contains(">32GB=min(vCPU*64, 800 per site)")
         }));
         assert!(php.settings.iter().any(|setting| {
             setting.key == "max_children_by_ram"
@@ -1913,6 +2116,12 @@ mod tests {
                 && setting
                     .value
                     .contains(">32GB=min(floor(php_budget/128M), 192 per site)")
+        }));
+        assert!(php.settings.iter().any(|setting| {
+            setting.key == "cpu_guard_by_ram"
+                && setting
+                    .value
+                    .contains("32GB=min(memory_budget, vCPU*12, 96)")
         }));
         assert!(database.settings.iter().any(|setting| {
             setting.key == "buffer_pool_by_ram"

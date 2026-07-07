@@ -2187,6 +2187,20 @@ mod tests {
                     .any(|setting| setting.key == "tier_gt32gb")
         }));
         assert!(api.provisioning.iter().any(|section| {
+            section.name == "web-server"
+                && section
+                    .settings
+                    .iter()
+                    .any(|setting| setting.key == "apache_max_request_workers_by_ram")
+        }));
+        assert!(api.provisioning.iter().any(|section| {
+            section.name == "web-server"
+                && section
+                    .settings
+                    .iter()
+                    .any(|setting| setting.key == "nginx_worker_processes_by_cpu_ram")
+        }));
+        assert!(api.provisioning.iter().any(|section| {
             section
                 .settings
                 .iter()
