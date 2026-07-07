@@ -4,15 +4,18 @@
 //! performing server changes. Every applied package/service step must be
 //! represented in `plan.rs`, `state.json`, `owned-files.json`, and the report.
 //!
-//! Current phase rule: package installation and basic service/port verification
-//! are implemented. App web-root creation, web vhost activation, database user
-//! creation, Redis hardening, and SSH changes belong to later phases.
+//! Current phase rule: package installation, basic service/port verification,
+//! and the Nginx HTTP vhost are implemented. Database user creation, app file
+//! deployment, Redis hardening, TLS issuance, and SSH changes belong to later
+//! phases.
 
 use std::fs;
 use std::fs::OpenOptions;
 use std::io;
 use std::io::Write;
 use std::net::IpAddr;
+#[cfg(unix)]
+use std::os::unix::fs as unix_fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -36,6 +39,7 @@ const LOG_PATH: &str = "/var/log/g7-installer/install.log";
 const REPORT_PATH: &str = "/var/log/g7-installer/report.json";
 const ROLLBACK_PATH: &str = "/var/lib/g7-installer/rollback.json";
 const LOCAL_HOSTS_PATH: &str = "/etc/g7-installer/local-hosts.txt";
+const PHP_READY_FILENAME: &str = "g7inst-ready.php";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallReport {
@@ -65,6 +69,7 @@ pub struct InstallReport {
     pub owned_files_path: PathBuf,
     pub owned_files: Vec<String>,
     pub completed_steps: Vec<String>,
+    pub safety_checks: Vec<InstallCheck>,
     pub preinstall_package_checks: Vec<InstallCheck>,
     pub package_checks: Vec<InstallCheck>,
     pub service_checks: Vec<InstallCheck>,
@@ -72,6 +77,7 @@ pub struct InstallReport {
     pub network_checks: Vec<InstallCheck>,
     pub mail_checks: Vec<InstallCheck>,
     pub certbot_checks: Vec<InstallCheck>,
+    pub vhost_checks: Vec<InstallCheck>,
     pub app_requirements: Vec<InstallCheck>,
 }
 
@@ -102,6 +108,7 @@ impl InstallCheck {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ApplySummary {
+    safety_checks: Vec<InstallCheck>,
     preinstall_package_checks: Vec<InstallCheck>,
     package_checks: Vec<InstallCheck>,
     service_checks: Vec<InstallCheck>,
@@ -109,6 +116,7 @@ struct ApplySummary {
     network_checks: Vec<InstallCheck>,
     mail_checks: Vec<InstallCheck>,
     certbot_checks: Vec<InstallCheck>,
+    vhost_checks: Vec<InstallCheck>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -196,9 +204,9 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     let mut owned_file_list = owned.clone();
     owned_file_list.push(STATE_PATH.to_string());
     owned_file_list.push(OWNED_FILES_PATH.to_string());
-    let owned_files = OwnedFiles {
+    let mut owned_files = OwnedFiles {
         version: 1,
-        files: owned_file_list,
+        files: owned_file_list.clone(),
     };
 
     let owned_files_path = paths.resolve(OWNED_FILES_PATH);
@@ -233,7 +241,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     })?;
     completed_steps.push("state-written".to_string());
 
-    let apply_summary = match apply_package_phase(probe, &install_plan) {
+    let mut apply_summary = match apply_package_phase(probe, &install_plan) {
         Ok(summary) => summary,
         Err(err) => {
             state.set_phase(InstallerPhase::PackageFailed);
@@ -266,6 +274,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     completed_steps.push("network-readiness-checked".to_string());
     completed_steps.push("mail-readiness-checked".to_string());
     completed_steps.push("certbot-readiness-checked".to_string());
+    apply_summary.safety_checks = safety_checks(&install_plan, "packages-installed");
     state.set_phase(InstallerPhase::PackagesInstalled);
     state.completed_steps = completed_steps.clone();
     write_state_file(&state_path, &state).map_err(|source| Error::FileWriteFailed {
@@ -277,6 +286,81 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         REPORT_PATH,
         &report_content(&install_plan, &state.phase, &apply_summary, None)?,
     )?;
+
+    match apply_vhost_phase(probe, paths, &install_plan, &mut owned_file_list) {
+        Ok(vhost_checks) => {
+            if !vhost_checks.is_empty() {
+                apply_summary.vhost_checks = vhost_checks;
+                completed_steps.push("site-user-verified".to_string());
+                completed_steps.push("web-root-created".to_string());
+                completed_steps.push("vhost-written".to_string());
+                completed_steps.push("vhost-enabled".to_string());
+                completed_steps.push("nginx-config-tested".to_string());
+                completed_steps.push("nginx-reloaded".to_string());
+                completed_steps.push("http-smoke-passed".to_string());
+                apply_summary.safety_checks = safety_checks(&install_plan, "vhost-enabled");
+                state.set_phase(InstallerPhase::VhostEnabled);
+                state.completed_steps = completed_steps.clone();
+                owned_files.files = owned_file_list.clone();
+                write_owned_files(&owned_files_path, &owned_files).map_err(|source| {
+                    Error::FileWriteFailed {
+                        path: OWNED_FILES_PATH.to_string(),
+                        source,
+                    }
+                })?;
+                write_existing_file(paths, ROLLBACK_PATH, &rollback_content(&owned_file_list))?;
+                write_state_file(&state_path, &state).map_err(|source| Error::FileWriteFailed {
+                    path: STATE_PATH.to_string(),
+                    source,
+                })?;
+                write_existing_file(
+                    paths,
+                    REPORT_PATH,
+                    &report_content(&install_plan, &state.phase, &apply_summary, None)?,
+                )?;
+            } else {
+                apply_summary.safety_checks = safety_checks(&install_plan, "packages-installed");
+                apply_summary.vhost_checks = deferred_vhost_checks(&install_plan);
+                write_existing_file(
+                    paths,
+                    REPORT_PATH,
+                    &report_content(&install_plan, &state.phase, &apply_summary, None)?,
+                )?;
+            }
+        }
+        Err(err) => {
+            apply_summary.safety_checks = safety_checks(&install_plan, "vhost-failed");
+            apply_summary.vhost_checks = vec![InstallCheck::fail(
+                "nginx-vhost",
+                format!("Nginx vhost setup failed: {err}"),
+            )];
+            state.set_phase(InstallerPhase::VhostFailed);
+            state.completed_steps = completed_steps.clone();
+            owned_files.files = owned_file_list.clone();
+            write_owned_files(&owned_files_path, &owned_files).map_err(|source| {
+                Error::FileWriteFailed {
+                    path: OWNED_FILES_PATH.to_string(),
+                    source,
+                }
+            })?;
+            write_existing_file(paths, ROLLBACK_PATH, &rollback_content(&owned_file_list))?;
+            write_state_file(&state_path, &state).map_err(|source| Error::FileWriteFailed {
+                path: STATE_PATH.to_string(),
+                source,
+            })?;
+            write_existing_file(
+                paths,
+                REPORT_PATH,
+                &report_content(
+                    &install_plan,
+                    &state.phase,
+                    &apply_summary,
+                    Some(&err.to_string()),
+                )?,
+            )?;
+            return Err(err);
+        }
+    }
 
     Ok(InstallReport {
         domain: state.domain,
@@ -305,6 +389,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         owned_files_path,
         owned_files: owned_files.files,
         completed_steps,
+        safety_checks: apply_summary.safety_checks,
         preinstall_package_checks: apply_summary.preinstall_package_checks,
         package_checks: apply_summary.package_checks,
         service_checks: apply_summary.service_checks,
@@ -312,6 +397,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         network_checks: apply_summary.network_checks,
         mail_checks: apply_summary.mail_checks,
         certbot_checks: apply_summary.certbot_checks,
+        vhost_checks: apply_summary.vhost_checks,
         app_requirements: app_requirements_to_checks(install_plan.app_requirements),
     })
 }
@@ -398,6 +484,7 @@ fn apply_package_phase<R: CommandRunner>(
     let certbot_checks = verify_certbot_readiness(probe, plan, &service_checks);
 
     Ok(ApplySummary {
+        safety_checks: Vec::new(),
         preinstall_package_checks,
         package_checks,
         service_checks,
@@ -405,7 +492,182 @@ fn apply_package_phase<R: CommandRunner>(
         network_checks,
         mail_checks,
         certbot_checks,
+        vhost_checks: Vec::new(),
     })
+}
+
+fn apply_vhost_phase<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+    owned: &mut Vec<String>,
+) -> Result<Vec<InstallCheck>> {
+    if plan.web_server != "nginx" {
+        return Ok(Vec::new());
+    }
+
+    let mut checks = Vec::new();
+    ensure_supported_web_root(plan)?;
+
+    let user_exists = probe.user_exists(&plan.site_user).map_err(|err| {
+        command_error("site-user-check", format!("id -u {}", plan.site_user), err)
+    })?;
+    if user_exists {
+        checks.push(InstallCheck::pass(
+            "site-user",
+            format!("Linux account `{}` already exists.", plan.site_user),
+        ));
+    } else {
+        let command = format!("useradd --create-home --shell /bin/bash {}", plan.site_user);
+        let output = probe
+            .create_login_user(&plan.site_user)
+            .map_err(|err| command_error("site-user-create", &command, err))?;
+        require_success("site-user-create", command, output)?;
+        checks.push(InstallCheck::pass(
+            "site-user",
+            format!("Linux account `{}` was created.", plan.site_user),
+        ));
+    }
+
+    require_empty_or_absent_dir(paths, &plan.web_root)?;
+    require_empty_or_absent_dir(paths, &plan.app_document_root)?;
+    create_owned_dir_if_absent(paths, &plan.web_root, owned)?;
+    create_owned_dir_if_absent(paths, &plan.app_document_root, owned)?;
+    checks.push(InstallCheck::pass(
+        "web-root",
+        format!("Created or verified {}.", plan.app_document_root),
+    ));
+
+    let ready_path = ready_probe_path(plan);
+    write_new_file(paths, &ready_path, ready_probe_content(), owned)?;
+    checks.push(InstallCheck::pass(
+        "php-ready-probe",
+        format!("Wrote temporary PHP smoke file {}.", ready_path),
+    ));
+
+    let owner_group = format!("{}:www-data", plan.site_user);
+    let command = format!("chown -R {owner_group} {}", plan.web_root);
+    let output = probe
+        .chown_recursive(&owner_group, &plan.web_root)
+        .map_err(|err| command_error("web-root-owner", &command, err))?;
+    require_success("web-root-owner", command, output)?;
+    let command = format!("chmod -R 0755 {}", plan.web_root);
+    let output = probe
+        .chmod_recursive("0755", &plan.web_root)
+        .map_err(|err| command_error("web-root-permissions", &command, err))?;
+    require_success("web-root-permissions", command, output)?;
+    checks.push(InstallCheck::pass(
+        "web-root-permissions",
+        format!(
+            "Set {} owner to {} and mode 0755.",
+            plan.web_root, owner_group
+        ),
+    ));
+
+    write_new_file(
+        paths,
+        g7_system::nginx::G7_SITE_AVAILABLE,
+        &nginx_vhost_content(plan),
+        owned,
+    )?;
+    create_owned_symlink(
+        paths,
+        g7_system::nginx::G7_SITE_AVAILABLE,
+        g7_system::nginx::G7_SITE_ENABLED,
+        owned,
+    )?;
+    checks.push(InstallCheck::pass(
+        "nginx-vhost",
+        format!(
+            "Wrote {} and enabled it at {}.",
+            g7_system::nginx::G7_SITE_AVAILABLE,
+            g7_system::nginx::G7_SITE_ENABLED
+        ),
+    ));
+
+    let output = probe
+        .nginx_config_test()
+        .map_err(|err| command_error("nginx-configtest", "nginx -t", err))?;
+    require_success("nginx-configtest", "nginx -t", output)?;
+    checks.push(InstallCheck::pass(
+        "nginx-configtest",
+        "nginx -t completed successfully.",
+    ));
+
+    let output = probe
+        .reload_service(g7_system::nginx::SERVICE_NAME)
+        .map_err(|err| command_error("nginx-reload", "systemctl reload nginx", err))?;
+    require_success("nginx-reload", "systemctl reload nginx", output)?;
+    checks.push(InstallCheck::pass(
+        "nginx-reload",
+        "Nginx was reloaded after vhost enable.",
+    ));
+
+    let smoke_host = primary_http_host(plan);
+    match probe.http_host_smoke(&smoke_host) {
+        Ok(true) => checks.push(InstallCheck::pass(
+            "http-smoke",
+            format!("HTTP smoke passed for Host: {smoke_host}."),
+        )),
+        Ok(false) => {
+            return Err(Error::InstallVerificationFailed {
+                checks: format!("HTTP smoke failed for Host: {smoke_host}"),
+            });
+        }
+        Err(err) => {
+            return Err(command_error(
+                "http-smoke",
+                format!("curl -H 'Host: {smoke_host}' http://127.0.0.1/"),
+                err,
+            ));
+        }
+    }
+
+    Ok(checks)
+}
+
+fn safety_checks(plan: &plan::InstallPlan, phase: &str) -> Vec<InstallCheck> {
+    let mut checks = Vec::new();
+    if plan.deployment_mode == "public" {
+        checks.push(InstallCheck {
+            name: "provider-snapshot".to_string(),
+            status: "warn".to_string(),
+            message: "Vhost/DB/app/SSL 단계 전에는 Lightsail 스냅샷을 먼저 찍는 것을 권장합니다. 설치기는 provider snapshot 존재 여부를 API로 확인하지 않습니다.".to_string(),
+        });
+    } else {
+        checks.push(InstallCheck {
+            name: "provider-snapshot".to_string(),
+            status: "skipped".to_string(),
+            message: "Local test mode does not require a provider snapshot.".to_string(),
+        });
+    }
+
+    checks.push(InstallCheck {
+        name: "rollback-boundary".to_string(),
+        status: "info".to_string(),
+        message: if phase == "packages-installed" {
+            "Rollback is allowed before app/database/certificate content is created.".to_string()
+        } else {
+            "Rollback is allowed while web-root contents are installer-owned; it is blocked after app/database/certificate content appears. Restore the VPS snapshot for full-server recovery.".to_string()
+        },
+    });
+    checks.push(InstallCheck {
+        name: "resume-policy".to_string(),
+        status: "info".to_string(),
+        message: "Existing installer state blocks a fresh run. Retry through report/recovery, or reset only installer-owned paths before starting over.".to_string(),
+    });
+    checks
+}
+
+fn deferred_vhost_checks(plan: &plan::InstallPlan) -> Vec<InstallCheck> {
+    vec![InstallCheck {
+        name: "vhost-apply".to_string(),
+        status: "deferred".to_string(),
+        message: format!(
+            "{} vhost apply is not implemented in this batch; package install report remains available.",
+            plan.web_server
+        ),
+    }]
 }
 
 fn package_names(plan: &plan::InstallPlan) -> Vec<String> {
@@ -414,6 +676,132 @@ fn package_names(plan: &plan::InstallPlan) -> Vec<String> {
         .flat_map(|package| package.name.split_whitespace())
         .map(ToOwned::to_owned)
         .collect()
+}
+
+fn ensure_supported_web_root(plan: &plan::InstallPlan) -> Result<()> {
+    let web_root = Path::new(&plan.web_root);
+    let app_root = Path::new(&plan.app_document_root);
+    if !web_root.is_absolute()
+        || web_root == Path::new("/")
+        || !app_root.starts_with(web_root)
+        || !reset_safe_web_root(&plan.web_root)
+    {
+        return Err(Error::InstallVerificationFailed {
+            checks: format!(
+                "web root is outside the current reset safety policy: {}",
+                plan.web_root
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn reset_safe_web_root(path: &str) -> bool {
+    let parts = Path::new(path)
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+
+    if parts.len() == 4 && parts[1] == "home" && (parts[3] == "public_html" || parts[3] == "www") {
+        return valid_path_segment(&parts[2]);
+    }
+
+    parts.len() == 4 && parts[1] == "var" && parts[2] == "www" && valid_path_segment(&parts[3])
+}
+
+fn valid_path_segment(value: &str) -> bool {
+    !value.is_empty()
+        && value != "."
+        && value != ".."
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.')
+}
+
+fn require_empty_or_absent_dir(paths: &InstallPaths, path: &str) -> Result<()> {
+    let target = paths.resolve(path);
+    let metadata = match fs::metadata(&target) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(Error::FileReadFailed {
+                path: path.to_string(),
+                source,
+            });
+        }
+    };
+
+    if !metadata.is_dir() {
+        return Err(Error::InstallVerificationFailed {
+            checks: format!("{path} exists but is not a directory"),
+        });
+    }
+
+    let mut entries = fs::read_dir(&target).map_err(|source| Error::FileReadFailed {
+        path: path.to_string(),
+        source,
+    })?;
+    if entries.next().is_some() {
+        return Err(Error::InstallVerificationFailed {
+            checks: format!("{path} exists but is not empty"),
+        });
+    }
+
+    Ok(())
+}
+
+fn ready_probe_path(plan: &plan::InstallPlan) -> String {
+    format!("{}/{}", plan.app_document_root, PHP_READY_FILENAME)
+}
+
+fn ready_probe_content() -> &'static str {
+    "<?php\nheader('Content-Type: text/plain; charset=utf-8');\necho \"G7inst vhost ready\\n\";\n"
+}
+
+fn nginx_vhost_content(plan: &plan::InstallPlan) -> String {
+    let app_hosts = nginx_app_hosts(plan);
+    let redirect_blocks = nginx_redirect_blocks(plan);
+    let php_socket = format!("/run/php/php{}-fpm.sock", plan.php_version);
+
+    format!(
+        "{redirect_blocks}server {{\n    listen 80;\n    listen [::]:80;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
+        root = plan.app_document_root,
+    )
+}
+
+fn nginx_app_hosts(plan: &plan::InstallPlan) -> String {
+    match plan.www_mode.as_str() {
+        "redirect-to-www" if !plan.domain.starts_with("www.") => format!("www.{}", plan.domain),
+        "redirect-to-root" | "none" => plan.domain.clone(),
+        _ if !plan.domain.starts_with("www.") => format!("{} www.{}", plan.domain, plan.domain),
+        _ => plan.domain.clone(),
+    }
+}
+
+fn nginx_redirect_blocks(plan: &plan::InstallPlan) -> String {
+    if plan.domain.starts_with("www.") {
+        return String::new();
+    }
+
+    match plan.www_mode.as_str() {
+        "redirect-to-root" => format!(
+            "server {{\n    listen 80;\n    listen [::]:80;\n    server_name www.{domain};\n    return 301 http://{domain}$request_uri;\n}}\n\n",
+            domain = plan.domain
+        ),
+        "redirect-to-www" => format!(
+            "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {domain};\n    return 301 http://www.{domain}$request_uri;\n}}\n\n",
+            domain = plan.domain
+        ),
+        _ => String::new(),
+    }
+}
+
+fn primary_http_host(plan: &plan::InstallPlan) -> String {
+    if plan.www_mode == "redirect-to-www" && !plan.domain.starts_with("www.") {
+        format!("www.{}", plan.domain)
+    } else {
+        plan.domain.clone()
+    }
 }
 
 fn managed_services(plan: &plan::InstallPlan) -> Vec<String> {
@@ -830,6 +1218,49 @@ fn create_owned_dir(paths: &InstallPaths, path: &str, owned: &mut Vec<String>) -
     Ok(())
 }
 
+fn create_owned_dir_if_absent(
+    paths: &InstallPaths,
+    path: &str,
+    owned: &mut Vec<String>,
+) -> Result<()> {
+    let target = paths.resolve(path);
+    let existed = target.exists();
+    fs::create_dir_all(&target).map_err(|source| Error::FileWriteFailed {
+        path: path.to_string(),
+        source,
+    })?;
+    if !existed {
+        owned.push(path.to_string());
+    }
+    Ok(())
+}
+
+fn create_owned_symlink(
+    paths: &InstallPaths,
+    source: &str,
+    link: &str,
+    owned: &mut Vec<String>,
+) -> Result<()> {
+    let source_path = paths.resolve(source);
+    let link_path = paths.resolve(link);
+    #[cfg(unix)]
+    {
+        unix_fs::symlink(&source_path, &link_path).map_err(|source| Error::FileWriteFailed {
+            path: link.to_string(),
+            source,
+        })?;
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = source_path;
+        return Err(Error::InstallVerificationFailed {
+            checks: "symlink creation is supported only on unix platforms".to_string(),
+        });
+    }
+    owned.push(link.to_string());
+    Ok(())
+}
+
 fn write_new_file(
     paths: &InstallPaths,
     path: &str,
@@ -957,6 +1388,7 @@ fn report_content(
         "dns_check": plan.dns_check_required,
         "security_profile": &plan.security_profile,
         "ssh_policy": &plan.ssh_policy,
+        "safety_checks": checks_json(&summary.safety_checks),
         "preinstall_package_checks": checks_json(&summary.preinstall_package_checks),
         "package_checks": checks_json(&summary.package_checks),
         "service_checks": checks_json(&summary.service_checks),
@@ -964,6 +1396,7 @@ fn report_content(
         "network_checks": checks_json(&summary.network_checks),
         "mail_checks": checks_json(&summary.mail_checks),
         "certbot_checks": checks_json(&summary.certbot_checks),
+        "vhost_checks": checks_json(&summary.vhost_checks),
         "app_requirements": requirements_json(&plan.app_requirements),
         "app_followup_steps": followup_steps_json(&plan.app_followup_steps),
         "problem": problem,
@@ -1085,7 +1518,7 @@ mod tests {
         assert_eq!(report.redis_mode, "enable");
         assert_eq!(report.security_profile, "standard");
         assert_eq!(report.ssh_policy, "audit-only");
-        assert_eq!(report.phase, "packages-installed");
+        assert_eq!(report.phase, "vhost-enabled");
         assert!(fs_root.join("etc/g7-installer/config.toml").exists());
         let config = fs::read_to_string(fs_root.join("etc/g7-installer/config.toml"))?;
         assert!(config.contains("deployment_mode = \"public\""));
@@ -1104,16 +1537,24 @@ mod tests {
         assert!(fs_root.join("var/backups/g7-installer").exists());
         assert!(fs_root.join(strip_root(STATE_PATH)).exists());
         assert!(fs_root.join(strip_root(OWNED_FILES_PATH)).exists());
-        assert!(!fs_root.join("home/g7/public_html").exists());
+        assert!(fs_root.join("home/g7/public_html").exists());
+        assert!(fs_root.join("home/g7/public_html/public").exists());
         assert!(
-            !report
+            fs_root
+                .join("home/g7/public_html/public/g7inst-ready.php")
+                .exists()
+        );
+        assert!(fs_root.join("etc/nginx/sites-available/g7.conf").exists());
+        assert!(fs_root.join("etc/nginx/sites-enabled/g7.conf").exists());
+        assert!(
+            report
                 .owned_files
                 .contains(&"/home/g7/public_html".to_string())
         );
         assert!(
             report
                 .completed_steps
-                .contains(&"packages-installed".to_string())
+                .contains(&"vhost-enabled".to_string())
         );
         assert!(
             report
@@ -1160,9 +1601,23 @@ mod tests {
                 .iter()
                 .any(|check| { check.name == "certbot-certificate" && check.status == "deferred" })
         );
+        assert!(
+            report
+                .safety_checks
+                .iter()
+                .any(|check| { check.name == "provider-snapshot" && check.status == "warn" })
+        );
+        assert!(
+            report
+                .vhost_checks
+                .iter()
+                .any(|check| { check.name == "http-smoke" && check.status == "pass" })
+        );
         assert!(report_json.contains("\"network_checks\""));
         assert!(report_json.contains("\"mail_checks\""));
         assert!(report_json.contains("\"certbot_checks\""));
+        assert!(report_json.contains("\"safety_checks\""));
+        assert!(report_json.contains("\"vhost_checks\""));
 
         fs::remove_file(os_release_path)?;
         fs::remove_dir_all(fs_root)?;
@@ -1301,6 +1756,7 @@ mod tests {
         let os_release_path = write_temp_os_release()?;
         let fs_root = create_temp_fs_root()?;
         fs::create_dir_all(fs_root.join("etc/nginx/sites-enabled"))?;
+        fs::create_dir_all(fs_root.join("etc/nginx/sites-available"))?;
         fs::create_dir_all(fs_root.join("etc/nginx/conf.d"))?;
         let options = super::plan::PlanOptions {
             php_version: "8.5".to_string(),
@@ -1384,6 +1840,7 @@ mod tests {
         options: &super::plan::PlanOptions,
     ) -> std::result::Result<SystemProbe<FakeCommandRunner>, Box<dyn std::error::Error>> {
         fs::create_dir_all(fs_root.join("etc/nginx/sites-enabled"))?;
+        fs::create_dir_all(fs_root.join("etc/nginx/sites-available"))?;
         fs::create_dir_all(fs_root.join("etc/nginx/conf.d"))?;
         let runner = FakeCommandRunner::default();
         runner.push_output(CommandOutput::success(uid));
@@ -1433,6 +1890,7 @@ mod tests {
         }
         push_successful_network_outputs(runner, install_plan);
         push_successful_mail_outputs(runner, install_plan);
+        push_successful_vhost_outputs(runner, install_plan);
     }
 
     fn push_successful_network_outputs(
@@ -1460,6 +1918,23 @@ mod tests {
             "local-postfix" => runner.push_output(CommandOutput::success("active\n")),
             _ => {}
         }
+    }
+
+    fn push_successful_vhost_outputs(
+        runner: &FakeCommandRunner,
+        install_plan: &super::plan::InstallPlan,
+    ) {
+        if install_plan.web_server != "nginx" {
+            return;
+        }
+
+        runner.push_output(CommandOutput::failure(1, "no such user"));
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
     }
 
     fn write_temp_os_release() -> std::result::Result<PathBuf, Box<dyn std::error::Error>> {

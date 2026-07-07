@@ -1,3 +1,4 @@
+pub mod account;
 pub mod apt;
 pub mod certbot;
 pub mod command;

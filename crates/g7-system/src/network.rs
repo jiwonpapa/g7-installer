@@ -59,6 +59,23 @@ pub fn tcp_connect<R: CommandRunner>(
     Ok(output.status == 0)
 }
 
+pub fn http_host_smoke<R: CommandRunner>(runner: &R, host: &str) -> Result<bool, CommandError> {
+    let host_header = format!("Host: {host}");
+    let output = runner.run(
+        &CommandSpec::new("curl")
+            .arg("-fsS")
+            .arg("--max-time")
+            .arg("10")
+            .arg("-H")
+            .arg(host_header)
+            .arg("http://127.0.0.1/")
+            .arg("-o")
+            .arg("/dev/null"),
+    )?;
+
+    Ok(output.status == 0)
+}
+
 fn public_ip<R: CommandRunner>(
     runner: &R,
     spec: CommandSpec,
@@ -104,8 +121,9 @@ fn parse_getent_ips(output: &CommandOutput) -> Vec<IpAddr> {
 
 #[cfg(test)]
 mod tests {
-    use super::{dns_ipv4_records, public_ipv4, tcp_connect};
+    use super::{dns_ipv4_records, http_host_smoke, public_ipv4, tcp_connect};
     use crate::command::{CommandOutput, FakeCommandRunner};
+    use std::ffi::OsString;
     use std::net::{IpAddr, Ipv4Addr};
 
     #[test]
@@ -138,6 +156,29 @@ mod tests {
         runner.push_output(CommandOutput::success(""));
 
         assert!(tcp_connect(&runner, "smtp.example.com", 587)?);
+        Ok(())
+    }
+
+    #[test]
+    fn http_smoke_uses_host_header_without_shell()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success(""));
+
+        assert!(http_host_smoke(&runner, "example.com")?);
+        let recorded = runner.recorded();
+
+        assert_eq!(recorded[0].program, OsString::from("curl"));
+        assert!(
+            recorded[0]
+                .args
+                .contains(&OsString::from("Host: example.com"))
+        );
+        assert!(
+            recorded[0]
+                .args
+                .contains(&OsString::from("http://127.0.0.1/"))
+        );
         Ok(())
     }
 }

@@ -2,15 +2,19 @@ use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
+use crate::account::{chmod_recursive, chown_recursive, create_login_user, user_exists};
 use crate::apt::{apt_candidate_available, apt_install, apt_purge, apt_update};
 use crate::certbot::renew_dry_run;
 use crate::command::{CommandError, CommandOutput, CommandRunner, RealCommandRunner};
-use crate::network::{dns_ipv4_records, dns_ipv6_records, public_ipv4, public_ipv6, tcp_connect};
+use crate::network::{
+    dns_ipv4_records, dns_ipv6_records, http_host_smoke, public_ipv4, public_ipv6, tcp_connect,
+};
+use crate::nginx::config_test;
 use crate::os::{OsRelease, OsReleaseError, read_os_release};
 use crate::package::{PackageStatus, package_status};
 use crate::port::{PortStatus, tcp_port_status};
 use crate::privilege::{Privilege, current_privilege};
-use crate::service::{ServiceActivity, disable_now, enable_now, is_active};
+use crate::service::{ServiceActivity, disable_now, enable_now, is_active, reload};
 use std::net::IpAddr;
 
 #[derive(Debug)]
@@ -101,6 +105,10 @@ impl<R: CommandRunner> SystemProbe<R> {
         tcp_connect(&self.runner, host, port).map_err(SystemProbeError::Command)
     }
 
+    pub fn http_host_smoke(&self, host: &str) -> Result<bool, SystemProbeError> {
+        http_host_smoke(&self.runner, host).map_err(SystemProbeError::Command)
+    }
+
     pub fn certbot_renew_dry_run(
         &self,
         cert_name: &str,
@@ -118,6 +126,38 @@ impl<R: CommandRunner> SystemProbe<R> {
 
     pub fn disable_service_now(&self, service: &str) -> Result<CommandOutput, SystemProbeError> {
         disable_now(&self.runner, service).map_err(SystemProbeError::Command)
+    }
+
+    pub fn reload_service(&self, service: &str) -> Result<CommandOutput, SystemProbeError> {
+        reload(&self.runner, service).map_err(SystemProbeError::Command)
+    }
+
+    pub fn nginx_config_test(&self) -> Result<CommandOutput, SystemProbeError> {
+        config_test(&self.runner).map_err(SystemProbeError::Command)
+    }
+
+    pub fn user_exists(&self, user: &str) -> Result<bool, SystemProbeError> {
+        user_exists(&self.runner, user).map_err(SystemProbeError::Command)
+    }
+
+    pub fn create_login_user(&self, user: &str) -> Result<CommandOutput, SystemProbeError> {
+        create_login_user(&self.runner, user).map_err(SystemProbeError::Command)
+    }
+
+    pub fn chown_recursive(
+        &self,
+        owner_group: &str,
+        path: &str,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        chown_recursive(&self.runner, owner_group, path).map_err(SystemProbeError::Command)
+    }
+
+    pub fn chmod_recursive(
+        &self,
+        mode: &str,
+        path: &str,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        chmod_recursive(&self.runner, mode, path).map_err(SystemProbeError::Command)
     }
 
     pub fn path_exists(&self, path: &Path) -> bool {

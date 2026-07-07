@@ -459,7 +459,7 @@ function refreshInstallButtonState(label = null) {
   }
 
   nodes.installButton.disabled = false;
-  setButtonLabel(nodes.installButton, label || "패키지 설치 시작");
+  setButtonLabel(nodes.installButton, label || "서버 설치 시작");
 }
 
 function setDoctorPassed(passed) {
@@ -553,7 +553,7 @@ function showStep(nextStep, options = {}) {
       nodes.installStatus,
       "warning",
       "설치 결과가 아직 없습니다",
-      "패키지 설치 시작을 완료해야 결과 리포트를 볼 수 있습니다.",
+      "서버 설치 시작을 완료해야 결과 리포트를 볼 수 있습니다.",
     );
     step = "install";
   }
@@ -799,7 +799,7 @@ function renderRecoveryStatus(status) {
     if (paths) {
       const rows = status?.metadata_paths?.length
         ? status.metadata_paths.map((path) => `<li>${escapeHtml(path)}</li>`).join("")
-        : `<li>설치기 메타데이터 없음</li>`;
+        : `<li>설치기 소유 기록 없음</li>`;
       paths.innerHTML = rows;
     }
   });
@@ -814,8 +814,8 @@ function renderRecoveryStatus(status) {
   recoveryActionButtons("reset").forEach((button) => {
     button.disabled = !status?.can_reset;
     button.title = status?.can_reset
-      ? "설치기 메타데이터만 정리합니다. apt 패키지는 제거하지 않습니다."
-      : (status?.can_rollback ? "패키지 설치 후에는 패키지 되돌리기를 먼저 사용하세요." : "설치기 메타데이터가 없어 리셋할 수 없습니다.");
+      ? "설치기 소유 설정과 웹루트 기록을 정리합니다. apt 패키지는 제거하지 않습니다."
+      : (status?.can_rollback ? "패키지 설치 직후에는 패키지 되돌리기를 먼저 사용하세요." : "설치기 소유 기록이 없어 리셋할 수 없습니다.");
   });
 
   saveWizardState();
@@ -848,7 +848,7 @@ function renderDoctor(report) {
     report.install_allowed ? "success" : "error",
     report.install_allowed ? "서버 점검 통과" : "서버 점검 실패",
     report.install_allowed
-      ? "패키지 설치를 계속 진행할 수 있습니다."
+      ? "서버 설치를 계속 진행할 수 있습니다."
       : "실패 항목을 해결한 뒤 다시 점검하세요.",
   );
 
@@ -1238,7 +1238,7 @@ function restoreInstallStateFromReport(report) {
 function renderInstallReport(report) {
   const link = accessLink(report.domain, report.deployment_mode, report.phase);
   nodes.reportOutput.innerHTML = [
-    reportSummaryCard("패키지 설치 완료", [
+    reportSummaryCard("서버 설치 완료", [
       ["도메인", report.domain],
       ["접속 주소", link.html],
       ["모드", report.deployment_mode === "local-test" ? "로컬 테스트" : "실제 도메인"],
@@ -1256,11 +1256,13 @@ function renderInstallReport(report) {
       ["소유 파일 목록", report.owned_files_path],
     ], link.hint),
     listCard("완료된 작업", report.completed_steps),
+    checksCard("안전장치", report.safety_checks),
     checksCard("설치 전 패키지 기준", report.preinstall_package_checks),
     checksCard("설치 패키지 검증", report.package_checks),
     checksCard("서비스 검증", report.service_checks),
     checksCard("포트 검증", report.port_checks),
     checksCard("DNS / 네트워크 검증", report.network_checks),
+    checksCard("웹서버 / vhost 검증", report.vhost_checks),
     checksCard("메일 발송 검증", report.mail_checks),
     checksCard("SSL / Certbot 검증", report.certbot_checks),
     checksCard("앱 요구사항", report.app_requirements),
@@ -1322,11 +1324,13 @@ function renderSavedReport(payload) {
       ["SMTP 서버", report.smtp_host || "-"],
       ["DNS/IP 확인", report.dns_check ? "수행" : "건너뜀"],
     ], link.hint),
+    checksCard("안전장치", report.safety_checks),
     checksCard("설치 전 패키지 기준", report.preinstall_package_checks),
     checksCard("설치 패키지 검증", report.package_checks),
     checksCard("서비스 검증", report.service_checks),
     checksCard("포트 검증", report.port_checks),
     checksCard("DNS / 네트워크 검증", report.network_checks),
+    checksCard("웹서버 / vhost 검증", report.vhost_checks),
     checksCard("메일 발송 검증", report.mail_checks),
     checksCard("SSL / Certbot 검증", report.certbot_checks),
     checksCard("앱 요구사항", report.app_requirements),
@@ -1341,7 +1345,7 @@ function renderResetReport(report) {
   nodes.reportOutput.innerHTML = [
     reportSummaryCard("메타데이터 리셋 완료", [
       ["미리보기", report.dry_run ? "예" : "아니오"],
-      ["의미", "설치 기록과 준비 흔적만 정리했습니다. apt 패키지는 제거하지 않습니다."],
+      ["의미", "설치기 소유 설정과 웹루트 기록을 정리했습니다. apt 패키지는 제거하지 않습니다."],
     ]),
     listCard("삭제됨", report.removed),
     listCard("이미 없던 항목", report.missing),
@@ -1472,8 +1476,8 @@ function accessLink(domain, mode, phase = "packages-installed") {
     return {
       html: `<span class="text-base-content/60">사이트 페이지는 아직 생성 전입니다.</span>`,
       hint: mode === "local-test"
-        ? "현재 단계는 apt 패키지 검증까지만 완료합니다. 로컬 테스트 도메인은 hosts 매핑과 vhost/app 설치 단계가 끝난 뒤 접속 링크를 제공합니다."
-        : "현재 단계는 apt 패키지 검증까지만 완료합니다. vhost와 앱 설치 단계가 끝난 뒤 접속 링크를 제공합니다.",
+        ? "로컬 테스트는 SSH 터널과 hosts 매핑 상태에 따라 브라우저 접속이 달라질 수 있습니다."
+        : "HTTP vhost 검증이 끝나면 도메인 접속 링크를 제공합니다. HTTPS는 인증서 단계 후 활성화됩니다.",
     };
   }
 
@@ -1573,7 +1577,7 @@ function installConfirmSummaryHtml(payload) {
 function confirmInstallStart() {
   const payload = optionPayload();
   if (!nodes.installConfirmDialog?.showModal) {
-    return Promise.resolve(window.confirm("패키지 설치를 시작할까요?"));
+    return Promise.resolve(window.confirm("서버 설치를 시작할까요?"));
   }
 
   nodes.installConfirmSummary.innerHTML = installConfirmSummaryHtml(payload);
@@ -1603,11 +1607,11 @@ function recoveryConfirmContent(action) {
 
   return {
     title: "메타데이터 리셋을 실행할까요?",
-    message: "설치 기록과 준비 흔적만 정리합니다. apt 패키지와 기존 웹서비스는 제거하지 않습니다.",
+    message: "설치기 소유 설정, vhost, 웹루트 기록을 정리합니다. apt 패키지와 기존 운영 웹서비스는 제거하지 않습니다.",
     yesClass: "btn btn-primary icon-button",
     rows: [
-      ["대상", "installer 상태 파일, 리포트, 준비 파일"],
-      ["보존", "apt 패키지와 서비스"],
+      ["대상", "installer 상태 파일, 리포트, installer가 만든 vhost/webroot"],
+      ["보존", "apt 패키지와 서비스, 설치 전부터 있던 운영 파일"],
       ["실행 후", "패키지가 남아 있으면 신규 설치 점검이 막힐 수 있습니다."],
     ],
   };
@@ -1752,7 +1756,7 @@ async function runRecoveryAction(action, button) {
   }
 
   if (action === "reset" && !state.recoveryStatus?.can_reset) {
-    setAlert(statusNode, "warning", "리셋 불가", "설치기 메타데이터가 없거나 패키지 되돌리기를 먼저 해야 합니다.");
+    setAlert(statusNode, "warning", "리셋 불가", "설치기 소유 기록이 없거나 패키지 되돌리기를 먼저 해야 합니다.");
     return;
   }
 
@@ -1794,7 +1798,7 @@ async function runRecoveryAction(action, button) {
       successTitle,
       action === "rollback"
         ? "서비스 중지, apt 패키지 제거, installer 메타데이터 정리를 완료했습니다."
-        : "installer 메타데이터와 준비 흔적을 정리했습니다.",
+        : "installer 소유 설정과 웹루트 기록을 정리했습니다.",
     );
     log(successTitle);
     clearWizardState();
@@ -1987,7 +1991,7 @@ function bindEvents() {
 
     const confirmed = await confirmInstallStart();
     if (!confirmed) {
-      log("패키지 설치 취소");
+      log("서버 설치 취소");
       return;
     }
 
@@ -2003,22 +2007,22 @@ function bindEvents() {
 
     try {
       markStage("preflight", "진행");
-      setAlert(nodes.installStatus, "info", "패키지 설치 진행 중", "apt 패키지 설치와 서비스/포트 검증을 진행합니다.");
-      log("패키지 설치 시작");
+      setAlert(nodes.installStatus, "info", "서버 설치 진행 중", "apt 패키지 설치, Nginx vhost 생성, HTTP 검증을 진행합니다.");
+      log("서버 설치 시작");
       const report = await apiFetch("/api/install/prepare", {
         method: "POST",
         body: JSON.stringify(optionPayload()),
       });
       renderInstallReport(report);
       await refreshRecoveryStatus();
-      setAlert(nodes.installStatus, "success", "패키지 설치 완료", "결과 리포트에서 패키지, 서비스, 포트 검증 결과를 확인하세요.");
+      setAlert(nodes.installStatus, "success", "서버 설치 완료", "결과 리포트에서 패키지, 서비스, 포트, vhost 검증 결과를 확인하세요.");
       showStep("report");
-      log(`패키지 설치 완료: ${report.phase}`);
+      log(`서버 설치 완료: ${report.phase}`);
     } catch (error) {
       markStage("packages", "실패");
       stopPackageTicker();
-      renderErrorReport("패키지 설치 실패", `${formatError(error)}\n\n리포트와 로그를 확인하세요. 패키지 버전 문제면 PHP 8.3 조합으로 다시 시도하세요.`);
-      setAlert(nodes.installStatus, "error", "패키지 설치 실패", formatError(error));
+      renderErrorReport("서버 설치 실패", `${formatError(error)}\n\n리포트와 로그를 확인하세요. 패키지 버전 문제면 PHP 8.3 조합으로 다시 시도하세요.`);
+      setAlert(nodes.installStatus, "error", "서버 설치 실패", formatError(error));
       setReportReady(true);
       await refreshRecoveryStatus();
       showStep("report");

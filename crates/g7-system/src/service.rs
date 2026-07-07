@@ -49,9 +49,13 @@ pub fn disable_now<R: CommandRunner>(
     )
 }
 
+pub fn reload<R: CommandRunner>(runner: &R, service: &str) -> Result<CommandOutput, CommandError> {
+    runner.run(&CommandSpec::new("systemctl").arg("reload").arg(service))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ServiceActivity, disable_now, is_active};
+    use super::{ServiceActivity, disable_now, is_active, reload};
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
 
@@ -82,6 +86,22 @@ mod tests {
                 OsString::from("--now"),
                 OsString::from("nginx")
             ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn reloads_service_without_shell() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success(""));
+
+        reload(&runner, "nginx")?;
+        let recorded = runner.recorded();
+
+        assert_eq!(recorded[0].program, OsString::from("systemctl"));
+        assert_eq!(
+            recorded[0].args,
+            vec![OsString::from("reload"), OsString::from("nginx")]
         );
         Ok(())
     }

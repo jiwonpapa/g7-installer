@@ -559,6 +559,7 @@ fn print_install(report: install::InstallReport) {
         println!("- {step}");
     }
 
+    print_install_checks("Safety checks", &report.safety_checks);
     print_install_checks(
         "Preinstall package checks",
         &report.preinstall_package_checks,
@@ -567,6 +568,7 @@ fn print_install(report: install::InstallReport) {
     print_install_checks("Service checks", &report.service_checks);
     print_install_checks("Port checks", &report.port_checks);
     print_install_checks("Network checks", &report.network_checks);
+    print_install_checks("Vhost checks", &report.vhost_checks);
     print_install_checks("Mail checks", &report.mail_checks);
     print_install_checks("Certbot checks", &report.certbot_checks);
     print_install_checks("App requirements", &report.app_requirements);

@@ -11,6 +11,7 @@ pub enum InstallerPhase {
     Prepared,
     PackageFailed,
     PackagesInstalled,
+    VhostFailed,
     RuntimeConfigured,
     DatabaseConfigured,
     AppFetched,
@@ -28,6 +29,7 @@ impl InstallerPhase {
             Self::Prepared => "prepared",
             Self::PackageFailed => "package-failed",
             Self::PackagesInstalled => "packages-installed",
+            Self::VhostFailed => "vhost-failed",
             Self::RuntimeConfigured => "runtime-configured",
             Self::DatabaseConfigured => "database-configured",
             Self::AppFetched => "app-fetched",
@@ -42,7 +44,8 @@ impl InstallerPhase {
     pub fn app_mutates_server(self) -> bool {
         matches!(
             self,
-            Self::RuntimeConfigured
+            Self::VhostFailed
+                | Self::RuntimeConfigured
                 | Self::DatabaseConfigured
                 | Self::AppFetched
                 | Self::AppConfigured

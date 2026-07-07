@@ -289,6 +289,7 @@ struct InstallApiReport {
     state_path: String,
     owned_files_path: String,
     completed_steps: Vec<String>,
+    safety_checks: Vec<InstallApiCheck>,
     preinstall_package_checks: Vec<InstallApiCheck>,
     package_checks: Vec<InstallApiCheck>,
     service_checks: Vec<InstallApiCheck>,
@@ -296,6 +297,7 @@ struct InstallApiReport {
     network_checks: Vec<InstallApiCheck>,
     mail_checks: Vec<InstallApiCheck>,
     certbot_checks: Vec<InstallApiCheck>,
+    vhost_checks: Vec<InstallApiCheck>,
     app_requirements: Vec<InstallApiCheck>,
 }
 
@@ -737,7 +739,7 @@ async fn api_install_prepare(
         &state,
         "install",
         15,
-        "install progress: running package phase",
+        "install progress: running server install",
     );
     let result = install::run(domain, options);
     state.install_running.store(false, Ordering::SeqCst);
@@ -764,15 +766,10 @@ async fn api_install_prepare(
             emit_progress(&state, "install", 75, "install progress: services verified");
             emit_stage(&state, "ports", "성공", "ports verified");
             emit_progress(&state, "install", 88, "install progress: ports verified");
-            emit_stage(
-                &state,
-                "http",
-                "성공",
-                "basic service verification completed",
-            );
+            emit_stage(&state, "http", "성공", "HTTP vhost verification completed");
             emit_stage(&state, "report", "성공", "problem report prepared");
             emit_progress(&state, "install", 100, "install progress: report ready");
-            emit_log(&state, "package install completed");
+            emit_log(&state, "server install completed");
             Ok(Json(install_to_api(report, database_version)))
         }
         Err(error) => {
@@ -1176,6 +1173,7 @@ fn install_to_api(report: install::InstallReport, database_version: String) -> I
         state_path: report.state_path.display().to_string(),
         owned_files_path: report.owned_files_path.display().to_string(),
         completed_steps: report.completed_steps,
+        safety_checks: install_checks_to_api(report.safety_checks),
         preinstall_package_checks: install_checks_to_api(report.preinstall_package_checks),
         package_checks: install_checks_to_api(report.package_checks),
         service_checks: install_checks_to_api(report.service_checks),
@@ -1183,6 +1181,7 @@ fn install_to_api(report: install::InstallReport, database_version: String) -> I
         network_checks: install_checks_to_api(report.network_checks),
         mail_checks: install_checks_to_api(report.mail_checks),
         certbot_checks: install_checks_to_api(report.certbot_checks),
+        vhost_checks: install_checks_to_api(report.vhost_checks),
         app_requirements: install_checks_to_api(report.app_requirements),
     }
 }
@@ -2107,6 +2106,7 @@ mod tests {
                 owned_files_path: PathBuf::from("/var/lib/g7-installer/owned-files.json"),
                 owned_files: vec!["/etc/g7-installer/config.toml".to_string()],
                 completed_steps: vec!["preflight-passed".to_string()],
+                safety_checks: Vec::new(),
                 preinstall_package_checks: vec![install::InstallCheck {
                     name: "nginx".to_string(),
                     status: "not-installed".to_string(),
@@ -2122,6 +2122,7 @@ mod tests {
                 network_checks: Vec::new(),
                 mail_checks: Vec::new(),
                 certbot_checks: Vec::new(),
+                vhost_checks: Vec::new(),
                 app_requirements: vec![install::InstallCheck {
                     name: "php-version".to_string(),
                     status: "pass".to_string(),

@@ -9,7 +9,7 @@ Date: 2026-07-06
 - Current measured line coverage is 77.46%.
 - Web controller line coverage is 76.63%.
 - Release `v0.2.7` has both Linux musl assets and `checksums.txt`.
-- `scripts/ops-harness.sh` now verifies a disposable Ubuntu 24.04 server through install, report validation, rollback, removed-package checks, and reinstall.
+- `scripts/ops-harness.sh` now verifies a disposable Ubuntu 24.04 server through install, report validation, rollback, removed-package checks, and reinstall. Current install reaches the Nginx HTTP vhost phase.
 
 ## Gaps Found
 
@@ -37,13 +37,13 @@ Date: 2026-07-06
   - expected `g7inst --version`
   - pre-install `doctor` must report `install_allowed: true`
   - local-test plan generation
-  - package install phase must finish as `packages-installed`
+  - install phase must finish as `vhost-enabled`
   - `/var/log/g7-installer/report.json` must pass JSON contract checks
   - post-install `doctor` must report `install_allowed: false`
   - `rollback --dry-run` must be available
   - `rollback --yes` must complete
   - packages absent before install must be absent after rollback
-  - installer metadata files and installer-owned directories must be removed after rollback
+  - installer metadata files, Nginx vhost files, and installer-owned webroot smoke files must be removed after rollback
   - post-rollback `doctor` must report `install_allowed: true`
   - optional second install/rollback cycle validates repeatability
 

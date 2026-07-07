@@ -164,6 +164,7 @@ fn validate_reset_path(path: &str) -> Result<()> {
     if allowed
         .iter()
         .any(|prefix| path == *prefix || path.starts_with(&format!("{prefix}/")))
+        || is_safe_site_root(path)
     {
         Ok(())
     } else {
@@ -171,6 +172,32 @@ fn validate_reset_path(path: &str) -> Result<()> {
             path: path.to_string(),
         })
     }
+}
+
+fn is_safe_site_root(path: &str) -> bool {
+    let parts = Path::new(path)
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+
+    if parts.len() >= 4
+        && parts[1] == "home"
+        && (parts[3] == "public_html" || parts[3] == "www")
+        && valid_path_segment(&parts[2])
+    {
+        return true;
+    }
+
+    parts.len() >= 4 && parts[1] == "var" && parts[2] == "www" && valid_path_segment(&parts[3])
+}
+
+fn valid_path_segment(value: &str) -> bool {
+    !value.is_empty()
+        && value != "."
+        && value != ".."
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.')
 }
 
 fn path_depth(path: &str) -> usize {
@@ -237,6 +264,36 @@ mod tests {
 
         assert!(report.removed.contains(&"/usr/local/bin/g7".to_string()));
         assert!(!fs_root.join("usr/local/bin/g7").exists());
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn reset_allows_only_scoped_site_roots() -> std::result::Result<(), Box<dyn std::error::Error>>
+    {
+        let fs_root = create_temp_fs_root()?;
+        fs::create_dir_all(fs_root.join("var/lib/g7-installer"))?;
+        fs::create_dir_all(fs_root.join("home/g7/public_html/public"))?;
+        fs::write(fs_root.join("home/g7/public_html/public/index.php"), "ok")?;
+
+        let owned = OwnedFiles {
+            version: 1,
+            files: vec![
+                "/home/g7/public_html/public/index.php".to_string(),
+                "/home/g7/public_html/public".to_string(),
+                "/home/g7/public_html".to_string(),
+            ],
+        };
+        write_owned_files(&fs_root.join(strip_root(OWNED_FILES_PATH)), &owned)?;
+
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success("0\n"));
+        let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
+        let report =
+            run_with_probe_and_paths(true, false, &probe, &ResetPaths::with_root(&fs_root))?;
+
+        assert!(report.removed.contains(&"/home/g7/public_html".to_string()));
+        assert!(!fs_root.join("home/g7/public_html").exists());
         fs::remove_dir_all(fs_root)?;
         Ok(())
     }

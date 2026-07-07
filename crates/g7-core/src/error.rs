@@ -149,7 +149,7 @@ pub enum Error {
     #[diagnostic(
         code(g7::rollback::blocked),
         help(
-            "Rollback only runs immediately after the package install phase and before app/site content is created."
+            "Rollback only runs before app/database/certificate content is created and when web-root contents are installer-owned."
         )
     )]
     RollbackBlocked { reason: String },

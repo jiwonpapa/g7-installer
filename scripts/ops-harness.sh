@@ -126,14 +126,14 @@ path = sys.argv[1]
 with open(path, "r", encoding="utf-8") as handle:
     data = json.load(handle)
 
-if data.get("phase") != "packages-installed":
+if data.get("phase") != "vhost-enabled":
     raise SystemExit(f"unexpected phase: {data.get('phase')}")
 
 baseline = data.get("preinstall_package_checks") or []
 if not baseline:
     raise SystemExit("missing preinstall_package_checks")
 
-for section in ("package_checks", "service_checks", "port_checks"):
+for section in ("package_checks", "service_checks", "port_checks", "vhost_checks"):
     checks = data.get(section) or []
     failed = [f"{item.get('name')}: {item.get('message')}" for item in checks if item.get("status") != "pass"]
     if failed:
@@ -213,7 +213,7 @@ run_install_cycle() {
 
   log "${cycle}: install"
   install_output="$(sudo_capture "${cycle}-install" "${remote_bin_q} install --local-test --domain ${domain_q}")"
-  assert_contains "${cycle} install" "${install_output}" "phase: packages-installed"
+  assert_contains "${cycle} install" "${install_output}" "phase: vhost-enabled"
 
   report_json="$(sudo_capture "${cycle}-report-json" "cat /var/log/g7-installer/report.json")"
   printf '%s\n' "${report_json}" >"${report_path}"

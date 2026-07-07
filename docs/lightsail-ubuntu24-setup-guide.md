@@ -8,19 +8,25 @@
 
 이미 서버, 고정 IP, 도메인 A 레코드가 준비됐으면 바로 진행합니다.
 
-1. SSH 터널을 엽니다.
+1. Lightsail 스냅샷을 생성합니다.
+
+```text
+Lightsail -> 인스턴스 -> 스냅샷 -> 스냅샷 생성
+```
+
+2. SSH 터널을 엽니다.
 
 ```bash
 ssh -L 7717:127.0.0.1:7717 g7installer
 ```
 
-2. 서버 안에서 설치 UI를 시작합니다.
+3. 서버 안에서 설치 UI를 시작합니다.
 
 ```bash
 sudo g7inst setup --domain g7devops.com
 ```
 
-3. 브라우저에서 token URL을 엽니다.
+4. 브라우저에서 token URL을 엽니다.
 
 ```text
 http://127.0.0.1:7717/?token=...
@@ -183,7 +189,18 @@ g7inst doctor
 sudo tail -120 /var/log/g7-lightsail-bootstrap.log
 ```
 
-## 9. 설치 웹 UI 열기
+## 9. 설치 전 스냅샷
+
+위험 작업 전 복구 지점을 먼저 만듭니다.
+
+1. Lightsail 콘솔에서 인스턴스를 선택합니다.
+2. `스냅샷` 탭을 엽니다.
+3. `스냅샷 생성`을 누릅니다.
+4. 이름 예시: `before-g7inst-YYYYMMDD-HHMM`
+
+`g7inst rollback`은 installer가 만든 패키지/vhost/webroot 흔적만 되돌립니다. 운영 파일이 섞이면 차단합니다. 서버 전체 복구는 Lightsail 스냅샷으로 합니다.
+
+## 10. 설치 웹 UI 열기
 
 Mac:
 
@@ -217,7 +234,16 @@ http://127.0.0.1:7717/?token=...
 
 설치 중에는 이 SSH 터널 창을 닫지 않습니다.
 
-## 10. 다른 Ubuntu VPS에서 쓰기
+설치 완료 후 확인:
+
+```bash
+curl -I http://example.com
+sudo cat /var/log/g7-installer/report.json
+```
+
+리포트 단계가 `vhost-enabled`이면 Nginx HTTP vhost까지 적용된 상태입니다.
+
+## 11. 다른 Ubuntu VPS에서 쓰기
 
 Lightsail이 아니어도 Ubuntu 24.04 서버면 같은 초기 스크립트를 쓸 수 있습니다.
 
@@ -232,7 +258,7 @@ sudo bash "$tmp"
 rm -f "$tmp"
 ```
 
-## 11. 메일 보내기만 쓸 때
+## 12. 메일 보내기만 쓸 때
 
 메일 수신은 하지 않습니다. 인바운드 25번은 열지 않습니다.
 
@@ -245,7 +271,7 @@ rm -f "$tmp"
 
 AWS에서 outbound 25 제한이 있으면 해제 요청이 필요합니다.
 
-## 12. 용어 설명
+## 13. 용어 설명
 
 | 용어 | 뜻 |
 | --- | --- |

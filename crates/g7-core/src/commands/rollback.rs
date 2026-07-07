@@ -1,10 +1,10 @@
 //! Early package rollback for G7 Installer.
 //!
-//! Safety boundary: this command only reverses the package-install phase on a
-//! fresh setup. It refuses to run when app content, vhost/database/certificate
-//! steps, non-empty web roots, missing package baseline data, or pre-existing
-//! packages are detected. Operating sites must be restored from normal backups,
-//! not by this installer rollback.
+//! Safety boundary: this command reverses package install plus installer-owned
+//! Nginx vhost/web-root smoke files on a fresh setup. It refuses to run when
+//! app/database/certificate steps, unowned web-root content, missing package
+//! baseline data, or pre-existing packages are detected. Operating sites must be
+//! restored from normal backups, not by this installer rollback.
 
 use std::fs;
 use std::io;
@@ -12,19 +12,21 @@ use std::path::{Path, PathBuf};
 
 use crate::commands::reset::{self, ResetPaths, ResetReport};
 use crate::{Error, Result};
+use g7_state::owned_files::{OWNED_FILES_PATH, read_owned_files};
 use g7_state::state::{InstallerPhase, STATE_PATH, read_state_file};
 use g7_system::SystemProbe;
 use g7_system::command::{CommandOutput, CommandRunner};
 use g7_system::package::PackageStatus;
 
 const REPORT_PATH: &str = "/var/log/g7-installer/report.json";
-const REQUIRED_PHASE: &str = InstallerPhase::PackagesInstalled.as_str();
+const SAFE_ROLLBACK_PHASES: [&str; 3] = [
+    InstallerPhase::PackagesInstalled.as_str(),
+    InstallerPhase::VhostEnabled.as_str(),
+    InstallerPhase::VhostFailed.as_str(),
+];
 const SAFE_BASELINE_STATUS: &str = "not-installed";
-const APP_MUTATION_STEPS: [&str; 11] = [
-    "web-root-created",
+const APP_MUTATION_STEPS: [&str; 8] = [
     "web-root-populated",
-    "vhost-written",
-    "vhost-enabled",
     "php-fpm-config-written",
     "database-created",
     "database-user-created",
@@ -124,7 +126,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     let packages = rollback_packages(&baseline);
     let services = check_names(&report, "service_checks");
     let service_plan = planned_service_actions(&services, &baseline, &report)?;
-    require_web_root_unused(probe, report_string(&report, "web_root").as_deref())?;
+    require_web_root_owned_only(paths, report_string(&report, "web_root").as_deref())?;
 
     let metadata_reset = reset::run_with_probe_and_paths(true, true, probe, &paths.reset_paths())?;
 
@@ -195,11 +197,14 @@ fn require_root<R: CommandRunner>(probe: &SystemProbe<R>) -> Result<()> {
 }
 
 fn require_safe_phase(phase: &str) -> Result<()> {
-    if phase == REQUIRED_PHASE {
+    if SAFE_ROLLBACK_PHASES.contains(&phase) {
         Ok(())
     } else {
         Err(Error::RollbackBlocked {
-            reason: format!("state phase is `{phase}`, expected `{REQUIRED_PHASE}`"),
+            reason: format!(
+                "state phase is `{phase}`, expected one of `{}`",
+                SAFE_ROLLBACK_PHASES.join(", ")
+            ),
         })
     }
 }
@@ -237,9 +242,12 @@ fn read_report(paths: &RollbackPaths) -> Result<serde_json::Value> {
 
 fn require_report_phase(report: &serde_json::Value) -> Result<()> {
     match report_string(report, "phase").as_deref() {
-        Some(REQUIRED_PHASE) => Ok(()),
+        Some(phase) if SAFE_ROLLBACK_PHASES.contains(&phase) => Ok(()),
         Some(phase) => Err(Error::RollbackBlocked {
-            reason: format!("report phase is `{phase}`, expected `{REQUIRED_PHASE}`"),
+            reason: format!(
+                "report phase is `{phase}`, expected one of `{}`",
+                SAFE_ROLLBACK_PHASES.join(", ")
+            ),
         }),
         None => Err(Error::RollbackBlocked {
             reason: "report phase is missing".to_string(),
@@ -384,10 +392,7 @@ fn package_baseline_status<'a>(baseline: &'a [ReportCheck], package: &str) -> Op
         .map(|check| check.status.as_str())
 }
 
-fn require_web_root_unused<R: CommandRunner>(
-    probe: &SystemProbe<R>,
-    web_root: Option<&str>,
-) -> Result<()> {
+fn require_web_root_owned_only(paths: &RollbackPaths, web_root: Option<&str>) -> Result<()> {
     let Some(web_root) = web_root else {
         return Ok(());
     };
@@ -397,22 +402,99 @@ fn require_web_root_unused<R: CommandRunner>(
             reason: format!("unsafe web root path in report: {web_root}"),
         });
     }
-    if !probe.path_exists(path) {
+    let target = paths.resolve(web_root);
+    if !target.exists() {
         return Ok(());
     }
 
-    let entries = probe
-        .directory_entries(path)
-        .map_err(|err| Error::RollbackBlocked {
-            reason: format!("failed to inspect web root `{web_root}`: {err}"),
-        })?;
-    if entries.is_empty() {
-        Ok(())
-    } else {
-        Err(Error::RollbackBlocked {
-            reason: format!("web root is not empty: {web_root}"),
-        })
+    let owned_path = paths.resolve(OWNED_FILES_PATH);
+    let owned_files = read_owned_files(&owned_path).map_err(|source| Error::FileReadFailed {
+        path: OWNED_FILES_PATH.to_string(),
+        source,
+    })?;
+    let owned = owned_files.files;
+    let mut unowned = Vec::new();
+    collect_unowned_children(paths, &target, &owned, &mut unowned)?;
+
+    if unowned.is_empty() {
+        return Ok(());
     }
+
+    Err(Error::RollbackBlocked {
+        reason: format!(
+            "web root contains unowned content: {}",
+            unowned.into_iter().take(5).collect::<Vec<_>>().join(", ")
+        ),
+    })
+}
+
+fn collect_unowned_children(
+    paths: &RollbackPaths,
+    target: &Path,
+    owned: &[String],
+    unowned: &mut Vec<String>,
+) -> Result<()> {
+    for entry in fs::read_dir(target).map_err(|source| Error::FileReadFailed {
+        path: logical_path(paths, target).unwrap_or_else(|_| target.display().to_string()),
+        source,
+    })? {
+        let entry = entry.map_err(|source| Error::FileReadFailed {
+            path: target.display().to_string(),
+            source,
+        })?;
+        collect_unowned_entries(paths, &entry.path(), owned, unowned)?;
+    }
+    Ok(())
+}
+
+fn collect_unowned_entries(
+    paths: &RollbackPaths,
+    target: &Path,
+    owned: &[String],
+    unowned: &mut Vec<String>,
+) -> Result<()> {
+    let logical = logical_path(paths, target)?;
+    if !owned.iter().any(|path| path == &logical) {
+        unowned.push(logical.clone());
+    }
+
+    let metadata = fs::symlink_metadata(target).map_err(|source| Error::FileReadFailed {
+        path: logical.clone(),
+        source,
+    })?;
+    if !metadata.is_dir() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(target).map_err(|source| Error::FileReadFailed {
+        path: logical,
+        source,
+    })? {
+        let entry = entry.map_err(|source| Error::FileReadFailed {
+            path: target.display().to_string(),
+            source,
+        })?;
+        collect_unowned_entries(paths, &entry.path(), owned, unowned)?;
+    }
+
+    Ok(())
+}
+
+fn logical_path(paths: &RollbackPaths, target: &Path) -> Result<String> {
+    if paths.root == Path::new("/") {
+        return Ok(target.display().to_string());
+    }
+
+    let stripped = target
+        .strip_prefix(&paths.root)
+        .map_err(|_| Error::RollbackBlocked {
+            reason: format!(
+                "path `{}` is outside rollback root `{}`",
+                target.display(),
+                paths.root.display()
+            ),
+        })?;
+    Ok(format!("/{}", stripped.display()))
 }
 
 fn disable_services<R: CommandRunner>(
@@ -544,7 +626,7 @@ mod tests {
     use super::{RollbackPaths, run_with_probe_and_paths};
     use crate::Error;
     use g7_state::owned_files::{OWNED_FILES_PATH, OwnedFiles, write_owned_files};
-    use g7_state::state::{InstallerState, STATE_PATH, write_state_file};
+    use g7_state::state::{InstallerState, STATE_PATH, read_state_file, write_state_file};
     use g7_system::SystemProbe;
     use g7_system::command::{CommandOutput, FakeCommandRunner};
     use std::fs;
@@ -707,8 +789,60 @@ mod tests {
 
         fs::remove_dir_all(fs_root)?;
         assert!(
-            matches!(err, Error::RollbackBlocked { reason } if reason.contains("web root is not empty"))
+            matches!(err, Error::RollbackBlocked { reason } if reason.contains("unowned content"))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn rollback_allows_vhost_phase_when_web_root_is_owned()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let fs_root = rollback_fs_root(false, true)?;
+        fs::create_dir_all(fs_root.join("home/g7/public_html/public"))?;
+        fs::write(
+            fs_root.join("home/g7/public_html/public/g7inst-ready.php"),
+            "<?php",
+        )?;
+        let mut state = read_state_file(&fs_root.join(strip_root(STATE_PATH)))?;
+        state.phase = "vhost-enabled".to_string();
+        state.completed_steps.push("vhost-written".to_string());
+        write_state_file(&fs_root.join(strip_root(STATE_PATH)), &state)?;
+        write_owned_files(
+            &fs_root.join(strip_root(OWNED_FILES_PATH)),
+            &OwnedFiles {
+                version: 1,
+                files: vec![
+                    "/etc/g7-installer/config.toml".to_string(),
+                    "/home/g7/public_html/public/g7inst-ready.php".to_string(),
+                    "/home/g7/public_html/public".to_string(),
+                    "/home/g7/public_html".to_string(),
+                    STATE_PATH.to_string(),
+                    OWNED_FILES_PATH.to_string(),
+                ],
+            },
+        )?;
+        fs::write(
+            fs_root.join("var/log/g7-installer/report.json"),
+            rollback_report_content_with_phase("vhost-enabled", true),
+        )?;
+
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success("0\n"));
+        runner.push_output(CommandOutput::success("0\n"));
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success("apt purge ok"));
+        runner.push_output(CommandOutput::failure(1, "not installed"));
+        runner.push_output(CommandOutput::failure(1, "not installed"));
+        runner.push_output(CommandOutput::success("0\n"));
+        let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
+
+        let report =
+            run_with_probe_and_paths(true, false, &probe, &RollbackPaths::with_root(&fs_root))?;
+
+        assert!(!fs_root.join("home/g7/public_html").exists());
+        assert_eq!(report.phase, "vhost-enabled");
+        fs::remove_dir_all(fs_root)?;
         Ok(())
     }
 
@@ -780,6 +914,10 @@ mod tests {
     }
 
     fn rollback_report_content(include_baseline: bool) -> String {
+        rollback_report_content_with_phase("packages-installed", include_baseline)
+    }
+
+    fn rollback_report_content_with_phase(phase: &str, include_baseline: bool) -> String {
         let baseline = if include_baseline {
             r#"
   "preinstall_package_checks": [
@@ -795,7 +933,7 @@ mod tests {
             r#"{{
   "version": 1,
   "domain": "example.com",
-  "phase": "packages-installed",
+  "phase": "{phase}",
   "web_root": "/home/g7/public_html",
 {baseline}
   "package_checks": [
