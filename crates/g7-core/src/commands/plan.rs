@@ -165,6 +165,155 @@ impl ProvisioningSetting {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MemorySizingPreset {
+    key: &'static str,
+    label: &'static str,
+    ram: &'static str,
+    swap: &'static str,
+    os_reserve: &'static str,
+    php_max_children: &'static str,
+    php_processes: &'static str,
+    php_memory_limit: &'static str,
+    php_upload_limit: &'static str,
+    opcache_memory: &'static str,
+    db_buffer_pool: &'static str,
+    db_max_connections: &'static str,
+    db_tmp_table_size: &'static str,
+    redis_maxmemory: &'static str,
+    nginx_worker_connections: &'static str,
+    note: &'static str,
+}
+
+const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
+    MemorySizingPreset {
+        key: "tier_1gb",
+        label: "1GB",
+        ram: "0.75-1.5GB",
+        swap: "2GB",
+        os_reserve: "384M",
+        php_max_children: "4",
+        php_processes: "start=1,min_spare=1,max_spare=2",
+        php_memory_limit: "192M",
+        php_upload_limit: "32M",
+        opcache_memory: "64M",
+        db_buffer_pool: "128M",
+        db_max_connections: "30",
+        db_tmp_table_size: "32M",
+        redis_maxmemory: "64M",
+        nginx_worker_connections: "512",
+        note: "single small site, Redis optional under pressure",
+    },
+    MemorySizingPreset {
+        key: "tier_2gb",
+        label: "2GB",
+        ram: "1.5-3GB",
+        swap: "2GB",
+        os_reserve: "512M",
+        php_max_children: "8",
+        php_processes: "start=2,min_spare=2,max_spare=4",
+        php_memory_limit: "256M",
+        php_upload_limit: "64M",
+        opcache_memory: "128M",
+        db_buffer_pool: "384M",
+        db_max_connections: "60",
+        db_tmp_table_size: "64M",
+        redis_maxmemory: "128M",
+        nginx_worker_connections: "1024",
+        note: "default low-cost VPS target",
+    },
+    MemorySizingPreset {
+        key: "tier_4gb",
+        label: "4GB",
+        ram: "3-6GB",
+        swap: "2GB",
+        os_reserve: "768M",
+        php_max_children: "16",
+        php_processes: "start=4,min_spare=4,max_spare=8",
+        php_memory_limit: "256M",
+        php_upload_limit: "128M",
+        opcache_memory: "192M",
+        db_buffer_pool: "1G",
+        db_max_connections: "100",
+        db_tmp_table_size: "128M",
+        redis_maxmemory: "256M",
+        nginx_worker_connections: "2048",
+        note: "small production site baseline",
+    },
+    MemorySizingPreset {
+        key: "tier_8gb",
+        label: "8GB",
+        ram: "6-12GB",
+        swap: "2GB",
+        os_reserve: "1G",
+        php_max_children: "32",
+        php_processes: "start=6,min_spare=6,max_spare=12",
+        php_memory_limit: "256M",
+        php_upload_limit: "128M",
+        opcache_memory: "256M",
+        db_buffer_pool: "2G",
+        db_max_connections: "150",
+        db_tmp_table_size: "256M",
+        redis_maxmemory: "512M",
+        nginx_worker_connections: "4096",
+        note: "busy single site or light multi-site",
+    },
+    MemorySizingPreset {
+        key: "tier_16gb",
+        label: "16GB",
+        ram: "12-24GB",
+        swap: "4GB",
+        os_reserve: "2G",
+        php_max_children: "64",
+        php_processes: "start=8,min_spare=8,max_spare=16",
+        php_memory_limit: "384M",
+        php_upload_limit: "256M",
+        opcache_memory: "512M",
+        db_buffer_pool: "5G",
+        db_max_connections: "250",
+        db_tmp_table_size: "512M",
+        redis_maxmemory: "1G",
+        nginx_worker_connections: "8192",
+        note: "high traffic single site",
+    },
+    MemorySizingPreset {
+        key: "tier_32gb",
+        label: "32GB",
+        ram: "24-32GB",
+        swap: "4GB",
+        os_reserve: "3G",
+        php_max_children: "96",
+        php_processes: "start=12,min_spare=12,max_spare=24",
+        php_memory_limit: "512M",
+        php_upload_limit: "256M",
+        opcache_memory: "768M",
+        db_buffer_pool: "10G",
+        db_max_connections: "400",
+        db_tmp_table_size: "512M",
+        redis_maxmemory: "2G",
+        nginx_worker_connections: "16384",
+        note: "large single site, cap PHP until real traffic is measured",
+    },
+    MemorySizingPreset {
+        key: "tier_gt32gb",
+        label: ">32GB",
+        ram: "32GB+",
+        swap: "4GB fixed unless dump/hibernate policy requires more",
+        os_reserve: "max(4GB, RAM*10%)",
+        php_max_children: "min(floor(php_budget/128M), 192 per site)",
+        php_processes: "start=min(16,max_children/8), spare=25%",
+        php_memory_limit: "512M default, app profile may raise",
+        php_upload_limit: "256M default, app profile may raise",
+        opcache_memory: "min(max(RAM*2%, 768M), 1G)",
+        db_buffer_pool: "min(RAM*40%, 24G) for single DB host",
+        db_max_connections: "min(800, RAM_GB*12)",
+        db_tmp_table_size: "min(1G, RAM*2%)",
+        redis_maxmemory: "min(RAM*6%, 4G)",
+        nginx_worker_connections: "min(32768, RAM_GB*512)",
+        note: "formula mode; cap per site before multi-tenant support",
+    },
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanOptions {
     pub local_test: bool,
@@ -918,6 +1067,53 @@ fn package_phase_php_extension_package(extension: &str, php_version: &str) -> Op
     Some(format!("php{php_version}-{package}"))
 }
 
+fn memory_sizing_settings() -> Vec<ProvisioningSetting> {
+    let mut settings = vec![
+        ProvisioningSetting::new("preset_tiers", "1GB, 2GB, 4GB, 8GB, 16GB, 32GB, >32GB"),
+        ProvisioningSetting::new("swap_by_ram", preset_matrix(|preset| preset.swap)),
+        ProvisioningSetting::new(
+            "os_reserve_by_ram",
+            preset_matrix(|preset| preset.os_reserve),
+        ),
+    ];
+
+    settings.extend(MEMORY_SIZING_PRESETS.iter().map(|preset| {
+        ProvisioningSetting::new(
+            preset.key,
+            format!(
+                "ram={}, swap={}, os_reserve={}, php_max_children={}, php_pool={}, php_memory_limit={}, upload={}, opcache={}, db_buffer_pool={}, db_max_connections={}, db_tmp_table_size={}, redis_maxmemory={}, nginx_worker_connections={}, note={}",
+                preset.ram,
+                preset.swap,
+                preset.os_reserve,
+                preset.php_max_children,
+                preset.php_processes,
+                preset.php_memory_limit,
+                preset.php_upload_limit,
+                preset.opcache_memory,
+                preset.db_buffer_pool,
+                preset.db_max_connections,
+                preset.db_tmp_table_size,
+                preset.redis_maxmemory,
+                preset.nginx_worker_connections,
+                preset.note
+            ),
+        )
+    }));
+
+    settings
+}
+
+fn preset_matrix<F>(value: F) -> String
+where
+    F: Fn(&MemorySizingPreset) -> &'static str,
+{
+    MEMORY_SIZING_PRESETS
+        .iter()
+        .map(|preset| format!("{}={}", preset.label, value(preset)))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 struct ProvisioningInput<'a> {
     domain: &'a str,
     app_profile: &'a str,
@@ -939,28 +1135,30 @@ struct ProvisioningInput<'a> {
 }
 
 fn provisioning_sections(input: ProvisioningInput<'_>) -> Vec<ProvisioningSection> {
+    let mut server_sizing_settings = vec![
+        ProvisioningSetting::new("size_probe", "RAM, vCPU, disk, swap 상태를 먼저 감지"),
+        ProvisioningSetting::new(
+            "tier_selection",
+            "MemTotal GiB를 가장 가까운 보수 등급으로 내림 선택하고, 32GB 초과는 공식 적용",
+        ),
+        ProvisioningSetting::new(
+            "memory_budget",
+            "OS reserve, DB, Redis, PHP-FPM, web server 순서로 메모리 예산 분배",
+        ),
+        ProvisioningSetting::new(
+            "profile_floor",
+            "1GB RAM / 2 vCPU / 40GB SSD 기준에서도 과부하를 피하는 값 우선",
+        ),
+    ];
+    server_sizing_settings.extend(memory_sizing_settings());
+
     let mut sections = vec![
         ProvisioningSection {
             name: "server-sizing",
             title: "서버 사양 기반 튜닝",
-            summary:
-                "적용 시점에 RAM/CPU/디스크를 감지해 1GB/2GB급 VPS에 맞는 보수적 값을 선택합니다."
-                    .to_string(),
-            settings: vec![
-                ProvisioningSetting::new("size_probe", "RAM, vCPU, disk, swap 상태를 먼저 감지"),
-                ProvisioningSetting::new(
-                    "swap",
-                    "1GB/2GB Lightsail급 서버는 2GB swap을 기본 후보로 계산",
-                ),
-                ProvisioningSetting::new(
-                    "memory_budget",
-                    "OS reserve, DB, Redis, PHP-FPM 순서로 메모리 예산 분배",
-                ),
-                ProvisioningSetting::new(
-                    "profile_floor",
-                    "1GB RAM / 2 vCPU / 40GB SSD 기준에서도 과부하를 피하는 값 우선",
-                ),
-            ],
+            summary: "1/2/4/8/16/32GB 프리셋과 32GB 초과 공식으로 메모리 중심 값을 선택합니다."
+                .to_string(),
+            settings: server_sizing_settings,
         },
         ProvisioningSection {
             name: "web-server",
@@ -984,6 +1182,10 @@ fn provisioning_sections(input: ProvisioningInput<'_>) -> Vec<ProvisioningSectio
                 ),
                 ProvisioningSetting::new("rewrite_policy", rewrite_policy(input.app_profile)),
                 ProvisioningSetting::new(
+                    "worker_connections_by_ram",
+                    preset_matrix(|preset| preset.nginx_worker_connections),
+                ),
+                ProvisioningSetting::new(
                     "security_headers",
                     "HTTPS 적용 후 HSTS, nosniff, frame deny, referrer policy 후보 적용",
                 ),
@@ -1003,17 +1205,30 @@ fn provisioning_sections(input: ProvisioningInput<'_>) -> Vec<ProvisioningSectio
                     "dynamic; max_children은 감지 RAM과 vCPU로 계산",
                 ),
                 ProvisioningSetting::new(
-                    "max_children",
-                    "1GB: 4-6, 2GB: 8-12 범위에서 메모리 예산 기반 산정",
+                    "max_children_by_ram",
+                    preset_matrix(|preset| preset.php_max_children),
                 ),
-                ProvisioningSetting::new("memory_limit", "256M 기본 후보"),
                 ProvisioningSetting::new(
-                    "upload_max_filesize",
-                    "64M 기본 후보, 앱 프로필별 상향 가능",
+                    "process_pool_by_ram",
+                    preset_matrix(|preset| preset.php_processes),
                 ),
-                ProvisioningSetting::new("post_max_size", "64M 기본 후보"),
+                ProvisioningSetting::new(
+                    "memory_limit_by_ram",
+                    preset_matrix(|preset| preset.php_memory_limit),
+                ),
+                ProvisioningSetting::new(
+                    "upload_max_filesize_by_ram",
+                    preset_matrix(|preset| preset.php_upload_limit),
+                ),
+                ProvisioningSetting::new(
+                    "post_max_size_by_ram",
+                    preset_matrix(|preset| preset.php_upload_limit),
+                ),
                 ProvisioningSetting::new("max_execution_time", "120초 기본 후보"),
-                ProvisioningSetting::new("opcache", "1GB: 64M, 2GB: 128M 후보로 적용"),
+                ProvisioningSetting::new(
+                    "opcache_memory_by_ram",
+                    preset_matrix(|preset| preset.opcache_memory),
+                ),
             ],
         },
         ProvisioningSection {
@@ -1031,7 +1246,18 @@ fn provisioning_sections(input: ProvisioningInput<'_>) -> Vec<ProvisioningSectio
                     "무작위 생성 후 root-only 파일에 저장, 화면/로그 출력 금지",
                 ),
                 ProvisioningSetting::new("bind", "127.0.0.1 또는 unix socket 전용"),
-                ProvisioningSetting::new("buffer_pool", "1GB: 128-256M, 2GB: 384-512M 후보로 산정"),
+                ProvisioningSetting::new(
+                    "buffer_pool_by_ram",
+                    preset_matrix(|preset| preset.db_buffer_pool),
+                ),
+                ProvisioningSetting::new(
+                    "max_connections_by_ram",
+                    preset_matrix(|preset| preset.db_max_connections),
+                ),
+                ProvisioningSetting::new(
+                    "tmp_table_size_by_ram",
+                    preset_matrix(|preset| preset.db_tmp_table_size),
+                ),
                 ProvisioningSetting::new(
                     "backup_note",
                     "앱 설치 후 DB 백업/복구 경로를 리포트에 표시",
@@ -1090,7 +1316,10 @@ fn provisioning_sections(input: ProvisioningInput<'_>) -> Vec<ProvisioningSectio
             settings: vec![
                 ProvisioningSetting::new("bind", "127.0.0.1/::1 또는 unix socket 전용"),
                 ProvisioningSetting::new("protected_mode", "yes"),
-                ProvisioningSetting::new("maxmemory", "1GB: 64M, 2GB: 128M 후보로 산정"),
+                ProvisioningSetting::new(
+                    "maxmemory_by_ram",
+                    preset_matrix(|preset| preset.redis_maxmemory),
+                ),
                 ProvisioningSetting::new("policy", "allkeys-lru 기본 후보"),
             ],
         });
@@ -1639,6 +1868,62 @@ mod tests {
                 .iter()
                 .any(|condition| condition.reason.contains("public IP"))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn plan_includes_memory_sizing_presets() -> std::result::Result<(), Box<dyn std::error::Error>>
+    {
+        let plan = build("example.com".to_string())?;
+        let sizing = plan
+            .provisioning
+            .iter()
+            .find(|section| section.name == "server-sizing")
+            .expect("server sizing section");
+        let php = plan
+            .provisioning
+            .iter()
+            .find(|section| section.name == "php-runtime")
+            .expect("php runtime section");
+        let database = plan
+            .provisioning
+            .iter()
+            .find(|section| section.name == "database")
+            .expect("database section");
+        let redis = plan
+            .provisioning
+            .iter()
+            .find(|section| section.name == "redis")
+            .expect("redis section");
+
+        assert!(sizing.summary.contains("1/2/4/8/16/32GB"));
+        assert!(sizing.settings.iter().any(|setting| {
+            setting.key == "tier_32gb"
+                && setting.value.contains("db_buffer_pool=10G")
+                && setting.value.contains("php_max_children=96")
+        }));
+        assert!(sizing.settings.iter().any(|setting| {
+            setting.key == "tier_gt32gb"
+                && setting.value.contains("db_buffer_pool=min(RAM*40%, 24G)")
+                && setting.value.contains("redis_maxmemory=min(RAM*6%, 4G)")
+        }));
+        assert!(php.settings.iter().any(|setting| {
+            setting.key == "max_children_by_ram"
+                && setting.value.contains("32GB=96")
+                && setting
+                    .value
+                    .contains(">32GB=min(floor(php_budget/128M), 192 per site)")
+        }));
+        assert!(database.settings.iter().any(|setting| {
+            setting.key == "buffer_pool_by_ram"
+                && setting.value.contains("16GB=5G")
+                && setting.value.contains("32GB=10G")
+        }));
+        assert!(redis.settings.iter().any(|setting| {
+            setting.key == "maxmemory_by_ram"
+                && setting.value.contains("32GB=2G")
+                && setting.value.contains(">32GB=min(RAM*6%, 4G)")
+        }));
         Ok(())
     }
 

@@ -696,8 +696,11 @@ mod tests {
         assert!(output.contains("rollback: true"));
         assert!(output.contains("Provisioning plan:"));
         assert!(output.contains("- PHP 런타임 설정 [php-runtime]:"));
-        assert!(output.contains("  - max_children: 1GB: 4-6, 2GB: 8-12"));
+        assert!(output.contains("  - max_children_by_ram: 1GB=4, 2GB=8"));
+        assert!(output.contains("32GB=96"));
+        assert!(output.contains(">32GB=min(floor(php_budget/128M), 192 per site)"));
         assert!(output.contains("- DB 생성 및 계정 설정 [database]:"));
+        assert!(output.contains("  - buffer_pool_by_ram: 1GB=128M"));
         assert!(output.contains("  - password_policy: 무작위 생성 후 root-only"));
         assert!(output.contains("- Apache is running."));
         Ok(())

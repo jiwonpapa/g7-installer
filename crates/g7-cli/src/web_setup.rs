@@ -2180,6 +2180,13 @@ mod tests {
                 .any(|section| section.name == "php-runtime")
         );
         assert!(api.provisioning.iter().any(|section| {
+            section.name == "server-sizing"
+                && section
+                    .settings
+                    .iter()
+                    .any(|setting| setting.key == "tier_gt32gb")
+        }));
+        assert!(api.provisioning.iter().any(|section| {
             section
                 .settings
                 .iter()
