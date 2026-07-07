@@ -19,7 +19,7 @@
           <div>
             <p class="text-sm font-semibold text-primary">G7 Installer</p>
             <h1 class="mt-1 text-2xl font-semibold tracking-normal sm:text-3xl">G7 설치 마법사</h1>
-            <p class="mt-2 text-sm text-base-content/60">서버 점검부터 vhost 검증 리포트까지 단계별로 진행합니다.</p>
+            <p class="mt-2 text-sm text-base-content/60">서버 점검부터 도메인 연결 검증 리포트까지 단계별로 진행합니다.</p>
           </div>
         </div>
         <div class="command-bar">
@@ -33,13 +33,13 @@
       </header>
 
       <section class="system-banner">
-        <span>현재 버전은 apt 패키지 설치, 기본 서비스/포트 검증, Nginx HTTP vhost 적용까지 수행합니다. DB 계정 생성, 앱 배치, 인증서 발급은 다음 단계입니다.</span>
+        <span>현재 버전은 apt 패키지 설치, 기본 서비스/포트 검증, Nginx 도메인 연결 설정까지 수행합니다. DB 계정 생성, 앱 배치, 인증서 발급은 다음 단계입니다.</span>
       </section>
 
       <section class="app-workspace">
         <nav class="wizard-progress" aria-label="설치 단계">
           <ul class="steps steps-horizontal w-full lg:steps-vertical">
-            <li class="step step-primary" data-progress="login"><span class="step-copy" data-ui-icon="log-in">서버 로그인</span></li>
+            <li class="step step-primary" data-progress="login"><span class="step-copy" data-ui-icon="log-in">접속 확인</span></li>
             <li class="step" data-progress="check"><span class="step-copy" data-ui-icon="shield-check">서버 점검</span></li>
             <li class="step" data-progress="options"><span class="step-copy" data-ui-icon="sliders-horizontal">설치 방식</span></li>
             <li class="step" data-progress="plan"><span class="step-copy" data-ui-icon="clipboard-list">사양 확정</span></li>
@@ -54,39 +54,40 @@
             <div class="section-heading">
               <div>
                 <span class="step-eyebrow">1단계</span>
-                <h2>서버 계정으로 로그인</h2>
-                <p>서버 설치 작업은 root 또는 sudo 권한이 있는 서버 계정으로만 진행합니다.</p>
+                <h2>
+                  접속 확인
+                  <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="접속 확인 도움말">?</button>
+                    <span class="help-text">터미널에 나온 접속 확인 주소로 들어오면 이 브라우저만 설치 화면을 사용할 수 있습니다.</span>
+                  </span>
+                </h2>
+                <p>터미널에 출력된 접속 확인 주소로 접속하면 설치 권한 확인이 끝납니다.</p>
               </div>
-              <span class="badge badge-outline">서버 계정</span>
+              <span class="badge badge-outline">접속 확인됨</span>
             </div>
 
             <div id="login-status" class="mt-5 hidden"></div>
 
-            <form id="login-form" class="mt-5 grid gap-4 sm:grid-cols-2">
-              <label class="field">
-                <span class="field-label">
-                  서버 계정
-                  <span class="help-wrap">
-                    <button class="help-circle" type="button" aria-label="서버 계정 도움말">?</button>
-                    <span class="help-text">Ubuntu에 실제로 존재하는 계정입니다. root 또는 sudo 권한 계정을 사용하세요.</span>
-                  </span>
-                </span>
-                <input id="login-username" class="input input-bordered w-full" autocomplete="username" value="root" />
-              </label>
-              <label class="field">
-                <span class="field-label">
-                  비밀번호
-                  <span class="help-wrap">
-                    <button class="help-circle" type="button" aria-label="비밀번호 도움말">?</button>
-                    <span class="help-text">서버 계정 비밀번호입니다. 비밀번호가 없다면 서버 터미널에서 sudo passwd root 또는 sudo passwd 계정명을 실행하세요.</span>
-                  </span>
-                </span>
-                <input id="login-password" class="input input-bordered w-full" type="password" autocomplete="current-password" placeholder="서버 계정 비밀번호" />
-              </label>
-              <div class="wizard-actions sm:col-span-2">
-                <button class="btn btn-primary icon-button" type="submit" data-icon="log-in">로그인하고 계속</button>
+            <div class="result-list mt-5">
+              <div class="result-row" data-status="pass">
+                <div class="result-copy">
+                  <span>서버 비밀번호 입력 없음</span>
+                  <p><code>sudo g7inst setup</code>으로 이미 설치 컨트롤러가 실행 중입니다.</p>
+                </div>
+                <strong>확인</strong>
               </div>
-            </form>
+              <div class="result-row" data-status="pass">
+                <div class="result-copy">
+                  <span>외부 포트 미개방</span>
+                  <p>7717 포트는 SSH 터널로만 접근합니다. 방화벽에는 열지 않습니다.</p>
+                </div>
+                <strong>확인</strong>
+              </div>
+            </div>
+
+            <div class="wizard-actions">
+              <button class="btn btn-primary icon-button" type="button" data-icon="chevron-right" data-next="check">서버 점검으로 이동</button>
+            </div>
           </section>
 
           <section class="view-panel" data-view="check">
@@ -104,18 +105,24 @@
             </div>
             <section class="recovery-panel mt-5" data-recovery-panel hidden>
               <div>
-                <h3>복구 / 초기화</h3>
+                <h3>
+                  문제 해결 / 초기화
+                  <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="초기화 도움말">?</button>
+                    <span class="help-text">설치가 중간에 멈췄을 때만 사용합니다. 서버 전체 복구는 Lightsail 스냅샷이 기준입니다.</span>
+                  </span>
+                </h3>
                 <p data-recovery-message>설치기 소유 흔적을 확인하는 중입니다.</p>
                 <ul data-recovery-paths></ul>
               </div>
               <div class="recovery-actions">
                 <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="refresh-cw" data-recovery-refresh>복구 상태 새로고침</button>
-                <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="rotate-ccw" data-recovery-action="reset">메타데이터 리셋</button>
+                <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="rotate-ccw" data-recovery-action="reset">설치 기록만 정리</button>
                 <button class="btn btn-sm btn-error icon-button" type="button" data-icon="undo-2" data-recovery-action="rollback">패키지 되돌리기</button>
               </div>
             </section>
             <div class="wizard-actions">
-              <button class="btn btn-ghost icon-button" type="button" data-icon="chevron-left" data-next="login">이전</button>
+              <button class="btn btn-ghost icon-button" type="button" data-icon="chevron-left" data-next="login">접속 확인</button>
               <button id="check-next-button" class="btn btn-primary icon-button" type="button" data-icon="chevron-right" data-next="options" disabled>점검 통과 후 다음</button>
             </div>
           </section>
@@ -152,13 +159,6 @@
                     <span>
                       <strong>Apache 호환</strong>
                       <small>Apache + MySQL + Redis</small>
-                    </span>
-                  </label>
-                  <label class="template-card">
-                    <input class="radio radio-primary" type="radio" name="install_template" value="local" />
-                    <span>
-                      <strong>로컬 테스트</strong>
-                      <small>g7-test.local 기준</small>
                     </span>
                   </label>
                 </div>
@@ -213,29 +213,18 @@
                     사이트 계정
                     <span class="help-wrap">
                     <button class="help-circle" type="button" aria-label="사이트 계정 도움말">?</button>
-                    <span class="help-text">웹파일 소유자로 사용할 Linux 계정입니다. 기본값 g7을 권장합니다.</span>
+                    <span class="help-text">웹파일 소유자로 사용할 Linux 계정입니다. FTP/SFTP로 파일을 올릴 때도 이 계정 기준으로 맞춥니다. 기본값 g7을 권장합니다.</span>
                   </span>
                   </span>
                   <input name="site_user" class="input input-bordered w-full" value="g7" />
                 </label>
               </div>
 
+              <input type="hidden" name="deployment_mode" id="deployment-mode" value="public" />
+
               <details class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-100">
                 <summary class="collapse-title font-semibold">상세 설정</summary>
                 <div class="collapse-content grid gap-4 md:grid-cols-2">
-                  <label class="field">
-                    <span class="field-label">
-                      배포 모드
-                      <span class="help-wrap">
-                    <button class="help-circle" type="button" aria-label="배포 모드 도움말">?</button>
-                    <span class="help-text">실제 도메인은 공개 서버용입니다. 로컬 테스트는 DNS/인증서 확인을 건너뜁니다.</span>
-                  </span>
-                    </span>
-                    <select name="deployment_mode" id="deployment-mode" class="select select-bordered w-full">
-                      <option value="public">실제 도메인</option>
-                      <option value="local-test">로컬 테스트</option>
-                    </select>
-                  </label>
                   <label class="field">
                     <span class="field-label">
                       웹서버
@@ -305,7 +294,13 @@
                     </select>
                   </label>
                   <label class="field">
-                    <span class="field-label">직접 입력 웹루트</span>
+                    <span class="field-label">
+                      직접 입력 웹루트
+                      <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="직접 입력 웹루트 도움말">?</button>
+                    <span class="help-text">웹루트 방식을 직접 입력으로 바꿨을 때만 사용합니다. 일반 설치는 기본 웹루트를 그대로 둡니다.</span>
+                  </span>
+                    </span>
                     <input name="web_root" id="custom-web-root" class="input input-bordered w-full" placeholder="/srv/www/g7" disabled />
                   </label>
                   <label class="field">
@@ -351,19 +346,43 @@
                     </select>
                   </label>
                   <label class="field">
-                    <span class="field-label">SMTP 서버</span>
+                    <span class="field-label">
+                      SMTP 서버
+                      <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="SMTP 서버 도움말">?</button>
+                    <span class="help-text">외부 메일 발송 서비스를 쓸 때 입력합니다. 예: smtp.gmail.com, smtp.mailgun.org</span>
+                  </span>
+                    </span>
                     <input name="smtp_host" id="smtp-host" class="input input-bordered w-full" placeholder="smtp.example.com" disabled />
                   </label>
                   <label class="field">
-                    <span class="field-label">SMTP 포트</span>
+                    <span class="field-label">
+                      SMTP 포트
+                      <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="SMTP 포트 도움말">?</button>
+                    <span class="help-text">메일 발송 서버가 안내한 포트를 넣습니다. 보통 STARTTLS는 587, TLS는 465를 씁니다.</span>
+                  </span>
+                    </span>
                     <input name="smtp_port" id="smtp-port" class="input input-bordered w-full" type="number" value="587" min="1" max="65535" disabled />
                   </label>
                   <label class="field">
-                    <span class="field-label">보내는 주소</span>
+                    <span class="field-label">
+                      보내는 주소
+                      <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="보내는 주소 도움말">?</button>
+                    <span class="help-text">회원 인증/알림 메일의 발신자로 보일 주소입니다. 실제 도메인 메일 주소를 권장합니다.</span>
+                  </span>
+                    </span>
                     <input name="smtp_from" id="smtp-from" class="input input-bordered w-full" placeholder="no-reply@example.com" disabled />
                   </label>
                   <label class="field">
-                    <span class="field-label">SMTP 암호화</span>
+                    <span class="field-label">
+                      SMTP 암호화
+                      <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="SMTP 암호화 도움말">?</button>
+                    <span class="help-text">메일 발송 서버가 안내한 방식을 선택합니다. 일반적으로 587은 STARTTLS를 씁니다.</span>
+                  </span>
+                    </span>
                     <select name="smtp_encryption" id="smtp-encryption" class="select select-bordered w-full" disabled>
                       <option value="starttls">STARTTLS</option>
                       <option value="tls">TLS</option>
@@ -375,7 +394,7 @@
                       보안 수준
                       <span class="help-wrap">
                     <button class="help-circle" type="button" aria-label="보안 수준 도움말">?</button>
-                    <span class="help-text">standard는 안전 기본값입니다. hardened는 더 강하지만 접속 정책 변경이 커질 수 있습니다.</span>
+                    <span class="help-text">표준은 안전 기본값입니다. 강화는 더 엄격하지만 SSH 접속 정책 변경이 커질 수 있습니다.</span>
                   </span>
                     </span>
                     <select name="security_profile" class="select select-bordered w-full">
@@ -430,7 +449,7 @@
               <div>
                 <span class="step-eyebrow">5단계</span>
                 <h2>서버 설치 실행</h2>
-                <p>apt 패키지를 설치하고 Nginx vhost와 HTTP 응답까지 확인합니다.</p>
+                <p>apt 패키지를 설치하고 Nginx 도메인 연결 설정과 HTTP 응답까지 확인합니다.</p>
               </div>
               <button id="install-button" class="btn btn-error icon-button" type="button" data-icon="package-plus">서버 설치 시작</button>
             </div>
@@ -449,18 +468,24 @@
               <div class="stage-row" data-stage="config"><span>설정 파일 생성</span><strong>대기</strong></div>
               <div class="stage-row" data-stage="services"><span>서비스 시작</span><strong>대기</strong></div>
               <div class="stage-row" data-stage="ports"><span>포트 확인</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="http"><span>HTTP / vhost 검증</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="http"><span>HTTP / 도메인 연결 검증</span><strong>대기</strong></div>
               <div class="stage-row" data-stage="report"><span>리포트 생성</span><strong>대기</strong></div>
             </div>
             <section class="recovery-panel mt-5" data-recovery-panel hidden>
               <div>
-                <h3>복구 / 초기화</h3>
+                <h3>
+                  문제 해결 / 초기화
+                  <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="초기화 도움말">?</button>
+                    <span class="help-text">설치가 중간에 멈췄을 때만 사용합니다. 서버 전체 복구는 Lightsail 스냅샷이 기준입니다.</span>
+                  </span>
+                </h3>
                 <p data-recovery-message>설치기 소유 흔적을 확인하는 중입니다.</p>
                 <ul data-recovery-paths></ul>
               </div>
               <div class="recovery-actions">
                 <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="refresh-cw" data-recovery-refresh>복구 상태 새로고침</button>
-                <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="rotate-ccw" data-recovery-action="reset">메타데이터 리셋</button>
+                <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="rotate-ccw" data-recovery-action="reset">설치 기록만 정리</button>
                 <button class="btn btn-sm btn-error icon-button" type="button" data-icon="undo-2" data-recovery-action="rollback">패키지 되돌리기</button>
               </div>
             </section>
@@ -479,13 +504,13 @@
               </div>
               <div class="flex flex-wrap gap-2">
                 <button id="report-button" class="btn btn-outline icon-button" type="button" data-icon="refresh-cw">리포트 새로고침</button>
-                <button id="reset-button" class="btn btn-outline icon-button" type="button" data-icon="rotate-ccw" data-recovery-action="reset">메타데이터 리셋</button>
+                <button id="reset-button" class="btn btn-outline icon-button" type="button" data-icon="rotate-ccw" data-recovery-action="reset">설치 기록만 정리</button>
                 <button id="rollback-button" class="btn btn-error icon-button" type="button" data-icon="undo-2" data-recovery-action="rollback">패키지 되돌리기</button>
               </div>
             </div>
             <div class="action-help-grid mt-5">
               <div><strong>리포트 새로고침</strong><span>서버에 저장된 결과만 다시 불러옵니다.</span></div>
-              <div><strong>메타데이터 리셋</strong><span>installer가 만든 설정/웹루트 기록을 기준으로 정리합니다. apt 패키지는 제거하지 않습니다.</span></div>
+              <div><strong>설치 기록만 정리</strong><span>installer가 만든 설정/웹루트 기록을 기준으로 정리합니다. apt 패키지는 제거하지 않습니다.</span></div>
               <div><strong>패키지 되돌리기</strong><span>설치 직후 운영 데이터가 없을 때만 패키지 제거를 시도합니다.</span></div>
             </div>
             <div id="report-status" class="mt-5 hidden"></div>
@@ -540,7 +565,7 @@
     <dialog id="install-confirm-dialog" class="modal">
       <div class="modal-box">
         <h3 class="text-lg font-semibold">서버 설치를 시작할까요?</h3>
-        <p class="mt-2 text-sm text-base-content/60">서버 패키지 설치, Nginx vhost 생성, HTTP 검증을 진행합니다. 실제 VPS는 시작 전 Lightsail 스냅샷을 권장합니다.</p>
+        <p class="mt-2 text-sm text-base-content/60">서버 패키지 설치, Nginx 도메인 연결 설정 생성, HTTP 검증을 진행합니다. 실제 VPS는 시작 전 Lightsail 스냅샷을 권장합니다.</p>
         <div id="install-confirm-summary" class="report-card mt-5"></div>
         <div class="modal-action">
           <form method="dialog" class="flex gap-2">

@@ -8,6 +8,8 @@ cd "${ROOT_DIR}"
 
 bash -n scripts/*.sh
 scripts/web-static-smoke.sh
+scripts/setup-auth-smoke.sh
+node --check web/app.js
 cargo fmt --check
 cargo test
 cargo clippy --all-targets -- -D warnings

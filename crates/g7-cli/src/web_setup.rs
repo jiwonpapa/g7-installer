@@ -8,12 +8,10 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::{Duration, Instant};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -32,9 +30,6 @@ use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tower_http::trace::TraceLayer;
 
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
-
 pub const DEFAULT_BIND: &str = "127.0.0.1:7717";
 
 const INDEX_HTML: &str = include_str!("../../../web/index.html");
@@ -51,11 +46,6 @@ const ROLLBACK_PATH: &str = "/var/lib/g7-installer/rollback.json";
 const SESSION_COOKIE: &str = "g7inst_session";
 const CSRF_HEADER: &str = "x-g7-csrf";
 const SESSION_TTL: Duration = Duration::from_secs(30 * 60);
-const AUTH_TIMEOUT: Duration = Duration::from_secs(15);
-const AUTH_MAX_FAILURES_BEFORE_LOCK: u32 = 3;
-const AUTH_LOCKOUT: Duration = Duration::from_secs(60);
-const NOBODY_UID: u32 = 65_534;
-const NOBODY_GID: u32 = 65_534;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WebSetupConfig {
@@ -74,7 +64,6 @@ struct WebState {
     install_running: Arc<AtomicBool>,
     sessions: Arc<Mutex<HashMap<String, Session>>>,
     allowed_client_ip: Arc<Mutex<Option<IpAddr>>>,
-    loopback_bind: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -84,8 +73,6 @@ struct Session {
     username: Option<String>,
     client_ip: IpAddr,
     expires_at: Instant,
-    failed_login_attempts: u32,
-    login_blocked_until: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -113,18 +100,6 @@ struct BootstrapAuth {
     username: Option<String>,
     authenticated: bool,
     client_ip: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct LoginRequest {
-    username: String,
-    password: String,
-}
-
-#[derive(Debug, Serialize)]
-struct LoginResponse {
-    authenticated: bool,
-    username: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -361,6 +336,8 @@ struct ReportApiPayload {
 }
 
 pub async fn run(config: WebSetupConfig) -> Result<()> {
+    ensure_setup_runs_as_root()?;
+
     let bind = parse_bind(&config.bind)?;
     ensure_remote_binding_is_explicit(bind, config.allow_remote)?;
 
@@ -372,7 +349,6 @@ pub async fn run(config: WebSetupConfig) -> Result<()> {
         install_running: Arc::new(AtomicBool::new(false)),
         sessions: Arc::new(Mutex::new(HashMap::new())),
         allowed_client_ip: Arc::new(Mutex::new(None)),
-        loopback_bind: is_loopback(bind.ip()),
     };
 
     let listener = TcpListener::bind(bind)
@@ -386,7 +362,6 @@ pub async fn run(config: WebSetupConfig) -> Result<()> {
         .route("/app.js", get(app_js))
         .route("/app.css", get(app_css))
         .route("/api/bootstrap", get(bootstrap))
-        .route("/api/auth/login", post(api_login))
         .route("/api/auth/logout", post(api_logout))
         .route("/api/events", get(api_events))
         .route("/api/doctor", get(api_doctor))
@@ -424,6 +399,30 @@ fn ensure_remote_binding_is_explicit(bind: SocketAddr, allow_remote: bool) -> Re
     ))
 }
 
+fn ensure_setup_runs_as_root() -> Result<()> {
+    let output = Command::new("id")
+        .arg("-u")
+        .output()
+        .into_diagnostic()
+        .map_err(|err| miette!("failed to check current user id: {err}"))?;
+
+    if !output.status.success() {
+        return Err(miette!(
+            "failed to check current user id: id -u exited with status {}",
+            output.status
+        ));
+    }
+
+    let uid = String::from_utf8_lossy(&output.stdout);
+    if uid.trim() == "0" {
+        return Ok(());
+    }
+
+    Err(miette!(
+        "g7inst setup must be started with sudo/root.\nRun: sudo g7inst setup --domain example.com\nServer account password input is not used in the web UI."
+    ))
+}
+
 fn is_loopback(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => ip.is_loopback(),
@@ -457,12 +456,11 @@ fn print_startup(addr: SocketAddr, token: &str) {
     println!("Open: http://{browser_addr}/?token={token}");
     println!("Access lock: first valid token client IP only");
     println!("Remote access:");
-    println!("ssh -L {port}:127.0.0.1:{port} root@SERVER_IP");
+    println!("ssh -L {port}:127.0.0.1:{port} ubuntu@SERVER_IP");
     if !is_loopback(addr.ip()) {
-        println!("Remote bind is enabled; server account password login is disabled.");
+        println!("Remote bind is enabled; keep this port firewalled.");
     }
-    println!("If server account password is not set:");
-    println!("sudo passwd root");
+    println!("Server password: not required; this controller already runs with sudo/root.");
     println!("Stop: Ctrl+C");
 }
 
@@ -556,7 +554,7 @@ async fn bootstrap(
         domain: state.domain,
         local_test: state.local_test,
         auth: BootstrapAuth {
-            mode: "server-account",
+            mode: "sudo-token",
             status: if session.authenticated {
                 "authenticated"
             } else {
@@ -570,47 +568,6 @@ async fn bootstrap(
     };
 
     Ok((StatusCode::OK, Json(payload)))
-}
-
-async fn api_login(
-    axum::extract::State(state): axum::extract::State<WebState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
-    Json(request): Json<LoginRequest>,
-) -> std::result::Result<impl IntoResponse, ApiError> {
-    let session_id = require_session_id(&headers)?;
-    let session = require_session(&state, &headers, peer.ip())?;
-    require_csrf(&headers, &session)?;
-    require_loopback_login(&state)?;
-    require_login_allowed(&session)?;
-
-    let username = normalize_login_username(&request.username)?;
-    let password = request.password;
-    let auth_username = username.clone();
-    let auth_result = tokio::task::spawn_blocking(move || {
-        verify_server_account_password(&auth_username, &password)
-    })
-    .await
-    .map_err(|err| ApiError::bad_request(format!("authentication worker failed: {err}")))?;
-    if let Err(message) = auth_result {
-        record_login_failure(&state, &session_id)?;
-        return Err(ApiError::unauthorized(message));
-    }
-
-    if !account_can_install(&username) {
-        record_login_failure(&state, &session_id)?;
-        return Err(ApiError::forbidden(
-            "root or sudo-capable server account is required",
-        ));
-    }
-
-    mark_session_authenticated(&state, &session_id, &username)?;
-    emit_log(&state, format!("server account authenticated: {username}"));
-
-    Ok(Json(LoginResponse {
-        authenticated: true,
-        username,
-    }))
 }
 
 async fn api_logout(
@@ -1235,12 +1192,10 @@ fn create_session(state: &WebState, client_ip: IpAddr) -> std::result::Result<St
     let csrf_token = secure_token().map_err(ApiError::bad_request)?;
     let session = Session {
         csrf_token,
-        authenticated: false,
-        username: None,
+        authenticated: true,
+        username: Some("root".to_string()),
         client_ip,
         expires_at: Instant::now() + SESSION_TTL,
-        failed_login_attempts: 0,
-        login_blocked_until: None,
     };
 
     let mut sessions = state
@@ -1348,7 +1303,7 @@ fn require_authenticated_session(
     if session.authenticated {
         Ok(session)
     } else {
-        Err(ApiError::unauthorized("server account login is required"))
+        Err(ApiError::unauthorized("setup token session is required"))
     }
 }
 
@@ -1363,67 +1318,6 @@ fn require_csrf(headers: &HeaderMap, session: &Session) -> std::result::Result<(
     } else {
         Err(ApiError::forbidden("invalid CSRF token"))
     }
-}
-
-fn mark_session_authenticated(
-    state: &WebState,
-    session_id: &str,
-    username: &str,
-) -> std::result::Result<(), ApiError> {
-    let mut sessions = state
-        .sessions
-        .lock()
-        .map_err(|_| ApiError::bad_request("session store is unavailable"))?;
-    let session = sessions
-        .get_mut(session_id)
-        .ok_or_else(|| ApiError::unauthorized("setup session expired or invalid"))?;
-    session.authenticated = true;
-    session.username = Some(username.to_string());
-    session.expires_at = Instant::now() + SESSION_TTL;
-    session.failed_login_attempts = 0;
-    session.login_blocked_until = None;
-
-    Ok(())
-}
-
-fn record_login_failure(state: &WebState, session_id: &str) -> std::result::Result<(), ApiError> {
-    let mut sessions = state
-        .sessions
-        .lock()
-        .map_err(|_| ApiError::bad_request("session store is unavailable"))?;
-    let session = sessions
-        .get_mut(session_id)
-        .ok_or_else(|| ApiError::unauthorized("setup session expired or invalid"))?;
-    session.failed_login_attempts = session.failed_login_attempts.saturating_add(1);
-
-    if session.failed_login_attempts >= AUTH_MAX_FAILURES_BEFORE_LOCK {
-        session.login_blocked_until = Some(Instant::now() + AUTH_LOCKOUT);
-    }
-
-    Ok(())
-}
-
-fn require_login_allowed(session: &Session) -> std::result::Result<(), ApiError> {
-    if session
-        .login_blocked_until
-        .is_some_and(|blocked_until| blocked_until > Instant::now())
-    {
-        Err(ApiError::too_many_requests(
-            "too many failed login attempts; wait 60 seconds and retry",
-        ))
-    } else {
-        Ok(())
-    }
-}
-
-fn require_loopback_login(state: &WebState) -> std::result::Result<(), ApiError> {
-    if state.loopback_bind {
-        return Ok(());
-    }
-
-    Err(ApiError::forbidden(
-        "server account password login is disabled on remote bind; use the default 127.0.0.1 bind with an SSH tunnel",
-    ))
 }
 
 fn remove_session(state: &WebState, session_id: &str) -> std::result::Result<(), ApiError> {
@@ -1454,96 +1348,6 @@ fn secure_eq(left: &str, right: &str) -> bool {
     diff == 0
 }
 
-fn normalize_login_username(username: &str) -> std::result::Result<String, ApiError> {
-    let username = username.trim();
-    let safe = !username.is_empty()
-        && username.len() <= 32
-        && username
-            .chars()
-            .all(|char| char.is_ascii_alphanumeric() || matches!(char, '_' | '-'));
-
-    if safe {
-        Ok(username.to_string())
-    } else {
-        Err(ApiError::bad_request("invalid server account name"))
-    }
-}
-
-#[cfg(unix)]
-fn verify_server_account_password(
-    username: &str,
-    password: &str,
-) -> std::result::Result<(), String> {
-    if password.is_empty() {
-        return Err("server account password is required".to_string());
-    }
-
-    let mut child = Command::new("su")
-        .arg("--login")
-        .arg(username)
-        .arg("--command")
-        .arg("true")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .uid(NOBODY_UID)
-        .gid(NOBODY_GID)
-        .spawn()
-        .map_err(|err| format!("failed to start server account verifier: {err}"))?;
-
-    if let Some(stdin) = child.stdin.as_mut() {
-        stdin
-            .write_all(format!("{password}\n").as_bytes())
-            .map_err(|err| format!("failed to send password to verifier: {err}"))?;
-    }
-
-    let deadline = Instant::now() + AUTH_TIMEOUT;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => return Ok(()),
-            Ok(Some(_)) => return Err("server account authentication failed".to_string()),
-            Ok(None) if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err("server account authentication timed out".to_string());
-            }
-            Ok(None) => thread::sleep(Duration::from_millis(50)),
-            Err(err) => return Err(format!("failed to wait for verifier: {err}")),
-        }
-    }
-}
-
-#[cfg(not(unix))]
-fn verify_server_account_password(
-    _username: &str,
-    _password: &str,
-) -> std::result::Result<(), String> {
-    Err("server account authentication is supported on Unix-like VPS targets only".to_string())
-}
-
-fn account_can_install(username: &str) -> bool {
-    username == "root" || user_in_admin_group(username)
-}
-
-fn user_in_admin_group(username: &str) -> bool {
-    let Ok(content) = fs::read_to_string("/etc/group") else {
-        return false;
-    };
-
-    content.lines().any(|line| {
-        let mut parts = line.split(':');
-        let group = parts.next();
-        let _password = parts.next();
-        let _gid = parts.next();
-        let members = parts.next();
-
-        matches!(group, Some("sudo" | "admin"))
-            && members
-                .map(|members| members.split(',').any(|member| member == username))
-                .unwrap_or(false)
-    })
-}
-
 impl ApiError {
     fn bad_request(error: impl std::fmt::Display) -> Self {
         Self {
@@ -1560,7 +1364,7 @@ impl ApiError {
             status: StatusCode::UNAUTHORIZED,
             message: error.into(),
             hint: Some(
-                "서버 계정으로 로그인하거나 터미널에 출력된 token URL로 다시 접속하세요."
+                "터미널에 출력된 token URL로 다시 접속하세요. 서버 비밀번호 입력은 사용하지 않습니다."
                     .to_string(),
             ),
             details: Vec::new(),
@@ -1586,16 +1390,6 @@ impl ApiError {
             status: StatusCode::CONFLICT,
             message: error.into(),
             hint: Some("현재 작업이 끝난 뒤 다시 시도하세요.".to_string()),
-            details: Vec::new(),
-            retryable: true,
-        }
-    }
-
-    fn too_many_requests(error: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::TOO_MANY_REQUESTS,
-            message: error.into(),
-            hint: Some("잠시 기다린 뒤 다시 로그인하세요. 비밀번호가 없다면 sudo passwd root를 먼저 실행하세요.".to_string()),
             details: Vec::new(),
             retryable: true,
         }
@@ -1673,14 +1467,13 @@ fn emit_progress(
 #[cfg(test)]
 mod tests {
     use super::{
-        AUTH_LOCKOUT, CSRF_HEADER, DoctorCheckStatus, REPORT_PATH, SESSION_COOKIE, SESSION_TTL,
-        Session, SetupRequest, WebState, api_install_prepare, api_plan, api_recovery, api_report,
-        api_reset, api_rollback, api_status, app_css, app_js, bootstrap, browser_addr_for,
-        create_session, doctor_status_label, doctor_to_api, ensure_remote_binding_is_explicit,
+        CSRF_HEADER, DoctorCheckStatus, REPORT_PATH, SESSION_COOKIE, SESSION_TTL, Session,
+        SetupRequest, WebState, api_install_prepare, api_plan, api_recovery, api_report, api_reset,
+        api_rollback, api_status, app_css, app_js, bootstrap, browser_addr_for, create_session,
+        doctor_status_label, doctor_to_api, ensure_remote_binding_is_explicit,
         failed_doctor_details, index, install_checks_to_api, install_to_api, lock_client_ip,
-        mark_session_authenticated, normalize_login_username, options_from_request, parse_bind,
-        remove_session, require_allowed_client_ip, require_authenticated_session, require_csrf,
-        require_login_allowed, require_loopback_login, require_session, require_session_id,
+        options_from_request, parse_bind, remove_session, require_allowed_client_ip,
+        require_authenticated_session, require_csrf, require_session, require_session_id,
         rollback_to_api, secure_eq, secure_token, session_cookie,
     };
     use axum::Json;
@@ -1708,7 +1501,6 @@ mod tests {
             install_running: Arc::new(AtomicBool::new(false)),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             allowed_client_ip: Arc::new(Mutex::new(None)),
-            loopback_bind: true,
         }
     }
 
@@ -1748,8 +1540,6 @@ mod tests {
     ) -> std::result::Result<HeaderMap, Box<dyn std::error::Error>> {
         let session_id = create_session(state, IpAddr::V4(Ipv4Addr::LOCALHOST))
             .expect("session should be created");
-        mark_session_authenticated(state, &session_id, "root")
-            .expect("session should authenticate");
         let csrf = state
             .sessions
             .lock()
@@ -1805,36 +1595,6 @@ mod tests {
         assert!(secure_eq("abc", "abc"));
         assert!(!secure_eq("abc", "abcd"));
         assert!(!secure_eq("abc", "abd"));
-    }
-
-    #[test]
-    fn login_username_accepts_safe_server_account_names() {
-        assert!(matches!(
-            normalize_login_username("root").as_deref(),
-            Ok("root")
-        ));
-        assert!(matches!(
-            normalize_login_username("ubuntu-admin").as_deref(),
-            Ok("ubuntu-admin")
-        ));
-        assert!(normalize_login_username("../root").is_err());
-        assert!(normalize_login_username("").is_err());
-    }
-
-    #[test]
-    fn login_lockout_returns_rate_limit_error() {
-        let session = Session {
-            csrf_token: "csrf".to_string(),
-            authenticated: false,
-            username: None,
-            client_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
-            expires_at: Instant::now() + SESSION_TTL,
-            failed_login_attempts: 3,
-            login_blocked_until: Some(Instant::now() + AUTH_LOCKOUT),
-        };
-
-        let error = require_login_allowed(&session).expect_err("lockout should reject login");
-        assert_eq!(error.status, StatusCode::TOO_MANY_REQUESTS);
     }
 
     #[test]
@@ -1942,18 +1702,9 @@ mod tests {
         let session = require_session(&state, &headers, IpAddr::V4(Ipv4Addr::LOCALHOST))
             .expect("session should be valid");
         require_csrf(&headers, &session).expect("csrf should match");
-        assert_eq!(
-            require_authenticated_session(&state, &headers, IpAddr::V4(Ipv4Addr::LOCALHOST))
-                .expect_err("session is not authenticated")
-                .status,
-            StatusCode::UNAUTHORIZED
-        );
-
-        mark_session_authenticated(&state, &session_id, "root")
-            .expect("session should authenticate");
         let session =
             require_authenticated_session(&state, &headers, IpAddr::V4(Ipv4Addr::LOCALHOST))
-                .expect("authenticated session should pass");
+                .expect("token session should already be authenticated");
         assert_eq!(session.username.as_deref(), Some("root"));
 
         remove_session(&state, &session_id).expect("session should be removed");
@@ -1990,8 +1741,6 @@ mod tests {
             username: Some("root".to_string()),
             client_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
             expires_at: Instant::now() + SESSION_TTL,
-            failed_login_attempts: 0,
-            login_blocked_until: None,
         };
         let headers = HeaderMap::new();
         assert_eq!(
@@ -2006,19 +1755,6 @@ mod tests {
         assert_eq!(
             require_csrf(&headers, &session)
                 .expect_err("invalid csrf")
-                .status,
-            StatusCode::FORBIDDEN
-        );
-    }
-
-    #[test]
-    fn remote_bind_blocks_password_login() {
-        let mut state = test_state();
-        state.loopback_bind = false;
-
-        assert_eq!(
-            require_loopback_login(&state)
-                .expect_err("remote bind should block password login")
                 .status,
             StatusCode::FORBIDDEN
         );
@@ -2236,7 +1972,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bootstrap_reports_token_accepted_and_authenticated_states()
+    async fn bootstrap_reports_token_session_authenticated_state()
     -> std::result::Result<(), Box<dyn std::error::Error>> {
         let state = test_state();
         let session_id = create_session(&state, IpAddr::V4(Ipv4Addr::LOCALHOST))
@@ -2250,17 +1986,9 @@ mod tests {
             .expect("bootstrap should respond")
             .into_response();
         let payload = response_json(response).await;
-        assert_eq!(payload["auth"]["status"], "token-accepted");
-        assert_eq!(payload["auth"]["authenticated"], false);
-
-        mark_session_authenticated(&state, &session_id, "root")
-            .expect("session should authenticate");
-        let response = bootstrap(axum::extract::State(state), peer(), headers)
-            .await
-            .expect("bootstrap should respond")
-            .into_response();
-        let payload = response_json(response).await;
+        assert_eq!(payload["auth"]["mode"], "sudo-token");
         assert_eq!(payload["auth"]["status"], "authenticated");
+        assert_eq!(payload["auth"]["authenticated"], true);
         assert_eq!(payload["auth"]["username"], "root");
         Ok(())
     }

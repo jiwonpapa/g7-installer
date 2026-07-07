@@ -1,6 +1,6 @@
 # Lightsail Ubuntu 24.04 상세 안내
 
-`g7inst` 실서버 테스트용 Ubuntu VPS를 만드는 상세 설명입니다.
+`g7inst` 실서버 테스트용 Ubuntu VPS를 만드는 상세 설명입니다. 그누보드 설치, 관리자 설정, FTP/SFTP 업로드 정도는 해본 사용자를 기준으로 합니다.
 
 짧은 순서만 필요하면 [초보용 설치 안내](beginner-install.md)를 먼저 봅니다.
 
@@ -8,25 +8,38 @@
 
 이미 서버, 고정 IP, 도메인 A 레코드가 준비됐으면 바로 진행합니다.
 
-1. Lightsail 스냅샷을 생성합니다.
+서버 비밀번호는 필요 없습니다. `ubuntu` 계정으로 SSH 키 접속하고, `sudo g7inst setup`으로 설치 컨트롤러를 실행합니다. 웹 UI에는 서버 비밀번호를 입력하지 않습니다.
+
+1. SSH와 sudo 상태를 확인합니다.
+
+```bash
+ssh g7installer
+sudo -n true && echo "sudo OK"
+g7inst --version
+exit
+```
+
+`sudo OK`가 나오면 비밀번호 없이 설치 준비가 된 상태입니다.
+
+2. Lightsail 스냅샷을 생성합니다.
 
 ```text
 Lightsail -> 인스턴스 -> 스냅샷 -> 스냅샷 생성
 ```
 
-2. SSH 터널을 엽니다.
+3. SSH 터널을 열고 서버에 접속합니다.
 
 ```bash
 ssh -L 7717:127.0.0.1:7717 g7installer
 ```
 
-3. 서버 안에서 설치 UI를 시작합니다.
+4. 같은 터미널 창에서 설치 UI를 시작합니다.
 
 ```bash
 sudo g7inst setup --domain g7devops.com
 ```
 
-4. 브라우저에서 token URL을 엽니다.
+5. 브라우저에서 접속 확인 주소를 엽니다.
 
 ```text
 http://127.0.0.1:7717/?token=...
@@ -184,10 +197,13 @@ ssh g7installer
 설치 여부를 확인합니다.
 
 ```bash
+sudo -n true && echo "sudo OK"
 g7inst --version
 g7inst doctor
 sudo tail -120 /var/log/g7-lightsail-bootstrap.log
 ```
+
+`sudo OK`가 나오지 않으면 설치 UI를 진행하지 않습니다. 기본 Lightsail Ubuntu 이미지에서는 보통 비밀번호 없이 sudo가 됩니다.
 
 ## 9. 설치 전 스냅샷
 
@@ -198,7 +214,7 @@ sudo tail -120 /var/log/g7-lightsail-bootstrap.log
 3. `스냅샷 생성`을 누릅니다.
 4. 이름 예시: `before-g7inst-YYYYMMDD-HHMM`
 
-`g7inst rollback`은 installer가 만든 패키지/vhost/webroot 흔적만 되돌립니다. 운영 파일이 섞이면 차단합니다. 서버 전체 복구는 Lightsail 스냅샷으로 합니다.
+`g7inst rollback`은 installer가 만든 패키지/도메인 연결 설정/웹루트 흔적만 되돌립니다. 운영 파일이 섞이면 차단합니다. 서버 전체 복구는 Lightsail 스냅샷으로 합니다.
 
 ## 10. 설치 웹 UI 열기
 
@@ -226,13 +242,13 @@ ssh -L 7717:127.0.0.1:7717 g7installer
 sudo g7inst setup --domain example.com
 ```
 
-브라우저에서 token URL을 엽니다.
+브라우저에서 접속 확인 주소를 엽니다.
 
 ```text
 http://127.0.0.1:7717/?token=...
 ```
 
-설치 중에는 이 SSH 터널 창을 닫지 않습니다.
+웹 화면에서는 서버 비밀번호를 입력하지 않습니다. 접속 확인 주소로 접속하면 바로 서버 점검 단계로 진행합니다. 설치 중에는 이 SSH 터널 창을 닫지 않습니다.
 
 설치 완료 후 확인:
 
@@ -241,7 +257,7 @@ curl -I http://example.com
 sudo cat /var/log/g7-installer/report.json
 ```
 
-리포트 단계가 `vhost-enabled`이면 Nginx HTTP vhost까지 적용된 상태입니다.
+리포트 단계가 `vhost-enabled`이면 Nginx 도메인 연결 설정까지 적용된 상태입니다.
 
 ## 11. 다른 Ubuntu VPS에서 쓰기
 
@@ -281,6 +297,7 @@ AWS에서 outbound 25 제한이 있으면 해제 요청이 필요합니다.
 | DNS only | Cloudflare 프록시 없이 실제 서버 IP를 보여주는 상태 |
 | SSH 키 | 비밀번호 대신 쓰는 접속 키 |
 | SSH 터널 | 서버 내부 포트를 내 PC 브라우저로 안전하게 연결하는 방법 |
+| 접속 확인 주소 | 터미널에 출력되는 `http://127.0.0.1:7717/?token=...` 주소 |
 | 시작 스크립트 | 서버 최초 생성 때 자동 실행되는 스크립트 |
 | UFW | Ubuntu 방화벽 |
 | fail2ban | 반복 로그인 공격 차단 도구 |

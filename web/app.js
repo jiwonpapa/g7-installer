@@ -1,5 +1,5 @@
 const state = {
-  activeStep: "login",
+  activeStep: "check",
   bootstrap: null,
   socket: null,
   csrfToken: null,
@@ -102,7 +102,7 @@ const checkLabel = {
 };
 
 const errorLabel = {
-  "server account login is required": "서버 계정 로그인이 필요합니다.",
+  "setup token session is required": "접속 확인 주소 세션이 필요합니다.",
   "missing setup session cookie": "설치 세션 쿠키가 없습니다.",
   "setup session expired or invalid": "설치 세션이 만료되었거나 올바르지 않습니다.",
   "missing CSRF token": "보안 확인 토큰이 없습니다.",
@@ -132,21 +132,6 @@ const templates = {
     domain: null,
     deployment_mode: "public",
     web_server: "apache",
-    php_version: "8.3",
-    database: "mysql",
-    database_version: "apt-default",
-    redis: "enable",
-    mail_mode: "none",
-    app_package: "gnuboard7",
-    web_root_mode: "public-html",
-    www_mode: "redirect-to-root",
-    security_profile: "standard",
-    ssh_policy: "audit-only",
-  },
-  local: {
-    domain: "g7-test.local",
-    deployment_mode: "local-test",
-    web_server: "nginx",
     php_version: "8.3",
     database: "mysql",
     database_version: "apt-default",
@@ -512,8 +497,8 @@ function showStep(nextStep, options = {}) {
     setAlert(
       nodes.loginStatus,
       "warning",
-      "서버 로그인이 필요합니다",
-      "저장 리포트, 점검 상태, 설치 진행 상태를 읽으려면 root 또는 sudo 가능한 계정으로 로그인하세요.",
+      "접속 확인이 필요합니다",
+      "터미널에 출력된 접속 확인 주소로 다시 접속하세요. 서버 비밀번호 입력은 사용하지 않습니다.",
     );
     step = "login";
   }
@@ -585,7 +570,7 @@ function showStep(nextStep, options = {}) {
 
 function optionPayload() {
   const form = new FormData(nodes.optionsForm);
-  const mode = form.get("deployment_mode");
+  const mode = form.get("deployment_mode") || "public";
   const mailMode = form.get("mail_mode");
   const customWebRoot = form.get("web_root")?.trim();
 
@@ -688,7 +673,7 @@ function refreshSummary() {
 
   const payload = optionPayload();
   nodes.summaryDomain.textContent = payload.domain;
-  nodes.summaryMode.textContent = payload.local_test ? "로컬 테스트" : "실제 도메인";
+  nodes.summaryMode.textContent = payload.local_test ? "개발 테스트" : "실제 도메인";
   nodes.summaryRuntime.textContent = `${runtimeLabel(payload.web_server)} / PHP ${payload.php_version}`;
   nodes.summaryData.textContent = `${databaseLabel(payload.database)} / Redis ${payload.redis === "enable" ? "사용" : "미사용"}`;
   nodes.summaryApp.textContent = appPackageLabel(payload.app_package);
@@ -699,7 +684,7 @@ function renderDraftPlan() {
   nodes.planOutput.textContent = [
     "설치 계획 요청값",
     `도메인: ${payload.domain}`,
-    `모드: ${payload.local_test ? "로컬 테스트" : "실제 도메인"}`,
+    `모드: ${payload.local_test ? "개발 테스트" : "실제 도메인"}`,
     `웹서버: ${runtimeLabel(payload.web_server)}`,
     `PHP: ${payload.php_version}`,
     `데이터베이스: ${databaseLabel(payload.database)} (${databaseVersionLabel(payload.database_version)})`,
@@ -807,7 +792,7 @@ function renderRecoveryStatus(status) {
   recoveryActionButtons("rollback").forEach((button) => {
     button.disabled = !status?.can_rollback;
     button.title = status?.can_rollback
-      ? "설치 직후 패키지와 메타데이터를 되돌립니다."
+      ? "설치 직후 패키지와 설치 기록을 되돌립니다."
       : (status?.rollback_reason || "안전 조건을 만족하지 않아 되돌릴 수 없습니다.");
   });
 
@@ -815,7 +800,7 @@ function renderRecoveryStatus(status) {
     button.disabled = !status?.can_reset;
     button.title = status?.can_reset
       ? "설치기 소유 설정과 웹루트 기록을 정리합니다. apt 패키지는 제거하지 않습니다."
-      : (status?.can_rollback ? "패키지 설치 직후에는 패키지 되돌리기를 먼저 사용하세요." : "설치기 소유 기록이 없어 리셋할 수 없습니다.");
+      : (status?.can_rollback ? "패키지 설치 직후에는 패키지 되돌리기를 먼저 사용하세요." : "설치기 소유 기록이 없어 정리할 수 없습니다.");
   });
 
   saveWizardState();
@@ -1241,7 +1226,7 @@ function renderInstallReport(report) {
     reportSummaryCard("서버 설치 완료", [
       ["도메인", report.domain],
       ["접속 주소", link.html],
-      ["모드", report.deployment_mode === "local-test" ? "로컬 테스트" : "실제 도메인"],
+      ["모드", report.deployment_mode === "local-test" ? "개발 테스트" : "실제 도메인"],
       ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / PHP ${report.php_version}`],
       ["데이터베이스", `${databaseLabel(report.database)} (${databaseVersionLabel(report.database_version)})`],
       ["앱 패키지", appPackageLabel(report.app_package)],
@@ -1262,7 +1247,7 @@ function renderInstallReport(report) {
     checksCard("서비스 검증", report.service_checks),
     checksCard("포트 검증", report.port_checks),
     checksCard("DNS / 네트워크 검증", report.network_checks),
-    checksCard("웹서버 / vhost 검증", report.vhost_checks),
+    checksCard("웹서버 / 도메인 연결 검증", report.vhost_checks),
     checksCard("메일 발송 검증", report.mail_checks),
     checksCard("SSL / Certbot 검증", report.certbot_checks),
     checksCard("앱 요구사항", report.app_requirements),
@@ -1313,7 +1298,7 @@ function renderSavedReport(payload) {
       ["도메인", report.domain || "-"],
       ["접속 주소", link.html],
       ["단계", report.phase || "-"],
-      ["모드", report.deployment_mode === "local-test" ? "로컬 테스트" : "실제 도메인"],
+      ["모드", report.deployment_mode === "local-test" ? "개발 테스트" : "실제 도메인"],
       ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / PHP ${report.php_version || "-"}`],
       ["데이터베이스", databaseLabel(report.database)],
       ["앱 패키지", appPackageLabel(report.app_package || report.app_profile)],
@@ -1330,7 +1315,7 @@ function renderSavedReport(payload) {
     checksCard("서비스 검증", report.service_checks),
     checksCard("포트 검증", report.port_checks),
     checksCard("DNS / 네트워크 검증", report.network_checks),
-    checksCard("웹서버 / vhost 검증", report.vhost_checks),
+    checksCard("웹서버 / 도메인 연결 검증", report.vhost_checks),
     checksCard("메일 발송 검증", report.mail_checks),
     checksCard("SSL / Certbot 검증", report.certbot_checks),
     checksCard("앱 요구사항", report.app_requirements),
@@ -1343,7 +1328,7 @@ function renderSavedReport(payload) {
 
 function renderResetReport(report) {
   nodes.reportOutput.innerHTML = [
-    reportSummaryCard("메타데이터 리셋 완료", [
+    reportSummaryCard("설치 기록 정리 완료", [
       ["미리보기", report.dry_run ? "예" : "아니오"],
       ["의미", "설치기 소유 설정과 웹루트 기록을 정리했습니다. apt 패키지는 제거하지 않습니다."],
     ]),
@@ -1357,12 +1342,12 @@ function renderRollbackReport(report) {
     reportSummaryCard("패키지 되돌리기 완료", [
       ["미리보기", report.dry_run ? "예" : "아니오"],
       ["단계", report.phase],
-      ["의미", "설치 직후 상태 기준으로 서비스 정리, 패키지 제거, 메타데이터 리셋을 시도했습니다."],
+      ["의미", "설치 직후 상태 기준으로 서비스 정리, 패키지 제거, 설치 기록 정리를 시도했습니다."],
     ]),
     actionCard("서비스 처리", report.service_actions),
     actionCard("패키지 처리", report.package_actions),
-    listCard("메타데이터 삭제", report.metadata_reset.removed),
-    listCard("이미 없던 메타데이터", report.metadata_reset.missing),
+    listCard("설치 기록 삭제", report.metadata_reset.removed),
+    listCard("이미 없던 설치 기록", report.metadata_reset.missing),
   ].join("");
 }
 
@@ -1476,8 +1461,8 @@ function accessLink(domain, mode, phase = "packages-installed") {
     return {
       html: `<span class="text-base-content/60">사이트 페이지는 아직 생성 전입니다.</span>`,
       hint: mode === "local-test"
-        ? "로컬 테스트는 SSH 터널과 hosts 매핑 상태에 따라 브라우저 접속이 달라질 수 있습니다."
-        : "HTTP vhost 검증이 끝나면 도메인 접속 링크를 제공합니다. HTTPS는 인증서 단계 후 활성화됩니다.",
+        ? "개발 테스트는 SSH 터널과 hosts 매핑 상태에 따라 브라우저 접속이 달라질 수 있습니다."
+        : "HTTP 도메인 연결 검증이 끝나면 도메인 접속 링크를 제공합니다. HTTPS는 인증서 단계 후 활성화됩니다.",
     };
   }
 
@@ -1486,7 +1471,7 @@ function accessLink(domain, mode, phase = "packages-installed") {
   return {
     html: `<a class="link link-primary" href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${escapeHtml(href)}</a>`,
     hint: mode === "local-test"
-      ? "로컬 테스트 주소는 Mac/PC hosts 파일에 도메인을 서버 IP로 매핑해야 열립니다."
+      ? "개발 테스트 주소는 Mac/PC hosts 파일에 도메인을 서버 IP로 매핑해야 열립니다."
       : "인증서 발급 전이면 임시로 http 접속이 먼저 필요할 수 있습니다.",
   };
 }
@@ -1511,7 +1496,7 @@ function renderPlanReport(report) {
   return [
     "설치 계획 요약",
     `도메인: ${report.domain}`,
-    `모드: ${report.deployment_mode === "local-test" ? "로컬 테스트" : "실제 도메인"}`,
+    `모드: ${report.deployment_mode === "local-test" ? "개발 테스트" : "실제 도메인"}`,
     `웹서버: ${runtimeLabel(report.web_server)}`,
     `PHP: ${report.php_version}`,
     `데이터베이스: ${databaseLabel(report.database)} (${databaseVersionLabel(report.database_version)})`,
@@ -1558,7 +1543,7 @@ function resetInstallStages() {
 function installConfirmSummaryHtml(payload) {
   const entries = [
     ["도메인", payload.domain],
-    ["모드", payload.local_test ? "로컬 테스트" : "실제 도메인"],
+    ["모드", payload.local_test ? "개발 테스트" : "실제 도메인"],
     ["웹서버 / PHP", `${runtimeLabel(payload.web_server)} / PHP ${payload.php_version}`],
     ["데이터베이스", `${databaseLabel(payload.database)} (${databaseVersionLabel(payload.database_version)})`],
     ["앱 패키지", appPackageLabel(payload.app_package)],
@@ -1595,7 +1580,7 @@ function recoveryConfirmContent(action) {
   if (action === "rollback") {
     return {
       title: "패키지 되돌리기를 실행할까요?",
-      message: "설치 직후 운영 데이터가 없을 때만 사용하세요. 서비스 중지, 패키지 제거, 설치기 메타데이터 정리를 진행합니다.",
+      message: "설치 직후 운영 데이터가 없을 때만 사용하세요. 서비스 중지, 패키지 제거, 설치 기록 정리를 진행합니다.",
       yesClass: "btn btn-error icon-button",
       rows: [
         ["대상", "이번 설치기가 설치한 apt 패키지와 서비스"],
@@ -1606,11 +1591,11 @@ function recoveryConfirmContent(action) {
   }
 
   return {
-    title: "메타데이터 리셋을 실행할까요?",
-    message: "설치기 소유 설정, vhost, 웹루트 기록을 정리합니다. apt 패키지와 기존 운영 웹서비스는 제거하지 않습니다.",
+    title: "설치 기록만 정리할까요?",
+    message: "설치기 소유 설정, 도메인 연결 설정, 웹루트 기록을 정리합니다. apt 패키지와 기존 운영 웹서비스는 제거하지 않습니다.",
     yesClass: "btn btn-primary icon-button",
     rows: [
-      ["대상", "installer 상태 파일, 리포트, installer가 만든 vhost/webroot"],
+      ["대상", "installer 상태 파일, 리포트, installer가 만든 도메인 연결 설정/웹루트"],
       ["보존", "apt 패키지와 서비스, 설치 전부터 있던 운영 파일"],
       ["실행 후", "패키지가 남아 있으면 신규 설치 점검이 막힐 수 있습니다."],
     ],
@@ -1797,7 +1782,7 @@ async function runRecoveryAction(action, button) {
       "success",
       successTitle,
       action === "rollback"
-        ? "서비스 중지, apt 패키지 제거, installer 메타데이터 정리를 완료했습니다."
+        ? "서비스 중지, apt 패키지 제거, 설치 기록 정리를 완료했습니다."
         : "installer 소유 설정과 웹루트 기록을 정리했습니다.",
     );
     log(successTitle);
@@ -1909,37 +1894,6 @@ function bindEvents() {
     });
   });
 
-  document.querySelector("#login-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const button = event.submitter;
-    const username = document.querySelector("#login-username").value;
-    const passwordInput = document.querySelector("#login-password");
-
-    await withBusy(button, "확인 중", async () => {
-      try {
-        hideAlert(nodes.loginStatus);
-        log(`서버 계정 인증 중: ${username}`);
-        const response = await apiFetch("/api/auth/login", {
-          method: "POST",
-          body: JSON.stringify({
-            username,
-            password: passwordInput.value,
-          }),
-        });
-        passwordInput.value = "";
-        state.authenticated = response.authenticated;
-        setAlert(nodes.loginStatus, "success", "로그인 성공", `${response.username} 계정으로 인증되었습니다.`);
-        log(`서버 계정 인증 성공: ${response.username}`);
-        await syncServerState();
-        showStep("check");
-      } catch (error) {
-        passwordInput.value = "";
-        setAlert(nodes.loginStatus, "error", "로그인 실패", formatError(error));
-        log(formatError(error));
-      }
-    });
-  });
-
   document.querySelector("#doctor-button").addEventListener("click", async (event) => {
     await withBusy(event.currentTarget, "점검 중", async () => {
       try {
@@ -2007,7 +1961,7 @@ function bindEvents() {
 
     try {
       markStage("preflight", "진행");
-      setAlert(nodes.installStatus, "info", "서버 설치 진행 중", "apt 패키지 설치, Nginx vhost 생성, HTTP 검증을 진행합니다.");
+      setAlert(nodes.installStatus, "info", "서버 설치 진행 중", "apt 패키지 설치, Nginx 도메인 연결 설정 생성, HTTP 검증을 진행합니다.");
       log("서버 설치 시작");
       const report = await apiFetch("/api/install/prepare", {
         method: "POST",
@@ -2015,7 +1969,7 @@ function bindEvents() {
       });
       renderInstallReport(report);
       await refreshRecoveryStatus();
-      setAlert(nodes.installStatus, "success", "서버 설치 완료", "결과 리포트에서 패키지, 서비스, 포트, vhost 검증 결과를 확인하세요.");
+      setAlert(nodes.installStatus, "success", "서버 설치 완료", "결과 리포트에서 패키지, 서비스, 포트, 도메인 연결 검증 결과를 확인하세요.");
       showStep("report");
       log(`서버 설치 완료: ${report.phase}`);
     } catch (error) {
@@ -2093,6 +2047,12 @@ async function boot() {
     state.csrfToken = state.bootstrap.csrf_token;
     state.authenticated = state.bootstrap.auth.authenticated;
     setConnectionStatus("연결됨", "badge-success");
+    setAlert(
+      nodes.loginStatus,
+      "success",
+      "접속 확인 완료",
+      "서버 비밀번호 입력 없이 접속 확인 주소로 설치 권한을 확인했습니다.",
+    );
 
     if (state.bootstrap.domain) {
       nodes.domain.value = state.bootstrap.domain;
@@ -2104,14 +2064,14 @@ async function boot() {
     showStep(normalizedStep(window.location.hash.replace("#", "") || state.activeStep), { pushHistory: false });
     writeStepHistory(state.activeStep, true);
     log("웹 컨트롤러 준비 완료");
-    log(`인증 상태: ${state.bootstrap.auth.status}`);
+    log(`접속 상태: ${state.bootstrap.auth.status}`);
     if (state.bootstrap.auth.client_ip) {
       log(`접속 IP 잠금: ${state.bootstrap.auth.client_ip}`);
     }
   } catch (error) {
     setConnectionStatus("오류", "badge-error");
-    setAlert(nodes.loginStatus, "error", "접속 확인 실패", `${formatError(error)}\n터미널에 출력된 token URL로 다시 접속하세요.`);
-    log(`${formatError(error)}\n터미널에 출력된 token URL로 다시 접속하세요.`);
+    setAlert(nodes.loginStatus, "error", "접속 확인 실패", `${formatError(error)}\n터미널에 출력된 접속 확인 주소로 다시 접속하세요.`);
+    log(`${formatError(error)}\n터미널에 출력된 접속 확인 주소로 다시 접속하세요.`);
   }
 }
 

@@ -1,6 +1,21 @@
 # 초보용 설치 안내
 
-목표는 `g7inst` 웹 마법사 화면을 여는 것입니다. 설명은 짧게 두고, 그대로 따라 할 순서만 적습니다.
+목표는 실제 VPS에서 `g7inst` 웹 마법사를 열고 `서버 점검 -> 설치 방식 -> 사양 확정 -> 서버 설치 -> 결과` 순서로 진행하는 것입니다.
+
+대상은 그누보드 설치, 관리자 설정, FTP/SFTP 업로드 정도는 해본 사용자입니다. 서버 명령은 복사해서 따라 하고, 낯선 용어는 웹 화면의 `?` 도움말과 아래 용어 설명에서 확인합니다.
+
+## 전체 순서
+
+1. Lightsail Ubuntu 24.04 서버 생성
+2. 방화벽 22/80/443만 열기
+3. 고정 IP 연결
+4. DNS 연결
+5. SSH 키 저장
+6. 서버 접속과 sudo 확인
+7. 설치 전 스냅샷 생성
+8. SSH 터널 열기
+9. `sudo g7inst setup --domain 도메인` 실행
+10. 브라우저에서 접속 확인 주소 열기
 
 ## 준비물
 
@@ -11,6 +26,14 @@
 > - 서버 고정 IP
 > - SSH 개인키 `.pem`
 > - Mac 터미널 또는 Windows PowerShell
+
+## 바꿔 넣을 값
+
+| 표시 | 실제 값 |
+| --- | --- |
+| `SERVER_IP` | Lightsail 고정 IP |
+| `example.com` | 실제 도메인 |
+| `YOUR_LIGHTSAIL_KEY.pem` | 내려받은 SSH 키 파일명 |
 
 ## 1. AWS 콘솔을 한글로 바꾸기
 
@@ -128,12 +151,17 @@ Windows PowerShell:
 ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" ubuntu@SERVER_IP
 ```
 
-서버에서 확인합니다.
+프롬프트가 `ubuntu@...`로 바뀌면 서버 안에서 아래를 입력합니다.
 
 ```bash
+sudo -n true && echo "sudo OK"
 g7inst --version
-g7inst doctor
+exit
 ```
+
+`sudo OK`가 나오면 비밀번호 없이 설치 준비가 된 상태입니다.
+
+서버 비밀번호는 몰라도 됩니다. Lightsail Ubuntu는 `ubuntu` 계정으로 SSH 키 접속하고, `sudo`로 설치기를 관리자 권한 실행합니다.
 
 ## 8. 설치 전 스냅샷 찍기
 
@@ -143,6 +171,8 @@ g7inst doctor
 4. 스냅샷 이름에 날짜를 넣습니다.
 
 ## 9. 설치 웹 UI 열기
+
+먼저 SSH 터널을 열면서 서버에 접속합니다.
 
 Mac:
 
@@ -156,11 +186,13 @@ Windows PowerShell:
 ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP
 ```
 
-서버에 접속된 상태에서 실행합니다.
+프롬프트가 `ubuntu@...`로 바뀌면 같은 터미널 창에서 설치 UI를 시작합니다.
 
 ```bash
 sudo g7inst setup --domain example.com
 ```
+
+`example.com`은 실제 도메인으로 바꿉니다.
 
 브라우저에서 터미널에 나온 주소를 엽니다.
 
@@ -168,15 +200,25 @@ sudo g7inst setup --domain example.com
 http://127.0.0.1:7717/?token=...
 ```
 
+웹 화면에서는 서버 비밀번호를 입력하지 않습니다. 접속 확인 주소로 접속하면 바로 서버 점검 단계로 진행합니다.
+
 ## 완료 기준
 
 - 브라우저에 `G7 Installer` 화면이 뜹니다.
 - 서버 점검 단계가 보입니다.
-- 설치 완료 후 리포트에 `vhost-enabled`가 보입니다.
+- 설치 완료 후 리포트에 `vhost-enabled`가 보입니다. 이 값은 도메인 연결 설정까지 끝났다는 뜻입니다.
 - `http://도메인` 접속이 됩니다.
 - 설치 중에는 SSH 터널 창을 닫지 않습니다.
 
 ## 막히면 확인
+
+| 증상 | 먼저 볼 것 |
+| --- | --- |
+| `Permission denied` | SSH 키 파일 경로와 권한 |
+| `sudo OK`가 안 나옴 | Lightsail 기본 `ubuntu` 계정인지 확인 |
+| `g7inst: command not found` | 시작 스크립트 로그 확인 |
+| 브라우저가 안 열림 | SSH 터널 창이 열려 있는지 확인 |
+| 설치 세션 쿠키 없음 | 터미널에 나온 접속 확인 주소를 다시 열기 |
 
 ```bash
 sudo tail -120 /var/log/g7-lightsail-bootstrap.log
@@ -193,8 +235,10 @@ g7inst doctor
 | DNS only | Cloudflare 프록시를 끄고 실제 IP를 보여주는 상태 |
 | SSH 키 | 비밀번호 대신 서버에 접속하는 파일 |
 | SSH 터널 | 7717 포트를 외부에 열지 않고 내 PC에서만 여는 방법 |
+| sudo | 일반 계정으로 관리자 권한 명령을 실행하는 방법 |
 | 시작 스크립트 | 서버가 처음 만들어질 때 자동 실행되는 명령 |
 | 스냅샷 | 서버 전체를 되돌릴 수 있게 저장한 복구 지점 |
 | vhost | 도메인을 특정 웹루트에 연결하는 웹서버 설정 |
+| 접속 확인 주소 | 터미널에 출력되는 `http://127.0.0.1:7717/?token=...` 주소 |
 
 더 자세한 설명은 [Lightsail 상세 안내](lightsail-ubuntu24-setup-guide.md)를 봅니다.

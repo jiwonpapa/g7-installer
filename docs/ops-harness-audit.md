@@ -1,21 +1,20 @@
 # Server Operations Harness Audit
 
-Date: 2026-07-06
+Date: 2026-07-07
 
 ## Current Status
 
 - Local regression gate exists: `scripts/quality-gate.sh`.
-- Local gate covers shell syntax, web static smoke, `cargo fmt --check`, `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo doc --no-deps`, `cargo llvm-cov --fail-under-lines 75`, and web CSS build.
+- Local gate covers shell syntax, web static smoke, setup auth smoke, JS syntax, `cargo fmt --check`, `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo doc --no-deps`, `cargo llvm-cov --fail-under-lines 75`, and web CSS build.
 - Current measured line coverage is 77.46%.
 - Web controller line coverage is 76.63%.
 - Release `v0.2.7` has both Linux musl assets and `checksums.txt`.
 - `scripts/ops-harness.sh` now verifies a disposable Ubuntu 24.04 server through install, report validation, rollback, removed-package checks, and reinstall. Current install reaches the Nginx HTTP vhost phase.
+- GitHub Actions workflow file exists at `.github/workflows/quality-gate.yml`; it runs the local quality gate on push to `main` and pull requests after it is pushed to GitHub.
 
 ## Gaps Found
 
-- No active GitHub Actions workflow is present in `.github/workflows`.
 - `main` branch is not protected.
-- Previous workflow push was rejected because the current GitHub token lacks `workflow` scope.
 - The old `scripts/g7-test-smoke.sh` treated `g7inst doctor` exit status as install permission. `doctor` reports `install_allowed` in stdout, so the smoke check could produce a false result.
 - Package rollback verification used `ssh` inside a file-fed loop. Without `ssh -n`, the first SSH call could consume the remaining package list from stdin.
 - No browser-driven web UI E2E harness exists yet.
@@ -27,6 +26,9 @@ Date: 2026-07-06
 - Reworked `scripts/g7-test-smoke.sh` as a wrapper over the ops harness.
 - Added web controller API/session/error-path regression coverage.
 - Added `scripts/web-static-smoke.sh` to catch wizard, theme, progress, reset, rollback, and localized error UI regressions.
+- Added `scripts/setup-auth-smoke.sh` to block password-login regressions and assert non-root `g7inst setup` fails with sudo guidance.
+- Added `.github/workflows/quality-gate.yml` to run the local quality gate in CI.
+- Extended the web static smoke to reject password login form/API/server-account verifier regressions.
 - Raised the default local line-coverage gate from 60% to 75%.
 - Remote harness commands now run with `ssh -n` so package verification loops inspect every package.
 - Shell compound checks that require sudo now run through `sudo sh -c` instead of relying on partial sudo command parsing.
@@ -49,12 +51,12 @@ Date: 2026-07-06
 
 ## Required Manual Follow-Up
 
-The following cannot be completed with the current GitHub token:
+The following cannot be completed from the local workspace alone:
 
-1. Re-authenticate GitHub CLI with `workflow` scope.
-2. Add an active workflow under `.github/workflows`.
-3. Enable branch protection for `main`.
-4. Require the workflow checks before merging or pushing to protected branches.
+1. Push `.github/workflows/quality-gate.yml` to GitHub so Actions activates.
+2. Enable branch protection for `main`.
+3. Require the `quality-gate / local quality gate` check before merging or pushing to protected branches.
+4. Add browser-driven web UI E2E once the controller can be exercised safely in an isolated root-capable environment.
 
 Suggested CI jobs:
 

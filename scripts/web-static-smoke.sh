@@ -13,8 +13,21 @@ need_pattern() {
   fi
 }
 
+reject_pattern() {
+  local file="$1"
+  local pattern="$2"
+  local message="$3"
+
+  if rg -q "${pattern}" "${ROOT_DIR}/${file}"; then
+    echo "${message}" >&2
+    exit 1
+  fi
+}
+
 need_pattern "web/index.html" "G7 설치 마법사"
 need_pattern "web/index.html" "data-view=\"login\""
+need_pattern "web/index.html" "접속 확인"
+need_pattern "web/index.html" "서버 비밀번호 입력 없음"
 need_pattern "web/index.html" "data-view=\"check\""
 need_pattern "web/index.html" "data-view=\"options\""
 need_pattern "web/index.html" "data-view=\"plan\""
@@ -47,6 +60,8 @@ need_pattern "web/index.html" "class=\"log-dock collapse collapse-arrow\""
 
 need_pattern "web/app.js" "formatError"
 need_pattern "web/app.js" "localizeMessage"
+need_pattern "web/app.js" "setup token session is required"
+need_pattern "web/app.js" "서버 비밀번호 입력 없이 접속 확인 주소"
 need_pattern "web/app.js" "setDoctorPassed"
 need_pattern "web/app.js" "setReportReady"
 need_pattern "web/app.js" "summaryPanel.hidden = !state.authenticated"
@@ -84,6 +99,15 @@ need_pattern "web/input.css" ".log-dock"
 need_pattern "web/input.css" "data-status=\"info\""
 need_pattern "crates/g7-cli/src/web_setup.rs" "CACHE_CONTROL"
 need_pattern "crates/g7-cli/src/web_setup.rs" "emit_progress"
+need_pattern "crates/g7-cli/src/web_setup.rs" "ensure_setup_runs_as_root"
+need_pattern "crates/g7-cli/src/web_setup.rs" "sudo-token"
+need_pattern "crates/g7-cli/src/web_setup.rs" "Server password: not required"
+
+reject_pattern "web/index.html" "login-password|login-username|login-form" "web UI contract regression: password login form must not return"
+reject_pattern "web/index.html" "서버 계정|로그인하고 계속|sudo passwd" "web UI contract regression: server account password copy must not return"
+reject_pattern "web/index.html" "로컬 테스트|value=\"local-test\"" "web UI contract regression: local-test option must not return to the public wizard"
+reject_pattern "web/app.js" "/api/auth/login|login-password|login-username|login-form" "web UI contract regression: password login API must not return"
+reject_pattern "crates/g7-cli/src/web_setup.rs" "/api/auth/login|LoginRequest|verify_server_account_password|sudo passwd" "web setup regression: server account password verifier must not return"
 
 if rg -q "installButton\\.textContent|installResultButton\\.textContent|checkNextButton\\.textContent|themeToggle\\.textContent|button\\.textContent" "${ROOT_DIR}/web/app.js"; then
   echo "web UI contract regression: stateful buttons must use setButtonLabel" >&2
