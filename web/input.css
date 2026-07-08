@@ -340,6 +340,31 @@
     @apply text-xs font-semibold text-base-content/60;
   }
 
+  .operation-overlay {
+    @apply fixed inset-0 z-[100] grid place-items-center bg-neutral/55 px-4 backdrop-blur-sm;
+  }
+
+  .operation-overlay[hidden] {
+    @apply hidden;
+  }
+
+  .operation-overlay-box {
+    @apply grid w-full max-w-sm justify-items-center gap-4 rounded-lg border border-base-300 bg-base-100 p-6 text-center shadow-2xl;
+  }
+
+  .operation-overlay-box h2 {
+    @apply text-xl font-semibold;
+  }
+
+  .operation-overlay-box p {
+    @apply text-sm leading-6 text-base-content/60;
+  }
+
+  .operation-spinner {
+    @apply h-12 w-12 rounded-full border-4 border-base-300 border-t-primary;
+    animation: g7inst-spin 0.9s linear infinite;
+  }
+
   body[data-operation-locked="true"] .app-shell {
     @apply cursor-progress;
   }
@@ -398,5 +423,11 @@
   .result-row[data-status="fail"] strong,
   .stage-row[data-status="실패"] strong {
     @apply bg-error text-error-content;
+  }
+
+  @keyframes g7inst-spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 }

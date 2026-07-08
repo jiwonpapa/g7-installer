@@ -62,6 +62,11 @@ const nodes = {
   recoveryConfirmMessage: document.querySelector("#recovery-confirm-message"),
   recoveryConfirmSummary: document.querySelector("#recovery-confirm-summary"),
   recoveryConfirmYes: document.querySelector("#recovery-confirm-yes"),
+  operationOverlay: document.querySelector("#operation-overlay"),
+  operationOverlayTitle: document.querySelector("#operation-overlay-title"),
+  operationOverlayMessage: document.querySelector("#operation-overlay-message"),
+  operationOverlaySpinner: document.querySelector("#operation-overlay-spinner"),
+  operationOverlayConfirm: document.querySelector("#operation-overlay-confirm"),
   summaryPanel: document.querySelector("#summary-panel"),
   floatingHelp: document.querySelector("#floating-help"),
   summaryDomain: document.querySelector("#summary-domain"),
@@ -168,6 +173,8 @@ const templates = {
   },
 };
 
+let operationOverlayResolve = null;
+
 // Icon paths are sourced from lucide-static and rendered inline to avoid extra requests.
 const iconSvg = {
   "check": "<path d=\"M20 6 9 17l-5-5\" />",
@@ -257,6 +264,46 @@ function setOperationLocked(locked) {
       delete control.dataset.lockPrevDisabled;
     }
   });
+}
+
+function showOperationOverlay(title, message, options = {}) {
+  if (!nodes.operationOverlay) {
+    return;
+  }
+
+  const loading = options.loading !== false;
+  nodes.operationOverlayTitle.textContent = title;
+  nodes.operationOverlayMessage.textContent = message;
+  nodes.operationOverlay.hidden = false;
+  nodes.operationOverlaySpinner.hidden = !loading;
+  nodes.operationOverlayConfirm.classList.toggle("hidden", loading);
+  nodes.operationOverlayConfirm.disabled = loading;
+  if (!loading) {
+    setButtonLabel(nodes.operationOverlayConfirm, options.confirmLabel || "확인");
+    nodes.operationOverlayConfirm.focus();
+  }
+}
+
+function hideOperationOverlay() {
+  if (!nodes.operationOverlay) {
+    return;
+  }
+
+  nodes.operationOverlay.hidden = true;
+  nodes.operationOverlaySpinner.hidden = false;
+  nodes.operationOverlayConfirm.classList.add("hidden");
+  nodes.operationOverlayConfirm.disabled = true;
+}
+
+function waitForOperationOverlayConfirm() {
+  return new Promise((resolve) => {
+    operationOverlayResolve = resolve;
+  });
+}
+
+function completeOperationOverlay(title, message) {
+  showOperationOverlay(title, message, { loading: false, confirmLabel: "확인" });
+  return waitForOperationOverlayConfirm();
 }
 
 async function withBusy(button, busyText, task) {
@@ -1822,7 +1869,8 @@ function confirmRecoveryAction(action) {
   });
 }
 
-function resetWizardForRetry() {
+function resetWizardForRetry(options = {}) {
+  const targetStep = options.targetStep || "check";
   clearWizardState();
   state.doctorReport = null;
   state.planReport = null;
@@ -1846,7 +1894,7 @@ function resetWizardForRetry() {
   nodes.reportOutput.innerHTML = `<div class="empty-state">아직 리포트가 없습니다.</div>`;
   refreshInstallButtonState();
   renderRecoveryStatus(null);
-  showStep("check");
+  showStep(targetStep, { force: true });
 }
 
 function restoreWizardState() {
@@ -1946,10 +1994,14 @@ async function runRecoveryAction(action, button) {
   const successTitle = action === "rollback" ? "패키지 되돌리기 완료" : "리셋 완료";
   const originalText = buttonLabel(button);
   let recoveryCompleted = false;
+  let resetCompletionAcknowledged = false;
 
   try {
     state.currentOperation = action;
     setButtonLabel(button, busyText);
+    if (action === "reset") {
+      showOperationOverlay("초기화 중입니다.", "서버 정리 작업이 완료될 때까지 기다려 주세요.");
+    }
     setOperationLocked(true);
     showReportProgress(5);
     hideAlert(statusNode);
@@ -1984,9 +2036,25 @@ async function runRecoveryAction(action, button) {
     setReportReady(false);
     refreshInstallButtonState();
     await refreshRecoveryStatus();
-    await runDoctorCheck();
     recoveryCompleted = true;
+    if (action === "rollback") {
+      await runDoctorCheck();
+    } else {
+      state.currentOperation = null;
+      setOperationLocked(false);
+      if (button && originalText) {
+        setButtonLabel(button, originalText);
+      }
+      await completeOperationOverlay(
+        "초기화 완료되었습니다.",
+        "확인을 누르면 접속 확인 단계로 이동합니다.",
+      );
+      resetCompletionAcknowledged = true;
+    }
   } catch (error) {
+    if (action === "reset") {
+      hideOperationOverlay();
+    }
     renderErrorReport(action === "rollback" ? "패키지 되돌리기 실패" : "리셋 실패", formatError(error));
     setAlert(statusNode, "error", action === "rollback" ? "패키지 되돌리기 실패" : "리셋 실패", formatError(error));
     log(formatError(error));
@@ -1994,6 +2062,9 @@ async function runRecoveryAction(action, button) {
   } finally {
     state.currentOperation = null;
     setOperationLocked(false);
+    if (action === "reset" && !resetCompletionAcknowledged) {
+      hideOperationOverlay();
+    }
     if (button && originalText) {
       setButtonLabel(button, originalText);
     }
@@ -2005,7 +2076,11 @@ async function runRecoveryAction(action, button) {
   }
 
   if (recoveryCompleted) {
-    showStep("check");
+    if (action === "reset") {
+      resetWizardForRetry({ targetStep: "login" });
+    } else {
+      showStep("check");
+    }
   }
 }
 
@@ -2043,6 +2118,7 @@ function bindHelpTooltips() {
   };
 
   document.querySelectorAll(".help-circle").forEach((button) => {
+    button.tabIndex = -1;
     button.addEventListener("pointerenter", () => showTooltip(button));
     button.addEventListener("focus", () => showTooltip(button));
     button.addEventListener("pointerleave", hideTooltip);
@@ -2065,6 +2141,15 @@ function bindEvents() {
 
   nodes.themeToggle.addEventListener("click", () => {
     applyTheme(state.theme === "dark" ? "light" : "dark");
+  });
+
+  nodes.operationOverlayConfirm?.addEventListener("click", () => {
+    hideOperationOverlay();
+    const resolve = operationOverlayResolve;
+    operationOverlayResolve = null;
+    if (resolve) {
+      resolve();
+    }
   });
 
   document.querySelectorAll("[data-step]").forEach((button) => {
