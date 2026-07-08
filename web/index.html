@@ -483,11 +483,13 @@
             </section>
             <div class="mt-5 space-y-3" id="install-stages">
               <div class="stage-row" data-stage="preflight"><span>서버 사전 점검</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="packages"><span>패키지 설치</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="config"><span>설정 파일 생성</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="services"><span>서비스 시작</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="ports"><span>포트 확인</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="http"><span>HTTP / 도메인 연결 검증</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="packages"><span>패키지 설치/검증</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="site"><span>사이트 계정/웹루트</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="vhost"><span>웹서버 vhost/HTTP 검증</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="runtime"><span>PHP-FPM/런타임 튜닝</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="database"><span>DB 튜닝/계정 생성</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="ssl"><span>SSL 인증서/HTTPS 검증</span><strong>대기</strong></div>
+              <div class="stage-row" data-stage="app"><span>웹앱 파일 배치</span><strong>대기</strong></div>
               <div class="stage-row" data-stage="report"><span>리포트 생성</span><strong>대기</strong></div>
             </div>
             <section class="recovery-panel mt-5" data-recovery-panel hidden>

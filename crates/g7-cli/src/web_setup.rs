@@ -744,43 +744,67 @@ async fn api_install_prepare(
     match result {
         Ok(report) => {
             emit_stage(&state, "preflight", "성공", "preflight passed");
-            emit_progress(&state, "install", 25, "install progress: preflight passed");
+            emit_progress(&state, "install", 15, "install progress: preflight passed");
             emit_stage(&state, "packages", "성공", "packages installed");
             emit_progress(
                 &state,
                 "install",
-                45,
+                30,
                 "install progress: packages installed",
             );
-            emit_stage(&state, "config", "성공", "configuration prepared");
+            emit_stage(
+                &state,
+                "site",
+                "성공",
+                "site account and web root configured",
+            );
             emit_progress(
                 &state,
                 "install",
-                60,
-                "install progress: configuration prepared",
+                42,
+                "install progress: site account and web root configured",
             );
-            emit_stage(&state, "services", "성공", "services enabled");
-            emit_progress(&state, "install", 75, "install progress: services verified");
-            emit_stage(&state, "ports", "성공", "ports verified");
-            emit_progress(&state, "install", 88, "install progress: ports verified");
-            emit_stage(&state, "http", "성공", "HTTP vhost verification completed");
-            emit_stage(&state, "report", "성공", "problem report prepared");
+            emit_stage(
+                &state,
+                "vhost",
+                "성공",
+                "web server vhost and HTTP smoke verified",
+            );
+            emit_progress(&state, "install", 54, "install progress: vhost verified");
+            emit_stage(&state, "runtime", "성공", "PHP runtime configured");
+            emit_progress(
+                &state,
+                "install",
+                66,
+                "install progress: runtime configured",
+            );
+            emit_stage(&state, "database", "성공", "database configured");
+            emit_progress(
+                &state,
+                "install",
+                76,
+                "install progress: database configured",
+            );
+            emit_stage(
+                &state,
+                "ssl",
+                "성공",
+                "TLS certificate and HTTPS vhost verified",
+            );
+            emit_progress(&state, "install", 88, "install progress: TLS configured");
+            emit_stage(&state, "app", "성공", "web app files prepared");
+            emit_stage(&state, "report", "성공", "setup guide and report prepared");
             emit_progress(&state, "install", 100, "install progress: report ready");
             emit_log(&state, "server install completed");
             Ok(Json(install_to_api(report, database_version)))
         }
         Err(error) => {
-            let details = failed_doctor_details(doctor::run());
+            let details = failed_report_details();
             emit_progress(&state, "install", 100, "install progress: failed");
-            emit_stage(
-                &state,
-                "packages",
-                "실패",
-                format!("install failed: {error}"),
-            );
+            emit_stage(&state, "report", "실패", format!("install failed: {error}"));
             Err(ApiError::bad_request(error)
                 .with_hint(
-                    "리포트의 실패 항목을 확인하세요. PHP 8.5 선택 시 Ondrej PHP PPA 추가 단계와 apt 네트워크 로그를 먼저 확인하세요.",
+                    "리포트의 실패 항목을 확인하세요. 중단된 서버 세팅 단계 이후 작업은 실행하지 않습니다.",
                 )
                 .with_details(details))
         }
@@ -1086,6 +1110,7 @@ fn doctor_status_label(status: DoctorCheckStatus) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn failed_doctor_details(report: doctor::DoctorReport) -> Vec<String> {
     report
         .checks
@@ -1105,6 +1130,53 @@ fn failed_doctor_details(report: doctor::DoctorReport) -> Vec<String> {
             )
         })
         .collect()
+}
+
+fn failed_report_details() -> Vec<String> {
+    let Ok(content) = fs::read_to_string(REPORT_PATH) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return Vec::new();
+    };
+
+    let mut details = Vec::new();
+    if let Some(problem) = value.get("problem").and_then(serde_json::Value::as_str) {
+        details.push(format!("[problem] {problem}"));
+    }
+
+    for section in [
+        "package_checks",
+        "vhost_checks",
+        "runtime_checks",
+        "database_checks",
+        "certbot_checks",
+        "app_checks",
+    ] {
+        let Some(checks) = value.get(section).and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        for check in checks {
+            let status = check
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("unknown");
+            if status != "fail" {
+                continue;
+            }
+            let name = check
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("unknown");
+            let message = check
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            details.push(format!("[{status}] {section}.{name} - {message}"));
+        }
+    }
+
+    details
 }
 
 fn plan_to_api(install_plan: plan::InstallPlan, database_version: String) -> PlanApiReport {

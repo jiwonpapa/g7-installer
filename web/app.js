@@ -72,6 +72,27 @@ const nodes = {
 
 const stepOrder = ["login", "check", "options", "plan", "install", "report"];
 const wizardStorageKey = "g7inst-wizard-state-v1";
+const installStageOrder = [
+  "preflight",
+  "packages",
+  "site",
+  "vhost",
+  "runtime",
+  "database",
+  "ssl",
+  "app",
+  "report",
+];
+const phaseCompletedStages = {
+  prepared: ["preflight"],
+  "package-failed": ["preflight"],
+  "packages-installed": ["preflight", "packages"],
+  "vhost-enabled": ["preflight", "packages", "site", "vhost"],
+  "runtime-configured": ["preflight", "packages", "site", "vhost", "runtime"],
+  "database-configured": ["preflight", "packages", "site", "vhost", "runtime", "database"],
+  "tls-enabled": ["preflight", "packages", "site", "vhost", "runtime", "database", "ssl"],
+  completed: installStageOrder,
+};
 
 const statusLabel = {
   pass: "통과",
@@ -1293,6 +1314,55 @@ function applyReportOptions(report) {
   refreshFormState({ preservePlan: true, persist: false });
 }
 
+function isInstallCompleted(report) {
+  return report?.phase === "completed";
+}
+
+function checksHaveFailure(checks) {
+  return Array.isArray(checks) && checks.some((check) => check.status === "fail");
+}
+
+function failedStageFromReport(report) {
+  if (!report || isInstallCompleted(report)) {
+    return null;
+  }
+  if (report.phase === "package-failed") {
+    return "packages";
+  }
+  if (report.phase === "vhost-failed" || checksHaveFailure(report.vhost_checks)) {
+    return "vhost";
+  }
+  if (checksHaveFailure(report.runtime_checks)) {
+    return "runtime";
+  }
+  if (checksHaveFailure(report.database_checks)) {
+    return "database";
+  }
+  if (checksHaveFailure(report.certbot_checks) || String(report.problem || "").includes("TLS")) {
+    return "ssl";
+  }
+  if (checksHaveFailure(report.app_checks)) {
+    return "app";
+  }
+  if (report.phase === "prepared") {
+    return "packages";
+  }
+  return null;
+}
+
+function applyInstallStagesFromReport(report) {
+  installStageOrder.forEach((stage) => markStage(stage, "대기"));
+  const completed = phaseCompletedStages[report?.phase] || [];
+  completed.forEach((stage) => markStage(stage, "성공"));
+  const failedStage = failedStageFromReport(report);
+  if (failedStage) {
+    markStage(failedStage, "실패");
+  } else if (isInstallCompleted(report)) {
+    markStage("report", "성공");
+  }
+  setProgress(nodes.installProgress, isInstallCompleted(report) || failedStage ? 100 : Math.round((completed.length / installStageOrder.length) * 100));
+}
+
 function restoreInstallStateFromReport(report) {
   if (!report || typeof report !== "object") {
     return;
@@ -1305,38 +1375,21 @@ function restoreInstallStateFromReport(report) {
     applyPackageChecks(packageChecks);
   }
 
-  if (report.phase === "packages-installed") {
-    ["preflight", "packages", "config", "services", "ports", "http", "report"].forEach((stage) => markStage(stage, "성공"));
-    setProgress(nodes.installProgress, 100);
-    state.installCompleted = true;
-    setReportReady(true);
-    refreshInstallButtonState();
-    return;
-  }
-
-  if (report.phase === "package-failed") {
-    markStage("preflight", "성공");
-    markStage("packages", "실패");
-    setProgress(nodes.installProgress, 100);
-    state.installCompleted = false;
-    setReportReady(true);
-    refreshInstallButtonState("복구 후 다시 시도");
-    return;
-  }
-
-  if (report.phase === "prepared") {
-    markStage("preflight", "성공");
-    setProgress(nodes.installProgress, 20);
-    state.installCompleted = false;
-    setReportReady(true);
-    refreshInstallButtonState("복구 후 다시 시도");
-  }
+  applyInstallStagesFromReport(report);
+  state.installCompleted = isInstallCompleted(report);
+  setReportReady(true);
+  refreshInstallButtonState(state.installCompleted ? null : "복구 후 다시 시도");
 }
 
 function renderInstallReport(report) {
-  const link = report.app_url ? urlLink(report.app_url) : accessLink(report.domain, report.phase);
+  const completed = isInstallCompleted(report);
+  const link = completed && report.app_url ? urlLink(report.app_url) : accessLink(report.domain, report.phase);
+  const title = completed ? "서버 세팅 및 앱 배치 완료" : "설치 중단 리포트";
+  const note = completed
+    ? link.hint
+    : (report.problem || "아직 모든 서버 세팅이 끝나지 않았습니다. 실패 항목을 해결한 뒤 초기화 또는 재시도를 진행하세요.");
   nodes.reportOutput.innerHTML = [
-    reportSummaryCard("기본 서버 구성 완료", [
+    reportSummaryCard(title, [
       ["도메인", report.domain],
       ["웹앱 링크", link.html],
       ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / ${phpRuntimeLabel(report.php_version, report.php_source)}`],
@@ -1352,7 +1405,7 @@ function renderInstallReport(report) {
       ["상태 파일", report.state_path],
       ["소유 파일 목록", report.owned_files_path],
       ["설정 안내서", report.setup_guide_path || "-"],
-    ], link.hint),
+    ], note),
     listCard("완료된 작업", report.completed_steps),
     checksCard("안전장치", report.safety_checks),
     checksCard("설치 전 패키지 기준", report.preinstall_package_checks),
@@ -1368,14 +1421,14 @@ function renderInstallReport(report) {
     checksCard("SSL / Certbot 검증", report.certbot_checks),
     checksCard("웹앱 설치", report.app_checks),
     checksCard("앱 요구사항", report.app_requirements),
+    report.problem ? listCard("중단 원인", [report.problem]) : "",
   ].join("");
 
-  ["preflight", "packages", "config", "services", "ports", "http", "report"].forEach((stage) => markStage(stage, "성공"));
-  setProgress(nodes.installProgress, 100);
   applyPackageChecks(report.package_checks);
-  state.installCompleted = true;
+  applyInstallStagesFromReport(report);
+  state.installCompleted = completed;
   setReportReady(true);
-  refreshInstallButtonState();
+  refreshInstallButtonState(completed ? null : "복구 후 다시 시도");
   state.savedReportPayload = {
     exists: true,
     path: "방금 생성됨",
@@ -1408,9 +1461,14 @@ function renderSavedReport(payload) {
     return;
   }
 
-  const link = report.app_url ? urlLink(report.app_url) : accessLink(report.domain || "example.com", report.phase);
+  const completed = isInstallCompleted(report);
+  const link = completed && report.app_url ? urlLink(report.app_url) : accessLink(report.domain || "example.com", report.phase);
+  const title = completed ? "저장된 완료 리포트" : "저장된 중단 리포트";
+  const note = completed
+    ? link.hint
+    : (report.problem || "아직 모든 서버 세팅이 끝나지 않았습니다. 실패 항목을 해결한 뒤 초기화 또는 재시도를 진행하세요.");
   nodes.reportOutput.innerHTML = [
-    reportSummaryCard("저장된 설치 리포트", [
+    reportSummaryCard(title, [
       ["리포트 파일", payload.path],
       ["도메인", report.domain || "-"],
       ["웹앱 링크", link.html],
@@ -1425,7 +1483,7 @@ function renderSavedReport(payload) {
       ["SMTP 서버", report.smtp_host || "-"],
       ["DNS/IP 확인", report.dns_check ? "수행" : "건너뜀"],
       ["설정 안내서", report.setup_guide_path || "-"],
-    ], link.hint),
+    ], note),
     checksCard("안전장치", report.safety_checks),
     checksCard("설치 전 패키지 기준", report.preinstall_package_checks),
     checksCard("설치 패키지 검증", report.package_checks),
@@ -1579,17 +1637,17 @@ function actionStatus(status) {
 }
 
 function accessLink(domain, phase = "packages-installed") {
-  if (["prepared", "package-failed", "packages-installed"].includes(phase)) {
+  if (phase !== "completed") {
     return {
       html: `<span class="text-base-content/60">사이트 페이지는 아직 생성 전입니다.</span>`,
-      hint: "HTTP 도메인 연결 검증이 끝나면 도메인 접속 링크를 제공합니다. HTTPS는 인증서 단계 후 활성화됩니다.",
+      hint: "서버 세팅, SSL, 앱 파일 배치가 모두 끝난 뒤 웹앱 설치 링크를 제공합니다.",
     };
   }
 
-  const href = `http://${domain}`;
+  const href = `https://${domain}`;
   return {
     html: `<a class="link link-primary" href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${escapeHtml(href)}</a>`,
-    hint: "인증서 발급 전까지는 HTTP 주소로 먼저 접속합니다.",
+    hint: "서버 세팅과 앱 파일 배치가 끝난 뒤 접속합니다.",
   };
 }
 
@@ -1667,7 +1725,7 @@ function renderErrorReport(title, message) {
 
 function resetInstallStages() {
   stopPackageTicker();
-  ["preflight", "packages", "config", "services", "ports", "http", "report"].forEach((stage) => {
+  installStageOrder.forEach((stage) => {
     markStage(stage, "대기");
   });
   setProgress(nodes.installProgress, 0);
@@ -2108,25 +2166,25 @@ function bindEvents() {
 
     try {
       markStage("preflight", "진행");
-      setAlert(nodes.installStatus, "info", "기본 서버 구성 진행 중", "apt 패키지 설치, Nginx/Apache 도메인 연결 설정 생성, HTTP 검증을 진행합니다.");
-      log("기본 서버 구성 시작");
+      setAlert(nodes.installStatus, "info", "서버 세팅 진행 중", "패키지, 사이트 계정/웹루트, vhost, PHP-FPM, DB, SSL, 앱 파일 배치 순서로 검증합니다.");
+      log("서버 세팅 시작");
       const report = await apiFetch("/api/install/prepare", {
         method: "POST",
         body: JSON.stringify(payload),
       });
       renderInstallReport(report);
       await refreshRecoveryStatus();
-      setAlert(nodes.installStatus, "success", "기본 서버 구성 완료", "결과 리포트에서 패키지, 서비스, 포트, 도메인 연결 검증 결과와 프로비저닝 계획을 확인하세요.");
+      setAlert(nodes.installStatus, "success", "서버 세팅 완료", "결과 리포트에서 웹서버, PHP, DB, SSL, 앱 경로와 재시작 명령을 확인하세요.");
       showStep("report");
-      log(`기본 서버 구성 완료: ${report.phase}`);
+      log(`서버 세팅 완료: ${report.phase}`);
     } catch (error) {
-      markStage("packages", "실패");
       stopPackageTicker();
       const reportPayload = await apiFetch("/api/report").catch(() => null);
       if (reportPayload?.exists) {
         renderSavedReport(reportPayload);
         restoreInstallStateFromReport(parseSavedReport(reportPayload));
       } else {
+        markStage("packages", "실패");
         renderErrorReport("기본 서버 구성 실패", `${formatError(error)}\n\n리포트와 로그를 확인하세요. 패키지 후보 검사 결과와 복구 버튼 상태를 먼저 확인하세요.`);
       }
       setAlert(nodes.installStatus, "error", "기본 서버 구성 실패", formatError(error));

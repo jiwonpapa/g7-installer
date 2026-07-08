@@ -57,6 +57,9 @@ const WORDPRESS_DOWNLOAD_URL: &str = "https://wordpress.org/latest.zip";
 const WORDPRESS_ARCHIVE_PATH: &str = "/var/lib/g7-installer/app-source/wordpress.zip";
 const WORDPRESS_EXTRACT_DIR: &str = "/var/lib/g7-installer/app-source/wordpress-extract";
 const WORDPRESS_SOURCE_DIR: &str = "/var/lib/g7-installer/app-source/wordpress-extract/wordpress";
+const ACME_CHALLENGE_DIR: &str = ".well-known/acme-challenge";
+const ACME_SMOKE_FILENAME: &str = "g7inst-acme-smoke.txt";
+const ACME_SMOKE_CONTENT: &str = "g7-installer-acme-ok\n";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallReport {
@@ -598,6 +601,20 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
                 state.set_phase(InstallerPhase::TlsEnabled);
             } else if tls_skipped {
                 completed_steps.push("tls-skipped".to_string());
+            } else {
+                state.completed_steps = completed_steps.clone();
+                persist_progress(
+                    &progress,
+                    &mut owned_files,
+                    &owned_file_list,
+                    &state,
+                    &install_plan,
+                    &apply_summary,
+                    Some("TLS checks did not pass; app placement was not started."),
+                )?;
+                return Err(Error::InstallVerificationFailed {
+                    checks: "TLS checks did not pass; app placement was not started.".to_string(),
+                });
             }
             state.completed_steps = completed_steps.clone();
             persist_progress(
@@ -1065,11 +1082,17 @@ fn apply_site_phase<R: CommandRunner>(
         .chmod_recursive("0755", &plan.web_root)
         .map_err(|err| command_error("web-root-permissions", &command, err))?;
     require_success("web-root-permissions", command, output)?;
+    let site_home = site_home_path(plan);
+    let command = format!("chmod 0711 {site_home}");
+    let output = probe
+        .chmod_path("0711", &site_home)
+        .map_err(|err| command_error("site-home-traverse", &command, err))?;
+    require_success("site-home-traverse", command, output)?;
     checks.push(InstallCheck::pass(
         "web-root-permissions",
         format!(
-            "Set {} owner to {} and mode 0755.",
-            plan.web_root, owner_group
+            "Set {} owner to {} and mode 0755; set {} to 0711 so the web server can traverse without listing the home directory.",
+            plan.web_root, owner_group, site_home
         ),
     ));
 
@@ -1580,6 +1603,51 @@ fn apply_tls_phase<R: CommandRunner>(
     let domains = certificate_hosts(plan);
     let cert_name = plan.domain.clone();
     let email = certificate_email(plan);
+    let acme_dir = acme_challenge_dir(plan);
+    let acme_smoke_path = acme_smoke_path(plan);
+    create_owned_dir_if_absent(
+        paths,
+        &format!("{}/.well-known", plan.app_document_root),
+        owned,
+    )?;
+    create_owned_dir_if_absent(paths, &acme_dir, owned)?;
+    if paths.resolve(&acme_smoke_path).exists() {
+        write_existing_file(paths, &acme_smoke_path, ACME_SMOKE_CONTENT)?;
+    } else {
+        write_new_file(paths, &acme_smoke_path, ACME_SMOKE_CONTENT, owned)?;
+    }
+    let owner_group = format!("{}:www-data", plan.site_user);
+    let command = format!("chown -R {owner_group} {acme_dir}");
+    let output = probe
+        .chown_recursive(&owner_group, &acme_dir)
+        .map_err(|err| command_error("acme-webroot-owner", &command, err))?;
+    require_success("acme-webroot-owner", command, output)?;
+    let command = format!("chmod -R 0755 {acme_dir}");
+    let output = probe
+        .chmod_recursive("0755", &acme_dir)
+        .map_err(|err| command_error("acme-webroot-permissions", &command, err))?;
+    require_success("acme-webroot-permissions", command, output)?;
+    let acme_uri = acme_smoke_uri();
+    for host in &domains {
+        match probe.http_host_path_smoke(host, &acme_uri) {
+            Ok(true) => {}
+            Ok(false) => {
+                return Err(Error::InstallVerificationFailed {
+                    checks: format!(
+                        "ACME HTTP challenge smoke failed for Host: {host} path: {acme_uri}"
+                    ),
+                });
+            }
+            Err(err) => {
+                return Err(command_error(
+                    "acme-http-smoke",
+                    format!("curl -H 'Host: {host}' http://127.0.0.1{acme_uri}"),
+                    err,
+                ));
+            }
+        }
+    }
+
     let output = probe
         .certbot_certonly_webroot(&plan.app_document_root, &cert_name, &domains, &email)
         .map_err(|err| {
@@ -1661,6 +1729,13 @@ fn apply_tls_phase<R: CommandRunner>(
 
     let _ = owned;
     Ok(vec![
+        InstallCheck::pass(
+            "acme-http-smoke",
+            format!(
+                "Verified HTTP-01 challenge path {acme_uri} for {} before running Certbot.",
+                domains.join(", ")
+            ),
+        ),
         InstallCheck::pass(
             "tls-certificate",
             format!(
@@ -2358,8 +2433,24 @@ fn ready_probe_path(plan: &plan::InstallPlan) -> String {
     format!("{}/{}", plan.app_document_root, PHP_READY_FILENAME)
 }
 
+fn site_home_path(plan: &plan::InstallPlan) -> String {
+    format!("/home/{}", plan.site_user)
+}
+
 fn ready_probe_content() -> &'static str {
     "<?php\nheader('Content-Type: text/plain; charset=utf-8');\necho \"G7inst vhost ready\\n\";\n"
+}
+
+fn acme_challenge_dir(plan: &plan::InstallPlan) -> String {
+    format!("{}/{}", plan.app_document_root, ACME_CHALLENGE_DIR)
+}
+
+fn acme_smoke_path(plan: &plan::InstallPlan) -> String {
+    format!("{}/{}", acme_challenge_dir(plan), ACME_SMOKE_FILENAME)
+}
+
+fn acme_smoke_uri() -> String {
+    format!("/{ACME_CHALLENGE_DIR}/{ACME_SMOKE_FILENAME}")
 }
 
 fn app_entry_url(plan: &plan::InstallPlan) -> String {
@@ -2668,11 +2759,16 @@ fn nginx_vhost_content_with_socket(plan: &plan::InstallPlan, php_socket: &str) -
     let app_hosts = nginx_app_hosts(plan);
     let redirect_blocks = nginx_redirect_blocks(plan);
     let reverb_proxy = nginx_reverb_proxy_block(plan);
+    let acme_location = nginx_acme_challenge_location();
 
     format!(
-        "{redirect_blocks}server {{\n    listen 80;\n    listen [::]:80;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n{reverb_proxy}\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
+        "{redirect_blocks}server {{\n    listen 80;\n    listen [::]:80;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n{acme_location}\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n{reverb_proxy}\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
         root = plan.app_document_root,
     )
+}
+
+fn nginx_acme_challenge_location() -> &'static str {
+    "    location ^~ /.well-known/acme-challenge/ {\n        default_type \"text/plain\";\n        try_files $uri =404;\n    }\n"
 }
 
 fn nginx_app_hosts(plan: &plan::InstallPlan) -> String {
@@ -2735,12 +2831,16 @@ fn nginx_redirect_blocks(plan: &plan::InstallPlan) -> String {
 
     match plan.www_mode.as_str() {
         "redirect-to-root" => format!(
-            "server {{\n    listen 80;\n    listen [::]:80;\n    server_name www.{domain};\n    return 301 http://{domain}$request_uri;\n}}\n\n",
-            domain = plan.domain
+            "server {{\n    listen 80;\n    listen [::]:80;\n    server_name www.{domain};\n    root {root};\n\n{acme_location}\n    location / {{\n        return 301 http://{domain}$request_uri;\n    }}\n}}\n\n",
+            domain = plan.domain,
+            root = plan.app_document_root,
+            acme_location = nginx_acme_challenge_location()
         ),
         "redirect-to-www" => format!(
-            "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {domain};\n    return 301 http://www.{domain}$request_uri;\n}}\n\n",
-            domain = plan.domain
+            "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {domain};\n    root {root};\n\n{acme_location}\n    location / {{\n        return 301 http://www.{domain}$request_uri;\n    }}\n}}\n\n",
+            domain = plan.domain,
+            root = plan.app_document_root,
+            acme_location = nginx_acme_challenge_location()
         ),
         _ => String::new(),
     }
@@ -2753,12 +2853,14 @@ fn apache_http_redirect_blocks(plan: &plan::InstallPlan) -> String {
 
     match plan.www_mode.as_str() {
         "redirect-to-root" => format!(
-            "<VirtualHost *:80>\n    ServerName www.{domain}\n    Redirect permanent / http://{domain}/\n</VirtualHost>\n\n",
-            domain = plan.domain
+            "<VirtualHost *:80>\n    ServerName www.{domain}\n    DocumentRoot {root}\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride None\n        Require all granted\n    </Directory>\n\n    RewriteEngine On\n    RewriteCond %{{REQUEST_URI}} !^/\\.well-known/acme-challenge/\n    RewriteRule ^ http://{domain}%{{REQUEST_URI}} [R=301,L]\n</VirtualHost>\n\n",
+            domain = plan.domain,
+            root = plan.app_document_root
         ),
         "redirect-to-www" => format!(
-            "<VirtualHost *:80>\n    ServerName {domain}\n    Redirect permanent / http://www.{domain}/\n</VirtualHost>\n\n",
-            domain = plan.domain
+            "<VirtualHost *:80>\n    ServerName {domain}\n    DocumentRoot {root}\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride None\n        Require all granted\n    </Directory>\n\n    RewriteEngine On\n    RewriteCond %{{REQUEST_URI}} !^/\\.well-known/acme-challenge/\n    RewriteRule ^ http://www.{domain}%{{REQUEST_URI}} [R=301,L]\n</VirtualHost>\n\n",
+            domain = plan.domain,
+            root = plan.app_document_root
         ),
         _ => String::new(),
     }
@@ -2770,9 +2872,10 @@ fn nginx_tls_vhost_content(plan: &plan::InstallPlan, php_socket: &str) -> String
     let app_hosts = nginx_app_hosts(plan);
     let canonical_redirect = nginx_https_canonical_redirect(plan);
     let reverb_proxy = nginx_reverb_proxy_block(plan);
+    let acme_location = nginx_acme_challenge_location();
 
     format!(
-        "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {http_hosts};\n    return 301 https://$host$request_uri;\n}}\n\n{canonical_redirect}server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    ssl_certificate /etc/letsencrypt/live/{cert_name}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{cert_name}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_prefer_server_ciphers off;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    add_header X-Content-Type-Options nosniff always;\n    add_header X-Frame-Options SAMEORIGIN always;\n    add_header Referrer-Policy strict-origin-when-cross-origin always;\n\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n{reverb_proxy}\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
+        "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {http_hosts};\n    root {root};\n\n{acme_location}\n    location / {{\n        return 301 https://$host$request_uri;\n    }}\n}}\n\n{canonical_redirect}server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    ssl_certificate /etc/letsencrypt/live/{cert_name}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{cert_name}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_prefer_server_ciphers off;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    add_header X-Content-Type-Options nosniff always;\n    add_header X-Frame-Options SAMEORIGIN always;\n    add_header Referrer-Policy strict-origin-when-cross-origin always;\n\n{acme_location}\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n{reverb_proxy}\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
         root = plan.app_document_root,
     )
 }
@@ -2786,7 +2889,7 @@ fn apache_tls_vhost_content(plan: &plan::InstallPlan, php_socket: &str) -> Strin
     let reverb_proxy = apache_reverb_proxy_block(plan);
 
     format!(
-        "<VirtualHost *:80>\n    ServerName {primary_host}\n    ServerAlias {http_hosts}\n    RewriteEngine On\n    RewriteRule ^ https://%{{HTTP_HOST}}%{{REQUEST_URI}} [R=301,L]\n</VirtualHost>\n\n{canonical_redirect}<VirtualHost *:443>\n    ServerName {server_name}\n{server_alias}    DocumentRoot {root}\n\n    ErrorLog ${{APACHE_LOG_DIR}}/g7-error.log\n    CustomLog ${{APACHE_LOG_DIR}}/g7-access.log combined\n\n    SSLEngine on\n    SSLCertificateFile /etc/letsencrypt/live/{cert_name}/fullchain.pem\n    SSLCertificateKeyFile /etc/letsencrypt/live/{cert_name}/privkey.pem\n    Protocols h2 http/1.1\n\n    Header always set X-Content-Type-Options \"nosniff\"\n    Header always set X-Frame-Options \"SAMEORIGIN\"\n    Header always set Referrer-Policy \"strict-origin-when-cross-origin\"\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n{reverb_proxy}\n    <FilesMatch \\.php$>\n        SetHandler \"proxy:unix:{php_socket}|fcgi://localhost/\"\n    </FilesMatch>\n\n    <DirectoryMatch \"^/.*/\\.git/\">\n        Require all denied\n    </DirectoryMatch>\n</VirtualHost>\n",
+        "<VirtualHost *:80>\n    ServerName {primary_host}\n    ServerAlias {http_hosts}\n    DocumentRoot {root}\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride None\n        Require all granted\n    </Directory>\n\n    RewriteEngine On\n    RewriteCond %{{REQUEST_URI}} !^/\\.well-known/acme-challenge/\n    RewriteRule ^ https://%{{HTTP_HOST}}%{{REQUEST_URI}} [R=301,L]\n</VirtualHost>\n\n{canonical_redirect}<VirtualHost *:443>\n    ServerName {server_name}\n{server_alias}    DocumentRoot {root}\n\n    ErrorLog ${{APACHE_LOG_DIR}}/g7-error.log\n    CustomLog ${{APACHE_LOG_DIR}}/g7-access.log combined\n\n    SSLEngine on\n    SSLCertificateFile /etc/letsencrypt/live/{cert_name}/fullchain.pem\n    SSLCertificateKeyFile /etc/letsencrypt/live/{cert_name}/privkey.pem\n    Protocols h2 http/1.1\n\n    Header always set X-Content-Type-Options \"nosniff\"\n    Header always set X-Frame-Options \"SAMEORIGIN\"\n    Header always set Referrer-Policy \"strict-origin-when-cross-origin\"\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n{reverb_proxy}\n    <FilesMatch \\.php$>\n        SetHandler \"proxy:unix:{php_socket}|fcgi://localhost/\"\n    </FilesMatch>\n\n    <DirectoryMatch \"^/.*/\\.git/\">\n        Require all denied\n    </DirectoryMatch>\n</VirtualHost>\n",
         primary_host = primary_http_host(plan),
         root = plan.app_document_root,
     )
@@ -4634,6 +4737,7 @@ mod tests {
         }
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
         if install_plan.web_server == "apache" {
             for _module in super::apache_http_modules() {
                 runner.push_output(CommandOutput::success(""));
@@ -4664,11 +4768,21 @@ mod tests {
         runner.push_output(CommandOutput::success(""));
 
         if install_plan.deployment_mode == "public" && install_plan.web_server == "nginx" {
+            runner.push_output(CommandOutput::success(""));
+            runner.push_output(CommandOutput::success(""));
+            for _host in super::certificate_hosts(install_plan) {
+                runner.push_output(CommandOutput::success(""));
+            }
             runner.push_output(CommandOutput::success("cert issued\n"));
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success("renew ok\n"));
         } else if install_plan.deployment_mode == "public" && install_plan.web_server == "apache" {
+            runner.push_output(CommandOutput::success(""));
+            runner.push_output(CommandOutput::success(""));
+            for _host in super::certificate_hosts(install_plan) {
+                runner.push_output(CommandOutput::success(""));
+            }
             runner.push_output(CommandOutput::success("cert issued\n"));
             for _module in super::apache_tls_modules() {
                 runner.push_output(CommandOutput::success(""));

@@ -3,8 +3,8 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use crate::account::{
-    chmod_recursive, chown_recursive, create_login_user, delete_login_user, set_login_password,
-    user_exists,
+    chmod_path, chmod_recursive, chown_recursive, create_login_user, delete_login_user,
+    set_login_password, user_exists,
 };
 use crate::apache::{config_test as apache_config_test, enable_module as apache_enable_module};
 use crate::app::{artisan, composer_install, npm_install, npm_run_build};
@@ -14,7 +14,8 @@ use crate::certbot::{certonly_webroot, delete_cert, renew_dry_run};
 use crate::command::{CommandError, CommandOutput, CommandRunner, RealCommandRunner};
 use crate::database::{DatabaseEngine, apply_sql};
 use crate::network::{
-    dns_ipv4_records, dns_ipv6_records, http_host_smoke, public_ipv4, public_ipv6, tcp_connect,
+    dns_ipv4_records, dns_ipv6_records, http_host_path_smoke, http_host_smoke, public_ipv4,
+    public_ipv6, tcp_connect,
 };
 use crate::nginx::config_test as nginx_config_test;
 use crate::os::{OsRelease, OsReleaseError, read_os_release};
@@ -123,6 +124,10 @@ impl<R: CommandRunner> SystemProbe<R> {
 
     pub fn http_host_smoke(&self, host: &str) -> Result<bool, SystemProbeError> {
         http_host_smoke(&self.runner, host).map_err(SystemProbeError::Command)
+    }
+
+    pub fn http_host_path_smoke(&self, host: &str, path: &str) -> Result<bool, SystemProbeError> {
+        http_host_path_smoke(&self.runner, host, path).map_err(SystemProbeError::Command)
     }
 
     pub fn certbot_renew_dry_run(
@@ -279,6 +284,10 @@ impl<R: CommandRunner> SystemProbe<R> {
         path: &str,
     ) -> Result<CommandOutput, SystemProbeError> {
         chmod_recursive(&self.runner, mode, path).map_err(SystemProbeError::Command)
+    }
+
+    pub fn chmod_path(&self, mode: &str, path: &str) -> Result<CommandOutput, SystemProbeError> {
+        chmod_path(&self.runner, mode, path).map_err(SystemProbeError::Command)
     }
 
     pub fn path_exists(&self, path: &Path) -> bool {

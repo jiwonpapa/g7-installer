@@ -60,7 +60,21 @@ pub fn tcp_connect<R: CommandRunner>(
 }
 
 pub fn http_host_smoke<R: CommandRunner>(runner: &R, host: &str) -> Result<bool, CommandError> {
+    http_host_path_smoke(runner, host, "/")
+}
+
+pub fn http_host_path_smoke<R: CommandRunner>(
+    runner: &R,
+    host: &str,
+    path: &str,
+) -> Result<bool, CommandError> {
     let host_header = format!("Host: {host}");
+    let normalized_path = if path.starts_with('/') {
+        path.to_string()
+    } else {
+        format!("/{path}")
+    };
+    let url = format!("http://127.0.0.1{normalized_path}");
     let output = runner.run(
         &CommandSpec::new("curl")
             .arg("-fsS")
@@ -68,7 +82,7 @@ pub fn http_host_smoke<R: CommandRunner>(runner: &R, host: &str) -> Result<bool,
             .arg("10")
             .arg("-H")
             .arg(host_header)
-            .arg("http://127.0.0.1/")
+            .arg(url)
             .arg("-o")
             .arg("/dev/null"),
     )?;
@@ -121,7 +135,9 @@ fn parse_getent_ips(output: &CommandOutput) -> Vec<IpAddr> {
 
 #[cfg(test)]
 mod tests {
-    use super::{dns_ipv4_records, http_host_smoke, public_ipv4, tcp_connect};
+    use super::{
+        dns_ipv4_records, http_host_path_smoke, http_host_smoke, public_ipv4, tcp_connect,
+    };
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
     use std::net::{IpAddr, Ipv4Addr};
@@ -179,6 +195,25 @@ mod tests {
                 .args
                 .contains(&OsString::from("http://127.0.0.1/"))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn http_path_smoke_uses_requested_path() -> std::result::Result<(), Box<dyn std::error::Error>>
+    {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success(""));
+
+        assert!(http_host_path_smoke(
+            &runner,
+            "example.com",
+            "/.well-known/acme-challenge/probe"
+        )?);
+        let recorded = runner.recorded();
+
+        assert!(recorded[0].args.contains(&OsString::from(
+            "http://127.0.0.1/.well-known/acme-challenge/probe"
+        )));
         Ok(())
     }
 }
