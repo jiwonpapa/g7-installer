@@ -45,6 +45,7 @@
             <li class="step" data-progress="plan"><span class="step-copy" data-ui-icon="clipboard-list">사양 확정</span></li>
             <li class="step" data-progress="install"><span class="step-copy" data-ui-icon="package-plus">기본 구성</span></li>
             <li class="step" data-progress="report"><span class="step-copy" data-ui-icon="file-check">결과</span></li>
+            <li class="step" data-progress="provision"><span class="step-copy" data-ui-icon="scan-line">세부 설정</span></li>
           </ul>
         </nav>
 
@@ -239,6 +240,50 @@
                   <input name="site_password_confirm" id="site-password-confirm" class="input input-bordered w-full" type="password" autocomplete="new-password" minlength="8" required />
                 </label>
                 <p id="site-password-status" class="password-status md:col-span-2" aria-live="polite" hidden></p>
+              </div>
+
+              <div class="grid gap-4 md:grid-cols-2">
+                <label class="field">
+                  <span class="field-label">
+                    DB 이름
+                    <span class="help-wrap">
+                      <button class="help-circle" type="button" tabindex="-1" aria-label="DB 이름 도움말">?</button>
+                      <span class="help-text">앱 전용 데이터베이스 이름입니다. 영문, 숫자, 밑줄만 사용합니다.</span>
+                    </span>
+                  </span>
+                  <input name="database_name" id="database-name-input" class="input input-bordered w-full" autocomplete="off" required />
+                </label>
+                <label class="field">
+                  <span class="field-label">
+                    DB 계정
+                    <span class="help-wrap">
+                      <button class="help-circle" type="button" tabindex="-1" aria-label="DB 계정 도움말">?</button>
+                      <span class="help-text">앱이 DB에 접속할 때 사용할 최소 권한 계정입니다. Linux 사이트 계정과 별개입니다.</span>
+                    </span>
+                  </span>
+                  <input name="database_user" id="database-user-input" class="input input-bordered w-full" autocomplete="off" required />
+                </label>
+                <label class="field">
+                  <span class="field-label">
+                    DB 비밀번호
+                    <span class="help-wrap">
+                      <button class="help-circle" type="button" tabindex="-1" aria-label="DB 비밀번호 도움말">?</button>
+                      <span class="help-text">웹앱 설정 파일에 들어갈 DB 접속 비밀번호입니다. 화면과 로그에는 저장하지 않습니다.</span>
+                    </span>
+                  </span>
+                  <input name="database_password" id="database-password" class="input input-bordered w-full" type="password" autocomplete="new-password" minlength="8" required />
+                </label>
+                <label class="field">
+                  <span class="field-label">
+                    DB 비밀번호 확인
+                    <span class="help-wrap">
+                      <button class="help-circle" type="button" tabindex="-1" aria-label="DB 비밀번호 확인 도움말">?</button>
+                      <span class="help-text">오타 방지를 위해 DB 비밀번호를 한 번 더 입력합니다.</span>
+                    </span>
+                  </span>
+                  <input name="database_password_confirm" id="database-password-confirm" class="input input-bordered w-full" type="password" autocomplete="new-password" minlength="8" required />
+                </label>
+                <p id="database-password-status" class="password-status md:col-span-2" aria-live="polite" hidden></p>
               </div>
 
               <details class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-100">
@@ -523,7 +568,7 @@
               <div>
                 <span class="step-eyebrow">6단계</span>
                 <h2>결과 리포트</h2>
-                <p>기본 서버 구성 결과, 검증 상태, 재시도 명령, 프로비저닝 계획을 확인합니다.</p>
+                <p>기본 서버 구성 결과를 요약합니다. 세부 적용/점검은 다음 단계에서 항목별로 확인합니다.</p>
               </div>
               <div class="flex flex-wrap gap-2">
                 <button id="report-button" class="btn btn-outline icon-button" type="button" data-icon="refresh-cw">리포트 새로고침</button>
@@ -543,6 +588,25 @@
             </div>
             <div class="wizard-actions">
               <button class="btn btn-ghost icon-button" type="button" data-icon="chevron-left" data-next="install">이전</button>
+              <button class="btn btn-primary icon-button" type="button" data-icon="scan-line" data-next="provision">세부 설정으로 이동</button>
+            </div>
+          </section>
+
+          <section class="view-panel" data-view="provision">
+            <div class="section-heading">
+              <div>
+                <span class="step-eyebrow">7단계</span>
+                <h2>세부 설정 적용/점검</h2>
+                <p>웹서버, PHP-FPM, DB, SSL, 메일, 웹앱을 카드별로 열어 설정값을 확인하고 필요한 적용/재시작/검증을 실행합니다.</p>
+              </div>
+              <button id="provision-refresh-button" class="btn btn-outline icon-button" type="button" data-icon="refresh-cw">리포트 새로고침</button>
+            </div>
+            <div id="provision-status" class="mt-5 hidden"></div>
+            <div id="provision-output" class="provisioning-actions mt-5">
+              <div class="empty-state">6단계 결과 리포트가 생성되면 세부 설정 카드가 표시됩니다.</div>
+            </div>
+            <div class="wizard-actions">
+              <button class="btn btn-ghost icon-button" type="button" data-icon="chevron-left" data-next="report">이전</button>
               <button id="start-over-button" class="btn btn-primary icon-button" type="button" data-icon="home">처음으로 돌아가기</button>
             </div>
           </section>
@@ -606,6 +670,28 @@
           <form method="dialog" class="flex gap-2">
             <button class="btn btn-ghost icon-button" value="cancel" data-icon="x">아니오</button>
             <button id="recovery-confirm-yes" class="btn btn-error icon-button" value="confirm" data-icon="check">예</button>
+          </form>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+      </form>
+    </dialog>
+    <dialog id="provision-action-dialog" class="modal">
+      <div class="modal-box provision-modal-box">
+        <div class="provision-modal-heading">
+          <div>
+            <span id="provision-action-status" class="badge badge-outline">대기</span>
+            <h3 id="provision-action-title" class="mt-3 text-lg font-semibold">세부 설정</h3>
+            <p id="provision-action-summary" class="mt-2 text-sm text-base-content/60">설정값을 확인한 뒤 적용/점검을 실행합니다.</p>
+          </div>
+        </div>
+        <div id="provision-action-details" class="provision-detail-grid mt-5"></div>
+        <pre id="provision-action-result" class="code-box mt-5 hidden"></pre>
+        <div class="modal-action">
+          <form method="dialog" class="flex flex-wrap gap-2">
+            <button class="btn btn-ghost icon-button" value="cancel" data-icon="x">닫기</button>
+            <button id="provision-action-run" class="btn btn-primary icon-button" value="run" data-icon="play">승인하고 적용/점검</button>
           </form>
         </div>
       </div>

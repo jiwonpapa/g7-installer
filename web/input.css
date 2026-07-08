@@ -364,6 +364,59 @@
     @apply flex flex-wrap gap-2;
   }
 
+  .provision-modal-box {
+    @apply max-w-4xl;
+  }
+
+  .provision-modal-heading {
+    @apply flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between;
+  }
+
+  .provision-modal-heading .badge[data-status="pass"] {
+    @apply badge-success;
+  }
+
+  .provision-modal-heading .badge[data-status="warn"],
+  .provision-modal-heading .badge[data-status="pending"] {
+    @apply badge-warning;
+  }
+
+  .provision-modal-heading .badge[data-status="fail"] {
+    @apply badge-error;
+  }
+
+  .provision-modal-heading .badge[data-status="info"] {
+    @apply badge-info;
+  }
+
+  .provision-detail-grid {
+    @apply grid gap-4 md:grid-cols-2;
+  }
+
+  .provision-detail-grid > section {
+    @apply rounded-md border border-base-300 bg-base-100 p-4;
+  }
+
+  .provision-detail-grid h4 {
+    @apply text-sm font-semibold;
+  }
+
+  .provision-detail-grid dl {
+    @apply mt-3 grid gap-2;
+  }
+
+  .provision-detail-grid dt {
+    @apply text-xs font-semibold text-base-content/50;
+  }
+
+  .provision-detail-grid dd {
+    @apply break-words text-sm font-semibold;
+  }
+
+  .provision-detail-grid code {
+    @apply mt-3 block overflow-x-auto rounded-md bg-base-200 px-3 py-2 font-mono text-xs leading-5;
+  }
+
   .provisioning-actions-heading > strong[data-status="pass"],
   .provisioning-action-card[data-status="pass"] strong {
     @apply bg-success text-success-content;

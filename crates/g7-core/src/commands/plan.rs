@@ -591,6 +591,9 @@ pub struct PlanOptions {
     pub php_version: String,
     pub php_source: String,
     pub database_engine: String,
+    pub database_name: Option<String>,
+    pub database_user: Option<String>,
+    pub database_password: Option<String>,
     pub site_user: String,
     pub site_user_password: Option<String>,
     pub web_root_mode: String,
@@ -618,6 +621,9 @@ impl Default for PlanOptions {
             php_version: DEFAULT_PHP_VERSION.to_string(),
             php_source: DEFAULT_PHP_SOURCE.to_string(),
             database_engine: DEFAULT_DATABASE_ENGINE.to_string(),
+            database_name: None,
+            database_user: None,
+            database_password: None,
             site_user: DEFAULT_SITE_USER.to_string(),
             site_user_password: None,
             web_root_mode: DEFAULT_WEB_ROOT_MODE.to_string(),
@@ -656,6 +662,7 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
     let php_source = normalize_php_source(&php_version, options.php_source)?;
     let site_user = normalize_site_user(options.site_user)?;
     validate_site_user_password(options.site_user_password.as_deref())?;
+    validate_database_password(options.database_password.as_deref())?;
     let web_root_mode = normalize_web_root_mode(options.web_root_mode, &options.custom_web_root)?;
     let web_root = web_root_for(
         &domain,
@@ -687,8 +694,29 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         options.smtp_from.as_deref(),
     )?;
     let smtp_port = smtp_port_for_mode(&mail_mode, options.smtp_port);
-    let database_name = database_name_for_domain(&domain, app_profile.id);
-    let database_user = database_user_for_site_user(&site_user, app_profile.id);
+    let database_name = match options.database_name {
+        Some(value) if !value.trim().is_empty() => normalize_database_identifier(
+            "database-name",
+            value,
+            64,
+            "letters, digits, and underscore only, max 64 characters",
+        )?,
+        _ => database_name_for_domain(&domain, app_profile.id),
+    };
+    let database_user = match options.database_user {
+        Some(value) if !value.trim().is_empty() => normalize_database_identifier(
+            "database-user",
+            value,
+            32,
+            "letters, digits, and underscore only, max 32 characters",
+        )?,
+        _ => database_user_for_site_user(&site_user, app_profile.id),
+    };
+    let database_password_policy = if options.database_password.is_some() {
+        "user-provided-store-root-only"
+    } else {
+        "generate-random-store-root-only"
+    };
 
     let dns_check_required = options.dns_check && !options.local_test;
     let deployment_mode = if options.local_test {
@@ -750,6 +778,7 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         database_engine: &database_engine,
         database_name: &database_name,
         database_user: &database_user,
+        database_password_policy,
         site_user: &site_user,
         web_root: &web_root,
         www_mode: &www_mode,
@@ -787,7 +816,7 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         ssh_policy,
         database_name,
         database_user,
-        database_password_policy: "generate-random-store-root-only",
+        database_password_policy,
         rollback_enabled: options.rollback,
         preserve_config: options.preserve_config,
         dns_check_required,
@@ -1454,6 +1483,7 @@ struct ProvisioningInput<'a> {
     database_engine: &'a str,
     database_name: &'a str,
     database_user: &'a str,
+    database_password_policy: &'a str,
     site_user: &'a str,
     web_root: &'a str,
     www_mode: &'a str,
@@ -1629,7 +1659,7 @@ fn provisioning_sections(input: ProvisioningInput<'_>) -> Vec<ProvisioningSectio
                 ProvisioningSetting::new("user", input.database_user),
                 ProvisioningSetting::new(
                     "password_policy",
-                    "무작위 생성 후 root-only 파일에 저장, 화면/로그 출력 금지",
+                    database_password_policy_label(input.database_password_policy),
                 ),
                 ProvisioningSetting::new("bind", "127.0.0.1 또는 unix socket 전용"),
                 ProvisioningSetting::new(
@@ -2062,6 +2092,66 @@ fn validate_site_user_password(password: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+fn validate_database_password(password: Option<&str>) -> Result<()> {
+    let Some(password) = password else {
+        return Ok(());
+    };
+
+    if password.len() < 8 {
+        return Err(Error::InvalidOption {
+            field: "database-password",
+            value: "<redacted>".to_string(),
+            supported: "at least 8 characters".to_string(),
+        });
+    }
+
+    let unsupported = password
+        .chars()
+        .any(|ch| ch == '\'' || ch == '\\' || ch == '\n' || ch == '\r' || ch.is_control());
+    if unsupported {
+        return Err(Error::InvalidOption {
+            field: "database-password",
+            value: "<redacted>".to_string(),
+            supported: "no single quote, backslash, newline, or control characters".to_string(),
+        });
+    }
+
+    Ok(())
+}
+
+fn normalize_database_identifier(
+    field: &'static str,
+    value: String,
+    max_len: usize,
+    supported: &str,
+) -> Result<String> {
+    let value = value.trim().to_string();
+
+    if value.is_empty() {
+        return Err(Error::MissingInput { field });
+    }
+
+    let valid = value.len() <= max_len
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        && value
+            .chars()
+            .next()
+            .map(|ch| ch.is_ascii_alphabetic() || ch == '_')
+            .unwrap_or(false);
+
+    if valid {
+        Ok(value)
+    } else {
+        Err(Error::InvalidOption {
+            field,
+            value,
+            supported: supported.to_string(),
+        })
+    }
+}
+
 fn normalize_web_root_mode(mode: String, custom_web_root: &Option<String>) -> Result<String> {
     let mode = if custom_web_root.is_some() && mode == DEFAULT_WEB_ROOT_MODE {
         "custom".to_string()
@@ -2147,6 +2237,15 @@ fn database_prefix(app_profile: &str) -> &'static str {
         "wordpress" => "wp",
         "laravel" => "laravel",
         _ => "g7",
+    }
+}
+
+fn database_password_policy_label(policy: &str) -> &'static str {
+    match policy {
+        "user-provided-store-root-only" => {
+            "사용자 입력값을 root-only 파일에 저장, 화면/로그 출력 금지"
+        }
+        _ => "무작위 생성 후 root-only 파일에 저장, 화면/로그 출력 금지",
     }
 }
 
@@ -2500,6 +2599,36 @@ mod tests {
             plan.packages
                 .iter()
                 .all(|package| !package.name.contains("php8.5-opcache"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn plan_uses_user_provided_database_credentials()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let options = PlanOptions {
+            database_name: Some("custom_g7".to_string()),
+            database_user: Some("custom_user".to_string()),
+            database_password: Some("0808dong!!".to_string()),
+            ..PlanOptions::default()
+        };
+        let plan = build_with_options("example.com".to_string(), options)?;
+
+        assert_eq!(plan.database_name, "custom_g7");
+        assert_eq!(plan.database_user, "custom_user");
+        assert_eq!(
+            plan.database_password_policy,
+            "user-provided-store-root-only"
+        );
+        assert!(
+            plan.provisioning
+                .iter()
+                .find(|section| section.name == "database")
+                .expect("database section")
+                .settings
+                .iter()
+                .any(|setting| setting.key == "password_policy"
+                    && setting.value.contains("사용자 입력값"))
         );
         Ok(())
     }

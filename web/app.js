@@ -17,6 +17,7 @@ const state = {
   recoveryStatus: null,
   currentOperation: null,
   operationLocked: false,
+  provisionActionResults: {},
   planPackages: [],
   packageTicker: null,
   theme: localStorage.getItem("g7inst-theme") || "light",
@@ -32,6 +33,11 @@ const nodes = {
   sitePassword: document.querySelector("#site-password"),
   sitePasswordConfirm: document.querySelector("#site-password-confirm"),
   sitePasswordStatus: document.querySelector("#site-password-status"),
+  databaseName: document.querySelector("#database-name-input"),
+  databaseUser: document.querySelector("#database-user-input"),
+  databasePassword: document.querySelector("#database-password"),
+  databasePasswordConfirm: document.querySelector("#database-password-confirm"),
+  databasePasswordStatus: document.querySelector("#database-password-status"),
   optionsPlanButtons: document.querySelectorAll('[data-view="options"] [data-next="plan"]'),
   mailMode: document.querySelector("#mail-mode"),
   databaseVersion: document.querySelector("#database-version"),
@@ -43,12 +49,14 @@ const nodes = {
   optionsForm: document.querySelector("#options-form"),
   planOutput: document.querySelector("#plan-output"),
   reportOutput: document.querySelector("#report-output"),
+  provisionOutput: document.querySelector("#provision-output"),
   doctorResults: document.querySelector("#doctor-results"),
   loginStatus: document.querySelector("#login-status"),
   doctorStatus: document.querySelector("#doctor-status"),
   planStatus: document.querySelector("#plan-status"),
   installStatus: document.querySelector("#install-status"),
   reportStatus: document.querySelector("#report-status"),
+  provisionStatus: document.querySelector("#provision-status"),
   installProgress: document.querySelector("#install-progress"),
   reportProgress: document.querySelector("#report-progress"),
   packageProgressList: document.querySelector("#package-progress-list"),
@@ -65,6 +73,14 @@ const nodes = {
   recoveryConfirmMessage: document.querySelector("#recovery-confirm-message"),
   recoveryConfirmSummary: document.querySelector("#recovery-confirm-summary"),
   recoveryConfirmYes: document.querySelector("#recovery-confirm-yes"),
+  provisionRefreshButton: document.querySelector("#provision-refresh-button"),
+  provisionActionDialog: document.querySelector("#provision-action-dialog"),
+  provisionActionTitle: document.querySelector("#provision-action-title"),
+  provisionActionSummary: document.querySelector("#provision-action-summary"),
+  provisionActionStatus: document.querySelector("#provision-action-status"),
+  provisionActionDetails: document.querySelector("#provision-action-details"),
+  provisionActionResult: document.querySelector("#provision-action-result"),
+  provisionActionRun: document.querySelector("#provision-action-run"),
   operationOverlay: document.querySelector("#operation-overlay"),
   operationOverlayTitle: document.querySelector("#operation-overlay-title"),
   operationOverlayMessage: document.querySelector("#operation-overlay-message"),
@@ -78,7 +94,17 @@ const nodes = {
   summaryApp: document.querySelector("#summary-app"),
 };
 
-const stepOrder = ["login", "check", "options", "plan", "install", "report"];
+const stepOrder = ["login", "check", "options", "plan", "install", "report", "provision"];
+const stepRoutes = {
+  login: "/setup/connect",
+  check: "/setup/doctor",
+  options: "/setup/options",
+  plan: "/setup/plan",
+  install: "/setup/install",
+  report: "/setup/result",
+  provision: "/setup/provision",
+};
+const routeToStep = Object.fromEntries(Object.entries(stepRoutes).map(([step, route]) => [route, step]));
 const wizardStorageKey = "g7inst-wizard-state-v1";
 const installStageOrder = [
   "preflight",
@@ -431,7 +457,7 @@ function formValues() {
   const values = {};
   const form = new FormData(nodes.optionsForm);
   form.forEach((value, key) => {
-    if (key === "site_password" || key === "site_password_confirm") {
+    if (key === "site_password" || key === "site_password_confirm" || key === "database_password" || key === "database_password_confirm") {
       return;
     }
     values[key] = value;
@@ -467,6 +493,7 @@ function saveWizardState() {
       planReport: state.planReport,
       savedReportPayload: state.savedReportPayload,
       recoveryStatus: state.recoveryStatus,
+      provisionActionResults: state.provisionActionResults,
       flags: {
         doctorPassed: state.doctorPassed,
         planReady: state.planReady,
@@ -494,7 +521,7 @@ function setPlanReady(ready) {
 
 function refreshConfirmSpecButton() {
   if (nodes.confirmSpecButton) {
-    nodes.confirmSpecButton.disabled = !state.planReady || Boolean(sitePasswordError());
+    nodes.confirmSpecButton.disabled = !state.planReady || Boolean(sitePasswordError() || databaseError());
   }
 }
 
@@ -536,11 +563,27 @@ function setDoctorPassed(passed) {
 }
 
 function normalizedStep(step) {
-  return stepOrder.includes(step) ? step : "login";
+  if (stepOrder.includes(step)) {
+    return step;
+  }
+  const path = String(step || "").split("?")[0];
+  return routeToStep[path] || "login";
 }
 
 function stepUrl(step) {
-  return `${window.location.pathname}#${step}`;
+  const route = stepRoutes[normalizedStep(step)] || stepRoutes.login;
+  const query = step === "login" && window.location.search.includes("token=") ? window.location.search : "";
+  return `${route}${query}`;
+}
+
+function stepFromLocation() {
+  if (routeToStep[window.location.pathname]) {
+    return routeToStep[window.location.pathname];
+  }
+  if (window.location.hash) {
+    return normalizedStep(window.location.hash.replace("#", ""));
+  }
+  return state.activeStep || "login";
 }
 
 function writeStepHistory(step, replace) {
@@ -617,7 +660,7 @@ function showStep(nextStep, options = {}) {
       setAlert(
         nodes.planStatus,
         "warning",
-        "사이트 계정 비밀번호 확인 필요",
+        "계정 정보 확인 필요",
         passwordError,
       );
       log(passwordError);
@@ -635,12 +678,12 @@ function showStep(nextStep, options = {}) {
     step = "plan";
   }
 
-  if (step === "report" && !state.reportReady) {
+  if (["report", "provision"].includes(step) && !state.reportReady) {
     setAlert(
       nodes.installStatus,
       "warning",
       "설치 결과가 아직 없습니다",
-      "기본 서버 구성을 완료해야 결과 리포트를 볼 수 있습니다.",
+      "기본 서버 구성을 완료해야 결과와 세부 설정을 볼 수 있습니다.",
     );
     step = "install";
   }
@@ -672,6 +715,9 @@ function showStep(nextStep, options = {}) {
   if (state.activeStep === "plan") {
     void generatePlan({ auto: true });
   }
+  if (state.activeStep === "provision") {
+    renderProvisionPanel(currentReport());
+  }
 }
 
 function optionPayload() {
@@ -686,6 +732,10 @@ function optionPayload() {
     php_source: phpSourceForVersion(form.get("php_version")),
     database: form.get("database"),
     database_version: form.get("database_version"),
+    database_name: form.get("database_name")?.trim() || "",
+    database_user: form.get("database_user")?.trim() || "",
+    database_password: form.get("database_password") || "",
+    database_password_confirm: form.get("database_password_confirm") || "",
     app_package: form.get("app_package"),
     site_user: form.get("site_user")?.trim() || "g7",
     site_password: form.get("site_password") || "",
@@ -708,7 +758,7 @@ function optionPayload() {
 }
 
 function validateSitePassword(payload) {
-  return sitePasswordError(payload);
+  return sitePasswordError(payload) || databaseError(payload);
 }
 
 const sitePasswordAlertMessages = [
@@ -717,6 +767,14 @@ const sitePasswordAlertMessages = [
   "사이트 계정 비밀번호는 8자 이상이어야 합니다.",
   "사이트 계정 비밀번호에는 콜론, 줄바꿈, 제어문자를 사용할 수 없습니다.",
   "사이트 계정 비밀번호에 사용할 수 없는 문자가 있습니다.",
+  "DB 이름을 입력하세요.",
+  "DB 이름 형식이 올바르지 않습니다.",
+  "DB 계정을 입력하세요.",
+  "DB 계정 형식이 올바르지 않습니다.",
+  "DB 비밀번호를 입력하세요.",
+  "DB 비밀번호 확인이 일치하지 않습니다.",
+  "DB 비밀번호는 8자 이상이어야 합니다.",
+  "DB 비밀번호에 사용할 수 없는 문자가 있습니다.",
 ];
 
 function sitePasswordError(payload = optionPayload()) {
@@ -735,6 +793,38 @@ function sitePasswordError(payload = optionPayload()) {
   return null;
 }
 
+function isDatabaseIdentifier(value, maxLength) {
+  return new RegExp(`^[A-Za-z_][A-Za-z0-9_]{0,${maxLength - 1}}$`).test(value || "");
+}
+
+function databaseError(payload = optionPayload()) {
+  if (!payload.database_name) {
+    return "DB 이름을 입력하세요.";
+  }
+  if (!isDatabaseIdentifier(payload.database_name, 64)) {
+    return "DB 이름 형식이 올바르지 않습니다. 영문 또는 밑줄로 시작하고 영문, 숫자, 밑줄만 사용하세요.";
+  }
+  if (!payload.database_user) {
+    return "DB 계정을 입력하세요.";
+  }
+  if (!isDatabaseIdentifier(payload.database_user, 32)) {
+    return "DB 계정 형식이 올바르지 않습니다. 영문 또는 밑줄로 시작하고 영문, 숫자, 밑줄만 사용하세요.";
+  }
+  if (!payload.database_password) {
+    return "DB 비밀번호를 입력하세요.";
+  }
+  if (payload.database_password !== payload.database_password_confirm) {
+    return "DB 비밀번호 확인이 일치하지 않습니다.";
+  }
+  if (payload.database_password.length < 8) {
+    return "DB 비밀번호는 8자 이상이어야 합니다.";
+  }
+  if (/['\\\n\r\x00-\x1F\x7F]/.test(payload.database_password)) {
+    return "DB 비밀번호에 사용할 수 없는 문자가 있습니다. 작은따옴표, 백슬래시, 줄바꿈, 제어문자는 사용할 수 없습니다.";
+  }
+  return null;
+}
+
 function clearSitePasswordAlerts() {
   [nodes.planStatus, nodes.installStatus].forEach((node) => {
     const text = node?.textContent || "";
@@ -747,8 +837,12 @@ function clearSitePasswordAlerts() {
 function refreshSitePasswordState(options = {}) {
   const payload = optionPayload();
   const error = sitePasswordError(payload);
+  const dbError = databaseError(payload);
+  const combinedError = error || dbError;
   const hasInput = Boolean(payload.site_password || payload.site_password_confirm);
+  const hasDbInput = Boolean(payload.database_password || payload.database_password_confirm || payload.database_name || payload.database_user);
   const shouldShowStatus = Boolean(options.show || hasInput || state.activeStep === "options");
+  const shouldShowDbStatus = Boolean(options.show || hasDbInput || state.activeStep === "options");
 
   if (nodes.sitePassword) {
     nodes.sitePassword.setCustomValidity(error || "");
@@ -763,17 +857,29 @@ function refreshSitePasswordState(options = {}) {
     nodes.sitePasswordStatus.dataset.status = error ? "fail" : "pass";
     nodes.sitePasswordStatus.textContent = error || "사이트 계정 비밀번호가 일치합니다.";
   }
+  [nodes.databaseName, nodes.databaseUser, nodes.databasePassword, nodes.databasePasswordConfirm].forEach((node) => {
+    if (!node) {
+      return;
+    }
+    node.setCustomValidity(dbError || "");
+    node.classList.toggle("input-error", Boolean(dbError && shouldShowDbStatus));
+  });
+  if (nodes.databasePasswordStatus) {
+    nodes.databasePasswordStatus.hidden = !shouldShowDbStatus;
+    nodes.databasePasswordStatus.dataset.status = dbError ? "fail" : "pass";
+    nodes.databasePasswordStatus.textContent = dbError || "DB 이름, 계정, 비밀번호 확인이 통과했습니다.";
+  }
   nodes.optionsPlanButtons.forEach((button) => {
-    button.disabled = Boolean(error);
-    button.title = error || "";
-    button.setAttribute("aria-disabled", error ? "true" : "false");
+    button.disabled = Boolean(combinedError);
+    button.title = combinedError || "";
+    button.setAttribute("aria-disabled", combinedError ? "true" : "false");
   });
   refreshConfirmSpecButton();
-  if (!error) {
+  if (!combinedError) {
     clearSitePasswordAlerts();
   }
 
-  return error;
+  return combinedError;
 }
 
 function setFormValue(name, value) {
@@ -783,6 +889,51 @@ function setFormValue(name, value) {
   }
 
   field.value = value;
+}
+
+function databasePrefix(appPackage) {
+  if (appPackage === "wordpress") {
+    return "wp";
+  }
+  if (appPackage === "laravel") {
+    return "laravel";
+  }
+  return "g7";
+}
+
+function derivedDatabaseName(domain, appPackage) {
+  const prefix = databasePrefix(appPackage);
+  const normalized = String(domain || "example.com")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48 - prefix.length - 1);
+  return `${prefix}_${normalized || "site"}`;
+}
+
+function derivedDatabaseUser(siteUser, appPackage) {
+  const prefix = databasePrefix(appPackage);
+  const normalizedSiteUser = String(siteUser || "g7").replace(/[^A-Za-z0-9_]+/g, "_");
+  const value = normalizedSiteUser === "g7" ? `${prefix}_app` : `${prefix}_${normalizedSiteUser}`;
+  return value.slice(0, 32);
+}
+
+function syncDatabaseDefaults() {
+  const form = nodes.optionsForm;
+  const domain = form.elements.domain?.value;
+  const appPackage = form.elements.app_package?.value;
+  const siteUser = form.elements.site_user?.value;
+  const nextName = derivedDatabaseName(domain, appPackage);
+  const nextUser = derivedDatabaseUser(siteUser, appPackage);
+
+  if (nodes.databaseName && (!nodes.databaseName.value || nodes.databaseName.dataset.autoValue === nodes.databaseName.value)) {
+    nodes.databaseName.value = nextName;
+    nodes.databaseName.dataset.autoValue = nextName;
+  }
+  if (nodes.databaseUser && (!nodes.databaseUser.value || nodes.databaseUser.dataset.autoValue === nodes.databaseUser.value)) {
+    nodes.databaseUser.value = nextUser;
+    nodes.databaseUser.dataset.autoValue = nextUser;
+  }
 }
 
 function applyTemplate(templateName) {
@@ -836,6 +987,7 @@ function refreshFormState(options = {}) {
     nodes.databaseVersion.disabled = false;
   }
 
+  syncDatabaseDefaults();
   refreshSecurityGuidance();
   refreshSitePasswordState();
   refreshSummary();
@@ -857,7 +1009,13 @@ function refreshSummary() {
 }
 
 function planRequestSignature(payload = optionPayload()) {
-  const { site_password: _sitePassword, site_password_confirm: _sitePasswordConfirm, ...safePayload } = payload;
+  const {
+    site_password: _sitePassword,
+    site_password_confirm: _sitePasswordConfirm,
+    database_password: _databasePassword,
+    database_password_confirm: _databasePasswordConfirm,
+    ...safePayload
+  } = payload;
   return JSON.stringify(safePayload);
 }
 
@@ -1061,10 +1219,10 @@ async function generatePlan(options = {}) {
 
   const passwordError = validateSitePassword(payload);
   if (passwordError) {
-    setAlert(nodes.planStatus, "error", "사이트 계정 비밀번호 확인 필요", passwordError);
+    setAlert(nodes.planStatus, "error", "계정 정보 확인 필요", passwordError);
     nodes.planOutput.innerHTML = planPlaceholderHtml(
       "사양 확인 필요",
-      `${passwordError}\n이전으로 돌아가 사이트 계정 비밀번호를 다시 입력하세요.`,
+      `${passwordError}\n이전으로 돌아가 사이트 계정과 DB 계정 정보를 다시 입력하세요.`,
     );
     setPlanReady(false);
     renderPackageProgress([]);
@@ -1567,6 +1725,8 @@ function applyReportOptions(report) {
     web_server: report.web_server,
     php_version: report.php_version,
     database: report.database,
+    database_name: report.database_name,
+    database_user: report.database_user,
     site_user: report.site_user,
     web_root: report.web_root,
     security_profile: report.security_profile,
@@ -1655,6 +1815,9 @@ function renderInstallReport(report) {
       ["웹앱 링크", link.html],
       ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / ${phpRuntimeLabel(report.php_version, report.php_source)}`],
       ["데이터베이스", `${databaseLabel(report.database)} (${databaseVersionLabel(report.database_version)})`],
+      ["DB 이름", report.database_name || "-"],
+      ["DB 계정", report.database_user || "-"],
+      ["DB 비밀번호", report.database_password_policy === "user-provided-store-root-only" ? "사용자 입력값 저장" : "무작위 생성"],
       ["앱 패키지", appPackageLabel(report.app_package)],
       ["앱 문서 루트", report.app_document_root || "-"],
       ["사이트 계정", report.site_user],
@@ -1667,22 +1830,11 @@ function renderInstallReport(report) {
       ["소유 파일 목록", report.owned_files_path],
       ["설정 안내서", report.setup_guide_path || "-"],
     ], note),
-    provisioningActionPanel(report),
     listCard("완료된 작업", report.completed_steps),
-    checksCard("안전장치", report.safety_checks),
-    checksCard("설치 전 패키지 기준", report.preinstall_package_checks),
-    checksCard("설치 패키지 검증", report.package_checks),
-    checksCard("서비스 검증", report.service_checks),
-    checksCard("포트 검증", report.port_checks),
-    checksCard("DNS / 네트워크 검증", report.network_checks),
-    checksCard("런타임 설정", report.runtime_checks, "report-runtime"),
-    checksCard("DB 설정", report.database_checks, "report-database"),
-    checksCard("방화벽 설정", report.firewall_checks, "report-firewall"),
-    checksCard("웹서버 / 도메인 연결 검증", report.vhost_checks, "report-vhost"),
-    checksCard("메일 발송 검증", report.mail_checks, "report-mail"),
-    checksCard("SSL / Certbot 검증", report.certbot_checks, "report-ssl"),
-    checksCard("웹앱 설치", report.app_checks, "report-app"),
-    checksCard("앱 요구사항", report.app_requirements),
+    compactListCard("다음 단계", [
+      "7단계 세부 설정에서 웹서버, PHP-FPM, DB, SSL, 메일, 웹앱 카드를 항목별로 열어 확인합니다.",
+      "각 카드는 설정값, 관련 파일, 실행/재시작 명령, 검증 결과를 따로 보여줍니다.",
+    ]),
     report.problem ? listCard("중단 원인", [report.problem]) : "",
   ].join("");
 
@@ -1697,6 +1849,7 @@ function renderInstallReport(report) {
     path: "방금 생성됨",
     content: JSON.stringify(report),
   };
+  renderProvisionPanel(report);
   saveWizardState();
 }
 
@@ -1738,6 +1891,9 @@ function renderSavedReport(payload) {
       ["단계", report.phase || "-"],
       ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / ${phpRuntimeLabel(report.php_version, report.php_source)}`],
       ["데이터베이스", databaseLabel(report.database)],
+      ["DB 이름", report.database_name || "-"],
+      ["DB 계정", report.database_user || "-"],
+      ["DB 비밀번호", report.database_password_policy === "user-provided-store-root-only" ? "사용자 입력값 저장" : "무작위 생성"],
       ["앱 패키지", appPackageLabel(report.app_package || report.app_profile)],
       ["앱 문서 루트", report.app_document_root || "-"],
       ["사이트 계정", report.site_user || "-"],
@@ -1747,26 +1903,16 @@ function renderSavedReport(payload) {
       ["DNS/IP 확인", report.dns_check ? "수행" : "건너뜀"],
       ["설정 안내서", report.setup_guide_path || "-"],
     ], note),
-    provisioningActionPanel(report),
-    checksCard("안전장치", report.safety_checks),
-    checksCard("설치 전 패키지 기준", report.preinstall_package_checks),
-    checksCard("설치 패키지 검증", report.package_checks),
-    checksCard("서비스 검증", report.service_checks),
-    checksCard("포트 검증", report.port_checks),
-    checksCard("DNS / 네트워크 검증", report.network_checks),
-    checksCard("런타임 설정", report.runtime_checks, "report-runtime"),
-    checksCard("DB 설정", report.database_checks, "report-database"),
-    checksCard("방화벽 설정", report.firewall_checks, "report-firewall"),
-    checksCard("웹서버 / 도메인 연결 검증", report.vhost_checks, "report-vhost"),
-    checksCard("메일 발송 검증", report.mail_checks, "report-mail"),
-    checksCard("SSL / Certbot 검증", report.certbot_checks, "report-ssl"),
-    checksCard("웹앱 설치", report.app_checks, "report-app"),
-    checksCard("앱 요구사항", report.app_requirements),
+    compactListCard("다음 단계", [
+      "7단계 세부 설정에서 웹서버, PHP-FPM, DB, SSL, 메일, 웹앱 카드를 항목별로 열어 확인합니다.",
+      "각 카드는 설정값, 관련 파일, 실행/재시작 명령, 검증 결과를 따로 보여줍니다.",
+    ]),
     report.problem ? listCard("문제", [report.problem]) : "",
   ].join("");
   hydrateIcons(nodes.reportOutput);
   setReportReady(true);
   restoreInstallStateFromReport(report);
+  renderProvisionPanel(report);
   saveWizardState();
 }
 
@@ -1822,14 +1968,26 @@ function listCard(title, items) {
   `;
 }
 
-function provisioningActionPanel(report) {
+function currentReport() {
+  return parseSavedReport(state.savedReportPayload);
+}
+
+function renderProvisionPanel(report = currentReport()) {
+  if (!nodes.provisionOutput) {
+    return;
+  }
+  if (!report || typeof report !== "object") {
+    nodes.provisionOutput.innerHTML = `<div class="empty-state">6단계 결과 리포트가 생성되면 세부 설정 카드가 표시됩니다.</div>`;
+    return;
+  }
+
   const actions = provisioningActions(report);
-  return `
+  nodes.provisionOutput.innerHTML = `
     <section class="report-card provisioning-actions">
       <div class="provisioning-actions-heading">
         <div>
-          <h3>세부 설정 액션 패널</h3>
-          <p>설치 이후 확인해야 할 웹서버, PHP, DB, SSL, 메일, 웹앱 설정 상태입니다.</p>
+          <h3>세부 설정 카드</h3>
+          <p>설정값을 항목별로 확인하고 승인 후 적용/재시작/검증을 실행합니다.</p>
         </div>
         <strong data-status="${escapeHtml(overallProvisioningStatus(actions))}">${escapeHtml(overallProvisioningLabel(actions))}</strong>
       </div>
@@ -1843,14 +2001,14 @@ function provisioningActionPanel(report) {
             <p>${escapeHtml(action.summary)}</p>
             <code>${escapeHtml(action.command)}</code>
             <div class="provisioning-action-buttons">
-              <button class="btn btn-sm btn-primary icon-button" type="button" data-icon="refresh-cw" data-provision-action="${escapeHtml(action.key)}">${escapeHtml(action.actionLabel)}</button>
-              <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="scan-line" data-report-jump="${escapeHtml(action.target)}">${escapeHtml(action.cta)}</button>
+              <button class="btn btn-sm btn-primary icon-button" type="button" data-icon="scan-line" data-provision-open="${escapeHtml(action.key)}">설정값 확인</button>
             </div>
           </article>
         `).join("")}
       </div>
     </section>
   `;
+  hydrateIcons(nodes.provisionOutput);
 }
 
 function provisioningActions(report = {}) {
@@ -1861,41 +2019,78 @@ function provisioningActions(report = {}) {
   const appRoot = report.web_root || "/home/사이트계정/public_html";
   const appUrl = report.app_url || accessLink(report.domain || "example.com", report.phase).html.replace(/<[^>]+>/g, "");
   const mailSkipped = report.mail_mode === "none";
+  const certName = report.domain || "example.com";
 
   return [
     provisioningAction("webserver", "웹서버/vhost", report.vhost_checks, {
-      target: "report-vhost",
       summary: "도메인 요청을 앱 문서 루트와 PHP-FPM으로 연결합니다.",
       command: `${webCheck} && sudo systemctl reload ${webService}`,
+      settings: [
+        ["도메인", report.domain || "-"],
+        ["문서 루트", report.app_document_root || "-"],
+        ["웹루트", report.web_root || "-"],
+        ["설정 파일", report.web_server === "apache" ? "/etc/apache2/sites-available/g7.conf" : "/etc/nginx/sites-available/g7.conf"],
+        ["서비스", webService],
+      ],
     }),
     provisioningAction("php", "PHP-FPM", report.runtime_checks, {
-      target: "report-runtime",
       summary: "사이트 계정으로 PHP 풀을 실행하고 메모리 기준 튜닝값을 적용합니다.",
       command: `sudo systemctl restart ${fpmService}`,
+      settings: [
+        ["PHP", phpRuntimeLabel(report.php_version, report.php_source)],
+        ["Pool 사용자", report.site_user || "-"],
+        ["Pool 설정", `/etc/php/${report.php_version || "8.3"}/fpm/pool.d/g7.conf`],
+        ["php.ini", `/etc/php/${report.php_version || "8.3"}/fpm/php.ini`],
+        ["서비스", fpmService],
+      ],
     }),
     provisioningAction("database", "데이터베이스", report.database_checks, {
-      target: "report-database",
       summary: "앱 전용 DB와 DB 계정을 만들고 root 전용 비밀 파일에 저장합니다.",
       command: `sudo systemctl restart ${dbService}`,
+      settings: [
+        ["DB 엔진", databaseLabel(report.database)],
+        ["DB 이름", report.database_name || "-"],
+        ["DB 계정", report.database_user || "-"],
+        ["비밀번호 정책", report.database_password_policy === "user-provided-store-root-only" ? "사용자 입력값 root-only 저장" : "무작위 생성 후 root-only 저장"],
+        ["비밀번호 보관", "/etc/g7-installer/secrets.toml"],
+        ["서비스", dbService],
+      ],
     }),
     provisioningAction("ssl", "SSL/Certbot", report.certbot_checks, {
-      target: "report-ssl",
       summary: "주 도메인과 www 도메인 인증서를 발급하고 자동 갱신을 검증합니다.",
       command: "sudo certbot renew --dry-run --no-random-sleep-on-renew",
+      settings: [
+        ["인증서 이름", certName],
+        ["인증서 경로", `/etc/letsencrypt/live/${certName}/fullchain.pem`],
+        ["키 경로", `/etc/letsencrypt/live/${certName}/privkey.pem`],
+        ["갱신", "certbot.timer"],
+      ],
     }),
     provisioningAction("mail", "메일 발송", report.mail_checks, {
-      target: "report-mail",
       summary: mailSkipped ? "메일 발송 설정을 선택하지 않아 건너뛰었습니다." : "Postfix 또는 SMTP 릴레이 발송 설정을 확인합니다.",
       command: mailSkipped ? "설정 안 함" : "sudo systemctl restart postfix",
       forceStatus: mailSkipped ? "info" : null,
       forceLabel: mailSkipped ? "건너뜀" : null,
+      settings: [
+        ["방식", mailModeLabel(report.mail_mode)],
+        ["SMTP 서버", report.smtp_host || "-"],
+        ["SMTP 포트", report.smtp_port || "-"],
+        ["발신 주소", report.smtp_from || "-"],
+        ["서비스", mailSkipped ? "-" : "postfix"],
+      ],
     }),
     provisioningAction("app", "웹앱", report.app_checks, {
-      target: "report-app",
       summary: "앱 소스, .env, 권한, 설치 화면 또는 Laravel 런타임을 확인합니다.",
       command: report.app_profile === "gnuboard7" || report.app_package === "gnuboard7"
         ? `브라우저에서 ${appUrl} 접속`
         : `cd ${appRoot} && php artisan about`,
+      settings: [
+        ["앱", appPackageLabel(report.app_package || report.app_profile)],
+        ["앱 경로", appRoot],
+        ["문서 루트", report.app_document_root || "-"],
+        ["접속 링크", appUrl],
+        ["안내서", report.setup_guide_path || "-"],
+      ],
     }),
   ];
 }
@@ -1909,7 +2104,8 @@ function provisioningAction(key, title, checks, options) {
     label: options.forceLabel || provisioningStatusLabel(status),
     summary: provisioningSummary(status, options.summary),
     command: options.command,
-    target: options.target,
+    settings: options.settings || [],
+    checks: Array.isArray(checks) ? checks : [],
     cta: status === "fail" ? "실패 항목 확인" : status === "warn" ? "후속 확인" : "상세 확인",
     actionLabel: status === "fail" ? "다시 점검" : "재시작/점검",
   };
@@ -1976,6 +2172,113 @@ function formatProvisionActionResult(result) {
     .map((check) => `- [${checkStatusLabel(check.status, checkStatus(check.status), check)}] ${check.name}: ${checkMessage(check)}`)
     .join("\n");
   return [result?.message || "작업 결과를 확인하세요.", details].filter(Boolean).join("\n");
+}
+
+function provisionActionByKey(key, report = currentReport()) {
+  return provisioningActions(report).find((action) => action.key === key) || null;
+}
+
+function checkRowsHtml(checks) {
+  const rows = Array.isArray(checks) && checks.length ? checks : [{ name: "아직 점검 전", status: "pending", message: "승인하고 적용/점검을 누르면 결과가 표시됩니다." }];
+  return rows.map((check) => {
+    const normalizedStatus = checkStatus(check.status);
+    return `
+      <div class="result-row" data-status="${escapeHtml(normalizedStatus)}">
+        <div class="result-copy">
+          <span>${escapeHtml(check.name)}</span>
+          <p>${escapeHtml(checkMessage(check))}</p>
+        </div>
+        <strong>${escapeHtml(checkStatusLabel(check.status, normalizedStatus, check))}</strong>
+      </div>
+    `;
+  }).join("");
+}
+
+function openProvisionActionDialog(action) {
+  if (!action || !nodes.provisionActionDialog?.showModal) {
+    return;
+  }
+
+  nodes.provisionActionDialog.dataset.action = action.key;
+  nodes.provisionActionTitle.textContent = action.title;
+  nodes.provisionActionSummary.textContent = action.summary;
+  nodes.provisionActionStatus.textContent = action.label;
+  nodes.provisionActionStatus.dataset.status = action.status;
+  nodes.provisionActionDetails.innerHTML = `
+    <section>
+      <h4>설정값</h4>
+      <dl>
+        ${(action.settings || []).map(([key, value]) => `
+          <div>
+            <dt>${escapeHtml(key)}</dt>
+            <dd>${escapeHtml(value ?? "-")}</dd>
+          </div>
+        `).join("")}
+      </dl>
+    </section>
+    <section>
+      <h4>실행/재시작 명령</h4>
+      <code>${escapeHtml(action.command)}</code>
+    </section>
+    <section class="md:col-span-2">
+      <h4>현재 검증 결과</h4>
+      <div class="result-list mt-3">${checkRowsHtml(action.checks)}</div>
+    </section>
+  `;
+  const priorResult = state.provisionActionResults[action.key];
+  if (priorResult) {
+    nodes.provisionActionResult.hidden = false;
+    nodes.provisionActionResult.classList.remove("hidden");
+    nodes.provisionActionResult.textContent = formatProvisionActionResult(priorResult);
+  } else {
+    nodes.provisionActionResult.hidden = true;
+    nodes.provisionActionResult.classList.add("hidden");
+    nodes.provisionActionResult.textContent = "";
+  }
+  setButtonLabel(nodes.provisionActionRun, action.actionLabel);
+  nodes.provisionActionDialog.returnValue = "cancel";
+  nodes.provisionActionDialog.showModal();
+}
+
+async function runProvisionAction(actionKey, button) {
+  const action = provisionActionByKey(actionKey);
+  if (!action) {
+    setAlert(nodes.provisionStatus, "error", "세부 설정 실패", "실행할 설정 항목을 찾지 못했습니다.");
+    return;
+  }
+
+  await withBusy(button, "실행 중", async () => {
+    try {
+      const result = await apiFetch("/api/provision/action", {
+        method: "POST",
+        body: JSON.stringify({ action: action.key }),
+      });
+      state.provisionActionResults[action.key] = result;
+      const failed = result.status === "fail";
+      nodes.provisionActionResult.hidden = false;
+      nodes.provisionActionResult.classList.remove("hidden");
+      nodes.provisionActionResult.textContent = formatProvisionActionResult(result);
+      setAlert(
+        nodes.provisionStatus,
+        failed ? "error" : "success",
+        failed ? `${action.title} 점검 실패` : `${action.title} 점검 완료`,
+        result.message,
+      );
+      log(`세부 설정 점검: ${result.action} ${result.status}`);
+      const reportPayload = await apiFetch("/api/report").catch(() => null);
+      if (reportPayload?.exists) {
+        state.savedReportPayload = reportPayload;
+        renderProvisionPanel(parseSavedReport(reportPayload));
+      }
+      saveWizardState();
+    } catch (error) {
+      setAlert(nodes.provisionStatus, "error", "세부 설정 점검 실패", formatError(error));
+      nodes.provisionActionResult.hidden = false;
+      nodes.provisionActionResult.classList.remove("hidden");
+      nodes.provisionActionResult.textContent = formatError(error);
+      log(formatError(error));
+    }
+  });
 }
 
 function checksCard(title, checks, id = "") {
@@ -2177,6 +2480,9 @@ function renderPlanReport(report) {
       ["도메인", report.domain],
       ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / ${phpRuntimeLabel(report.php_version, report.php_source)}`],
       ["데이터베이스", `${databaseLabel(report.database)} (${databaseVersionLabel(report.database_version)})`],
+      ["DB 이름", report.database_name || "-"],
+      ["DB 계정", report.database_user || "-"],
+      ["DB 비밀번호", report.database_password_policy === "user-provided-store-root-only" ? "사용자 입력값 저장" : "무작위 생성"],
       ["앱 패키지", `${appPackageLabel(report.app_package)} - 서버 스택 준비 후 마지막 설치 대상`],
       ["사이트 계정", report.site_user],
       ["웹루트", report.web_root],
@@ -2220,6 +2526,8 @@ function installConfirmSummaryHtml(payload) {
     ["도메인", payload.domain],
     ["웹서버 / PHP", `${runtimeLabel(payload.web_server)} / ${phpRuntimeLabel(payload.php_version, payload.php_source)}`],
     ["데이터베이스", `${databaseLabel(payload.database)} (${databaseVersionLabel(payload.database_version)})`],
+    ["DB 이름", payload.database_name],
+    ["DB 계정", payload.database_user],
     ["앱 패키지", appPackageLabel(payload.app_package)],
     ["웹루트", payload.web_root || payload.web_root_mode],
     ["메일", mailModeLabel(payload.mail_mode)],
@@ -2319,6 +2627,7 @@ function resetWizardForRetry(options = {}) {
   state.installRunning = false;
   state.installCompleted = false;
   state.currentOperation = null;
+  state.provisionActionResults = {};
   stopPackageTicker();
   hideAlert(nodes.planStatus);
   hideAlert(nodes.installStatus);
@@ -2329,6 +2638,9 @@ function resetWizardForRetry(options = {}) {
   nodes.planOutput.innerHTML = `<div class="empty-state">선택한 사양을 바탕으로 설치 계획을 자동 생성합니다.</div>`;
   renderPackageProgress([]);
   nodes.reportOutput.innerHTML = `<div class="empty-state">아직 리포트가 없습니다.</div>`;
+  if (nodes.provisionOutput) {
+    nodes.provisionOutput.innerHTML = `<div class="empty-state">6단계 결과 리포트가 생성되면 세부 설정 카드가 표시됩니다.</div>`;
+  }
   refreshInstallButtonState();
   renderRecoveryStatus(null);
   showStep(targetStep, { force: true });
@@ -2358,6 +2670,9 @@ function restoreWizardState() {
   }
   if (saved.recoveryStatus) {
     renderRecoveryStatus(saved.recoveryStatus);
+  }
+  if (saved.provisionActionResults && typeof saved.provisionActionResults === "object") {
+    state.provisionActionResults = saved.provisionActionResults;
   }
 
   state.activeStep = normalizedStep(saved.activeStep || state.activeStep);
@@ -2575,7 +2890,7 @@ function bindHelpTooltips() {
 
 function bindEvents() {
   window.addEventListener("popstate", (event) => {
-    showStep(event.state?.step || window.location.hash.replace("#", ""), { pushHistory: false });
+    showStep(event.state?.step || stepFromLocation(), { pushHistory: false });
   });
 
   nodes.themeToggle.addEventListener("click", () => {
@@ -2611,29 +2926,16 @@ function bindEvents() {
   });
 
   document.addEventListener("click", async (event) => {
-    const button = event.target.closest("[data-provision-action]");
+    const button = event.target.closest("[data-provision-open]");
     if (!button) {
       return;
     }
-    await withBusy(button, "실행 중", async () => {
-      try {
-        const result = await apiFetch("/api/provision/action", {
-          method: "POST",
-          body: JSON.stringify({ action: button.dataset.provisionAction }),
-        });
-        const failed = result.status === "fail";
-        setAlert(
-          nodes.reportStatus,
-          failed ? "error" : "success",
-          failed ? "세부 설정 점검 실패" : "세부 설정 점검 완료",
-          formatProvisionActionResult(result),
-        );
-        log(`세부 설정 점검: ${result.action} ${result.status}`);
-      } catch (error) {
-        setAlert(nodes.reportStatus, "error", "세부 설정 점검 실패", formatError(error));
-        log(formatError(error));
-      }
-    });
+    openProvisionActionDialog(provisionActionByKey(button.dataset.provisionOpen));
+  });
+
+  nodes.provisionActionRun?.addEventListener("click", (event) => {
+    event.preventDefault();
+    void runProvisionAction(nodes.provisionActionDialog?.dataset.action, event.currentTarget);
   });
 
   document.querySelectorAll('input[name="install_template"]').forEach((radio) => {
@@ -2671,7 +2973,7 @@ function bindEvents() {
     const payload = optionPayload();
     const passwordError = validateSitePassword(payload);
     if (passwordError) {
-      setAlert(nodes.installStatus, "error", "기본 서버 구성 실패", passwordError);
+      setAlert(nodes.installStatus, "error", "계정 정보 확인 필요", passwordError);
       log(passwordError);
       return;
     }
@@ -2752,6 +3054,28 @@ function bindEvents() {
     });
   });
 
+  nodes.provisionRefreshButton?.addEventListener("click", async (event) => {
+    await withBusy(event.currentTarget, "새로고침", async () => {
+      try {
+        hideAlert(nodes.provisionStatus);
+        const report = await apiFetch("/api/report");
+        state.savedReportPayload = report;
+        if (report.exists) {
+          renderSavedReport(report);
+          renderProvisionPanel(parseSavedReport(report));
+          setAlert(nodes.provisionStatus, "success", "세부 설정 새로고침 완료", "서버에 저장된 리포트를 기준으로 카드를 다시 그렸습니다.");
+        } else {
+          renderProvisionPanel(null);
+          setAlert(nodes.provisionStatus, "warning", "리포트 없음", "아직 생성된 리포트가 없습니다.");
+        }
+        log(`세부 설정 리포트 불러오기: ${report.exists ? "있음" : "없음"}`);
+      } catch (error) {
+        setAlert(nodes.provisionStatus, "error", "세부 설정 새로고침 실패", formatError(error));
+        log(formatError(error));
+      }
+    });
+  });
+
   document.querySelectorAll("[data-recovery-refresh]").forEach((button) => {
     button.addEventListener("click", async (event) => {
       await withBusy(event.currentTarget, "확인 중", async () => {
@@ -2799,7 +3123,7 @@ async function boot() {
     refreshFormState({ preservePlan: true, persist: false });
     restoreWizardState();
     await syncServerState();
-    showStep(normalizedStep(window.location.hash.replace("#", "") || state.activeStep), { pushHistory: false });
+    showStep(stepFromLocation(), { pushHistory: false });
     writeStepHistory(state.activeStep, true);
     log("웹 컨트롤러 준비 완료");
     log(`접속 상태: ${state.bootstrap.auth.status}`);

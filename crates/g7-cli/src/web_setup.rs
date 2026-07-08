@@ -113,6 +113,14 @@ struct SetupRequest {
     php_source: String,
     database: String,
     database_version: String,
+    #[serde(default)]
+    database_name: Option<String>,
+    #[serde(default)]
+    database_user: Option<String>,
+    #[serde(default)]
+    database_password: Option<String>,
+    #[serde(default)]
+    database_password_confirm: Option<String>,
     app_package: String,
     site_user: String,
     #[serde(default)]
@@ -203,6 +211,9 @@ struct PlanApiReport {
     php_source: String,
     database: String,
     database_version: String,
+    database_name: String,
+    database_user: String,
+    database_password_policy: &'static str,
     app_package: String,
     site_user: String,
     web_root: String,
@@ -288,6 +299,9 @@ struct InstallApiReport {
     php_source: String,
     database: String,
     database_version: String,
+    database_name: String,
+    database_user: String,
+    database_password_policy: &'static str,
     app_package: String,
     site_user: String,
     web_root: String,
@@ -410,6 +424,13 @@ pub async fn run(config: WebSetupConfig) -> Result<()> {
 
     let app = Router::new()
         .route("/", get(index))
+        .route("/setup/connect", get(index))
+        .route("/setup/doctor", get(index))
+        .route("/setup/options", get(index))
+        .route("/setup/plan", get(index))
+        .route("/setup/install", get(index))
+        .route("/setup/result", get(index))
+        .route("/setup/provision", get(index))
         .route("/app.js", get(app_js))
         .route("/app.css", get(app_css))
         .route("/api/bootstrap", get(bootstrap))
@@ -709,6 +730,7 @@ async fn api_plan(
     let session = require_authenticated_session(&state, &headers, peer.ip())?;
     require_csrf(&headers, &session)?;
     validate_site_password_request(&request)?;
+    validate_database_request(&request)?;
     emit_log(&state, "building install plan");
     let domain = request.domain.clone();
     let database_version = normalize_database_version(&request.database_version);
@@ -735,6 +757,7 @@ async fn api_install_prepare(
     let session = require_authenticated_session(&state, &headers, peer.ip())?;
     require_csrf(&headers, &session)?;
     validate_site_password_request(&request)?;
+    validate_database_request(&request)?;
 
     if state.install_running.swap(true, Ordering::SeqCst) {
         emit_log(&state, "install request rejected: already running");
@@ -1329,6 +1352,15 @@ fn options_from_request(request: SetupRequest) -> plan::PlanOptions {
         request.php_version,
         request.php_source,
         request.database,
+        request
+            .database_name
+            .filter(|value| !value.trim().is_empty()),
+        request
+            .database_user
+            .filter(|value| !value.trim().is_empty()),
+        request
+            .database_password
+            .filter(|value| !value.trim().is_empty()),
         request.site_user,
         request
             .site_password
@@ -1388,6 +1420,69 @@ fn validate_site_password_request(request: &SetupRequest) -> std::result::Result
     }
 
     Ok(())
+}
+
+fn validate_database_request(request: &SetupRequest) -> std::result::Result<(), ApiError> {
+    let database_name = request.database_name.as_deref().unwrap_or("").trim();
+    let database_user = request.database_user.as_deref().unwrap_or("").trim();
+    let password = request.database_password.as_deref().unwrap_or("");
+    let confirm = request.database_password_confirm.as_deref().unwrap_or("");
+
+    if database_name.is_empty() {
+        return Err(ApiError::bad_request("DB 이름을 입력하세요.")
+            .with_hint("영문, 숫자, 밑줄만 사용할 수 있습니다."));
+    }
+    if !is_database_identifier(database_name, 64) {
+        return Err(ApiError::bad_request("DB 이름 형식이 올바르지 않습니다.")
+            .with_hint("영문 또는 밑줄로 시작하고 영문, 숫자, 밑줄만 사용하세요."));
+    }
+    if database_user.is_empty() {
+        return Err(ApiError::bad_request("DB 계정을 입력하세요.")
+            .with_hint("영문, 숫자, 밑줄만 사용할 수 있습니다."));
+    }
+    if !is_database_identifier(database_user, 32) {
+        return Err(ApiError::bad_request("DB 계정 형식이 올바르지 않습니다.")
+            .with_hint("영문 또는 밑줄로 시작하고 영문, 숫자, 밑줄만 사용하세요."));
+    }
+    if password.is_empty() {
+        return Err(ApiError::bad_request("DB 비밀번호를 입력하세요.")
+            .with_hint("앱이 DB에 접속할 때 사용할 비밀번호입니다."));
+    }
+    if password != confirm {
+        return Err(
+            ApiError::bad_request("DB 비밀번호 확인이 일치하지 않습니다.")
+                .with_hint("DB 비밀번호와 확인 입력값을 다시 입력하세요."),
+        );
+    }
+    if password.len() < 8 {
+        return Err(
+            ApiError::bad_request("DB 비밀번호는 8자 이상이어야 합니다.")
+                .with_hint("작은따옴표, 백슬래시, 줄바꿈, 제어문자는 사용할 수 없습니다."),
+        );
+    }
+    if password
+        .chars()
+        .any(|ch| ch == '\'' || ch == '\\' || ch == '\n' || ch == '\r' || ch.is_control())
+    {
+        return Err(
+            ApiError::bad_request("DB 비밀번호에 사용할 수 없는 문자가 있습니다.")
+                .with_hint("작은따옴표, 백슬래시, 줄바꿈, 제어문자는 사용할 수 없습니다."),
+        );
+    }
+
+    Ok(())
+}
+
+fn is_database_identifier(value: &str, max_len: usize) -> bool {
+    value.len() <= max_len
+        && value
+            .chars()
+            .next()
+            .map(|ch| ch.is_ascii_alphabetic() || ch == '_')
+            .unwrap_or(false)
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 fn doctor_to_api(report: doctor::DoctorReport) -> DoctorApiReport {
@@ -1498,6 +1593,9 @@ fn plan_to_api(install_plan: plan::InstallPlan, database_version: String) -> Pla
         php_source: install_plan.php_source,
         database: install_plan.database_engine,
         database_version,
+        database_name: install_plan.database_name,
+        database_user: install_plan.database_user,
+        database_password_policy: install_plan.database_password_policy,
         app_package: install_plan.app_profile,
         site_user: install_plan.site_user,
         web_root: install_plan.web_root,
@@ -1597,6 +1695,9 @@ fn install_to_api(report: install::InstallReport, database_version: String) -> I
         php_source: report.php_source,
         database: report.database_engine,
         database_version,
+        database_name: report.database_name,
+        database_user: report.database_user,
+        database_password_policy: report.database_password_policy,
         app_package: report.app_profile,
         site_user: report.site_user,
         web_root: report.web_root,
@@ -2015,6 +2116,10 @@ mod tests {
             php_source: "auto".to_string(),
             database: "mysql".to_string(),
             database_version: "apt-default".to_string(),
+            database_name: Some("g7_example_com".to_string()),
+            database_user: Some("g7_app".to_string()),
+            database_password: Some("0808dong!!".to_string()),
+            database_password_confirm: Some("0808dong!!".to_string()),
             app_package: "gnuboard7".to_string(),
             site_user: "g7".to_string(),
             site_password: Some("0808dong!!".to_string()),
@@ -2326,6 +2431,9 @@ mod tests {
                 php_version: "8.3".to_string(),
                 php_source: "ubuntu".to_string(),
                 database_engine: "mysql".to_string(),
+                database_name: "g7_test".to_string(),
+                database_user: "g7_app".to_string(),
+                database_password_policy: "user-provided-store-root-only",
                 site_user: "g7".to_string(),
                 web_root_mode: "public-html".to_string(),
                 web_root: "/home/g7/public_html".to_string(),

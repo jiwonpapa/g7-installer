@@ -57,9 +57,9 @@ const WORDPRESS_DOWNLOAD_URL: &str = "https://wordpress.org/latest.zip";
 const WORDPRESS_ARCHIVE_PATH: &str = "/var/lib/g7-installer/app-source/wordpress.zip";
 const WORDPRESS_EXTRACT_DIR: &str = "/var/lib/g7-installer/app-source/wordpress-extract";
 const WORDPRESS_SOURCE_DIR: &str = "/var/lib/g7-installer/app-source/wordpress-extract/wordpress";
-const ACME_CHALLENGE_DIR: &str = ".well-known/acme-challenge";
-const ACME_SMOKE_FILENAME: &str = "g7inst-acme-smoke.txt";
-const ACME_SMOKE_CONTENT: &str = "g7-installer-acme-ok\n";
+const CERTBOT_HTTP01_CHALLENGE_DIR: &str = ".well-known/acme-challenge";
+const CERTBOT_HTTP01_SMOKE_FILENAME: &str = "g7inst-certbot-http01-smoke.txt";
+const CERTBOT_HTTP01_SMOKE_CONTENT: &str = "g7-installer-certbot-http01-ok\n";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallReport {
@@ -72,6 +72,9 @@ pub struct InstallReport {
     pub php_version: String,
     pub php_source: String,
     pub database_engine: String,
+    pub database_name: String,
+    pub database_user: String,
+    pub database_password_policy: &'static str,
     pub site_user: String,
     pub web_root_mode: String,
     pub web_root: String,
@@ -217,6 +220,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     paths: &InstallPaths,
 ) -> Result<InstallReport> {
     let site_user_password = options.site_user_password.clone();
+    let database_password = options.database_password.clone();
     let install_plan = plan::build_with_options(domain, options)?;
     let doctor_report = doctor::run_with_probe(probe);
 
@@ -541,7 +545,13 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         }
     }
 
-    match apply_database_phase(probe, paths, &install_plan, &mut owned_file_list) {
+    match apply_database_phase(
+        probe,
+        paths,
+        &install_plan,
+        &mut owned_file_list,
+        database_password.as_deref(),
+    ) {
         Ok(database_checks) => {
             apply_summary.database_checks = database_checks;
             completed_steps.push("database-runtime-configured".to_string());
@@ -742,6 +752,9 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         php_version: install_plan.php_version,
         php_source: install_plan.php_source,
         database_engine: install_plan.database_engine,
+        database_name: install_plan.database_name,
+        database_user: install_plan.database_user,
+        database_password_policy: install_plan.database_password_policy,
         site_user: install_plan.site_user,
         web_root_mode: install_plan.web_root_mode,
         web_root: install_plan.web_root.clone(),
@@ -1447,6 +1460,7 @@ fn apply_database_phase<R: CommandRunner>(
     paths: &InstallPaths,
     plan: &plan::InstallPlan,
     owned: &mut Vec<String>,
+    database_password: Option<&str>,
 ) -> Result<Vec<InstallCheck>> {
     let sizing = detected_memory_sizing(probe);
     let db_config_path = database_config_path(plan);
@@ -1464,7 +1478,10 @@ fn apply_database_phase<R: CommandRunner>(
         .map_err(|err| command_error("database-restart", &command, err))?;
     require_success("database-restart", command, output)?;
 
-    let password = random_hex_secret()?;
+    let password = match database_password {
+        Some(value) => value.to_string(),
+        None => random_hex_secret()?,
+    };
     write_secret_file(
         paths,
         SECRETS_PATH,
@@ -1497,7 +1514,14 @@ fn apply_database_phase<R: CommandRunner>(
         ),
         InstallCheck::pass(
             "database-secret",
-            format!("Generated DB password and stored it root-only at {SECRETS_PATH}."),
+            format!(
+                "{} DB password and stored it root-only at {SECRETS_PATH}.",
+                if database_password.is_some() {
+                    "Stored user-provided"
+                } else {
+                    "Generated"
+                }
+            ),
         ),
         InstallCheck::pass(
             "database-created",
@@ -1611,45 +1635,54 @@ fn apply_tls_phase<R: CommandRunner>(
     let domains = certificate_hosts(plan);
     let cert_name = plan.domain.clone();
     let email = certificate_email(plan);
-    let acme_dir = acme_challenge_dir(plan);
-    let acme_smoke_path = acme_smoke_path(plan);
+    let certbot_challenge_dir = certbot_http01_challenge_dir(plan);
+    let certbot_http01_smoke_path = certbot_http01_smoke_path(plan);
     create_owned_dir_if_absent(
         paths,
         &format!("{}/.well-known", plan.app_document_root),
         owned,
     )?;
-    create_owned_dir_if_absent(paths, &acme_dir, owned)?;
-    if paths.resolve(&acme_smoke_path).exists() {
-        write_existing_file(paths, &acme_smoke_path, ACME_SMOKE_CONTENT)?;
+    create_owned_dir_if_absent(paths, &certbot_challenge_dir, owned)?;
+    if paths.resolve(&certbot_http01_smoke_path).exists() {
+        write_existing_file(
+            paths,
+            &certbot_http01_smoke_path,
+            CERTBOT_HTTP01_SMOKE_CONTENT,
+        )?;
     } else {
-        write_new_file(paths, &acme_smoke_path, ACME_SMOKE_CONTENT, owned)?;
+        write_new_file(
+            paths,
+            &certbot_http01_smoke_path,
+            CERTBOT_HTTP01_SMOKE_CONTENT,
+            owned,
+        )?;
     }
     let owner_group = format!("{}:www-data", plan.site_user);
-    let command = format!("chown -R {owner_group} {acme_dir}");
+    let command = format!("chown -R {owner_group} {certbot_challenge_dir}");
     let output = probe
-        .chown_recursive(&owner_group, &acme_dir)
-        .map_err(|err| command_error("acme-webroot-owner", &command, err))?;
-    require_success("acme-webroot-owner", command, output)?;
-    let command = format!("chmod -R 0755 {acme_dir}");
+        .chown_recursive(&owner_group, &certbot_challenge_dir)
+        .map_err(|err| command_error("certbot-http01-webroot-owner", &command, err))?;
+    require_success("certbot-http01-webroot-owner", command, output)?;
+    let command = format!("chmod -R 0755 {certbot_challenge_dir}");
     let output = probe
-        .chmod_recursive("0755", &acme_dir)
-        .map_err(|err| command_error("acme-webroot-permissions", &command, err))?;
-    require_success("acme-webroot-permissions", command, output)?;
-    let acme_uri = acme_smoke_uri();
+        .chmod_recursive("0755", &certbot_challenge_dir)
+        .map_err(|err| command_error("certbot-http01-webroot-permissions", &command, err))?;
+    require_success("certbot-http01-webroot-permissions", command, output)?;
+    let certbot_http01_uri = certbot_http01_smoke_uri();
     for host in &domains {
-        match probe.http_host_path_smoke(host, &acme_uri) {
+        match probe.http_host_path_smoke(host, &certbot_http01_uri) {
             Ok(true) => {}
             Ok(false) => {
                 return Err(Error::InstallVerificationFailed {
                     checks: format!(
-                        "ACME HTTP challenge smoke failed for Host: {host} path: {acme_uri}"
+                        "Certbot HTTP-01 challenge smoke failed for Host: {host} path: {certbot_http01_uri}"
                     ),
                 });
             }
             Err(err) => {
                 return Err(command_error(
-                    "acme-http-smoke",
-                    format!("curl -H 'Host: {host}' http://127.0.0.1{acme_uri}"),
+                    "certbot-http01-smoke",
+                    format!("curl -H 'Host: {host}' http://127.0.0.1{certbot_http01_uri}"),
                     err,
                 ));
             }
@@ -1738,9 +1771,9 @@ fn apply_tls_phase<R: CommandRunner>(
     let _ = owned;
     Ok(vec![
         InstallCheck::pass(
-            "acme-http-smoke",
+            "certbot-http01-smoke",
             format!(
-                "Verified HTTP-01 challenge path {acme_uri} for {} before running Certbot.",
+                "Verified HTTP-01 challenge path {certbot_http01_uri} for {} before running Certbot.",
                 domains.join(", ")
             ),
         ),
@@ -2539,16 +2572,23 @@ fn ready_probe_content() -> &'static str {
     "<?php\nheader('Content-Type: text/plain; charset=utf-8');\necho \"G7inst vhost ready\\n\";\n"
 }
 
-fn acme_challenge_dir(plan: &plan::InstallPlan) -> String {
-    format!("{}/{}", plan.app_document_root, ACME_CHALLENGE_DIR)
+fn certbot_http01_challenge_dir(plan: &plan::InstallPlan) -> String {
+    format!(
+        "{}/{}",
+        plan.app_document_root, CERTBOT_HTTP01_CHALLENGE_DIR
+    )
 }
 
-fn acme_smoke_path(plan: &plan::InstallPlan) -> String {
-    format!("{}/{}", acme_challenge_dir(plan), ACME_SMOKE_FILENAME)
+fn certbot_http01_smoke_path(plan: &plan::InstallPlan) -> String {
+    format!(
+        "{}/{}",
+        certbot_http01_challenge_dir(plan),
+        CERTBOT_HTTP01_SMOKE_FILENAME
+    )
 }
 
-fn acme_smoke_uri() -> String {
-    format!("/{ACME_CHALLENGE_DIR}/{ACME_SMOKE_FILENAME}")
+fn certbot_http01_smoke_uri() -> String {
+    format!("/{CERTBOT_HTTP01_CHALLENGE_DIR}/{CERTBOT_HTTP01_SMOKE_FILENAME}")
 }
 
 fn app_entry_url(plan: &plan::InstallPlan) -> String {
@@ -2857,15 +2897,15 @@ fn nginx_vhost_content_with_socket(plan: &plan::InstallPlan, php_socket: &str) -
     let app_hosts = nginx_app_hosts(plan);
     let redirect_blocks = nginx_redirect_blocks(plan);
     let reverb_proxy = nginx_reverb_proxy_block(plan);
-    let acme_location = nginx_acme_challenge_location();
+    let certbot_http01_location = nginx_certbot_http01_challenge_location();
 
     format!(
-        "{redirect_blocks}server {{\n    listen 80;\n    listen [::]:80;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n{acme_location}\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n{reverb_proxy}\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
+        "{redirect_blocks}server {{\n    listen 80;\n    listen [::]:80;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n{certbot_http01_location}\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n{reverb_proxy}\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
         root = plan.app_document_root,
     )
 }
 
-fn nginx_acme_challenge_location() -> &'static str {
+fn nginx_certbot_http01_challenge_location() -> &'static str {
     "    location ^~ /.well-known/acme-challenge/ {\n        default_type \"text/plain\";\n        try_files $uri =404;\n    }\n"
 }
 
@@ -2929,16 +2969,16 @@ fn nginx_redirect_blocks(plan: &plan::InstallPlan) -> String {
 
     match plan.www_mode.as_str() {
         "redirect-to-root" => format!(
-            "server {{\n    listen 80;\n    listen [::]:80;\n    server_name www.{domain};\n    root {root};\n\n{acme_location}\n    location / {{\n        return 301 http://{domain}$request_uri;\n    }}\n}}\n\n",
+            "server {{\n    listen 80;\n    listen [::]:80;\n    server_name www.{domain};\n    root {root};\n\n{certbot_http01_location}\n    location / {{\n        return 301 http://{domain}$request_uri;\n    }}\n}}\n\n",
             domain = plan.domain,
             root = plan.app_document_root,
-            acme_location = nginx_acme_challenge_location()
+            certbot_http01_location = nginx_certbot_http01_challenge_location()
         ),
         "redirect-to-www" => format!(
-            "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {domain};\n    root {root};\n\n{acme_location}\n    location / {{\n        return 301 http://www.{domain}$request_uri;\n    }}\n}}\n\n",
+            "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {domain};\n    root {root};\n\n{certbot_http01_location}\n    location / {{\n        return 301 http://www.{domain}$request_uri;\n    }}\n}}\n\n",
             domain = plan.domain,
             root = plan.app_document_root,
-            acme_location = nginx_acme_challenge_location()
+            certbot_http01_location = nginx_certbot_http01_challenge_location()
         ),
         _ => String::new(),
     }
@@ -2970,10 +3010,10 @@ fn nginx_tls_vhost_content(plan: &plan::InstallPlan, php_socket: &str) -> String
     let app_hosts = nginx_app_hosts(plan);
     let canonical_redirect = nginx_https_canonical_redirect(plan);
     let reverb_proxy = nginx_reverb_proxy_block(plan);
-    let acme_location = nginx_acme_challenge_location();
+    let certbot_http01_location = nginx_certbot_http01_challenge_location();
 
     format!(
-        "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {http_hosts};\n    root {root};\n\n{acme_location}\n    location / {{\n        return 301 https://$host$request_uri;\n    }}\n}}\n\n{canonical_redirect}server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    ssl_certificate /etc/letsencrypt/live/{cert_name}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{cert_name}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_prefer_server_ciphers off;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    add_header X-Content-Type-Options nosniff always;\n    add_header X-Frame-Options SAMEORIGIN always;\n    add_header Referrer-Policy strict-origin-when-cross-origin always;\n\n{acme_location}\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n{reverb_proxy}\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
+        "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {http_hosts};\n    root {root};\n\n{certbot_http01_location}\n    location / {{\n        return 301 https://$host$request_uri;\n    }}\n}}\n\n{canonical_redirect}server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    ssl_certificate /etc/letsencrypt/live/{cert_name}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{cert_name}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_prefer_server_ciphers off;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    add_header X-Content-Type-Options nosniff always;\n    add_header X-Frame-Options SAMEORIGIN always;\n    add_header Referrer-Policy strict-origin-when-cross-origin always;\n\n{certbot_http01_location}\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n{reverb_proxy}\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
         root = plan.app_document_root,
     )
 }
@@ -3783,6 +3823,10 @@ fn report_content(
     value.insert(
         "database_user".to_string(),
         serde_json::json!(&plan.database_user),
+    );
+    value.insert(
+        "database_password_policy".to_string(),
+        serde_json::json!(plan.database_password_policy),
     );
     value.insert("site_user".to_string(), serde_json::json!(&plan.site_user));
     value.insert(
