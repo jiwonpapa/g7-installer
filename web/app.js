@@ -1667,6 +1667,7 @@ function renderInstallReport(report) {
       ["소유 파일 목록", report.owned_files_path],
       ["설정 안내서", report.setup_guide_path || "-"],
     ], note),
+    provisioningActionPanel(report),
     listCard("완료된 작업", report.completed_steps),
     checksCard("안전장치", report.safety_checks),
     checksCard("설치 전 패키지 기준", report.preinstall_package_checks),
@@ -1674,17 +1675,18 @@ function renderInstallReport(report) {
     checksCard("서비스 검증", report.service_checks),
     checksCard("포트 검증", report.port_checks),
     checksCard("DNS / 네트워크 검증", report.network_checks),
-    checksCard("런타임 설정", report.runtime_checks),
-    checksCard("DB 설정", report.database_checks),
-    checksCard("방화벽 설정", report.firewall_checks),
-    checksCard("웹서버 / 도메인 연결 검증", report.vhost_checks),
-    checksCard("메일 발송 검증", report.mail_checks),
-    checksCard("SSL / Certbot 검증", report.certbot_checks),
-    checksCard("웹앱 설치", report.app_checks),
+    checksCard("런타임 설정", report.runtime_checks, "report-runtime"),
+    checksCard("DB 설정", report.database_checks, "report-database"),
+    checksCard("방화벽 설정", report.firewall_checks, "report-firewall"),
+    checksCard("웹서버 / 도메인 연결 검증", report.vhost_checks, "report-vhost"),
+    checksCard("메일 발송 검증", report.mail_checks, "report-mail"),
+    checksCard("SSL / Certbot 검증", report.certbot_checks, "report-ssl"),
+    checksCard("웹앱 설치", report.app_checks, "report-app"),
     checksCard("앱 요구사항", report.app_requirements),
     report.problem ? listCard("중단 원인", [report.problem]) : "",
   ].join("");
 
+  hydrateIcons(nodes.reportOutput);
   applyPackageChecks(report.package_checks);
   applyInstallStagesFromReport(report);
   state.installCompleted = completed;
@@ -1745,22 +1747,24 @@ function renderSavedReport(payload) {
       ["DNS/IP 확인", report.dns_check ? "수행" : "건너뜀"],
       ["설정 안내서", report.setup_guide_path || "-"],
     ], note),
+    provisioningActionPanel(report),
     checksCard("안전장치", report.safety_checks),
     checksCard("설치 전 패키지 기준", report.preinstall_package_checks),
     checksCard("설치 패키지 검증", report.package_checks),
     checksCard("서비스 검증", report.service_checks),
     checksCard("포트 검증", report.port_checks),
     checksCard("DNS / 네트워크 검증", report.network_checks),
-    checksCard("런타임 설정", report.runtime_checks),
-    checksCard("DB 설정", report.database_checks),
-    checksCard("방화벽 설정", report.firewall_checks),
-    checksCard("웹서버 / 도메인 연결 검증", report.vhost_checks),
-    checksCard("메일 발송 검증", report.mail_checks),
-    checksCard("SSL / Certbot 검증", report.certbot_checks),
-    checksCard("웹앱 설치", report.app_checks),
+    checksCard("런타임 설정", report.runtime_checks, "report-runtime"),
+    checksCard("DB 설정", report.database_checks, "report-database"),
+    checksCard("방화벽 설정", report.firewall_checks, "report-firewall"),
+    checksCard("웹서버 / 도메인 연결 검증", report.vhost_checks, "report-vhost"),
+    checksCard("메일 발송 검증", report.mail_checks, "report-mail"),
+    checksCard("SSL / Certbot 검증", report.certbot_checks, "report-ssl"),
+    checksCard("웹앱 설치", report.app_checks, "report-app"),
     checksCard("앱 요구사항", report.app_requirements),
     report.problem ? listCard("문제", [report.problem]) : "",
   ].join("");
+  hydrateIcons(nodes.reportOutput);
   setReportReady(true);
   restoreInstallStateFromReport(report);
   saveWizardState();
@@ -1818,10 +1822,153 @@ function listCard(title, items) {
   `;
 }
 
-function checksCard(title, checks) {
+function provisioningActionPanel(report) {
+  const actions = provisioningActions(report);
+  return `
+    <section class="report-card provisioning-actions">
+      <div class="provisioning-actions-heading">
+        <div>
+          <h3>세부 설정 액션 패널</h3>
+          <p>설치 이후 확인해야 할 웹서버, PHP, DB, SSL, 메일, 웹앱 설정 상태입니다.</p>
+        </div>
+        <strong data-status="${escapeHtml(overallProvisioningStatus(actions))}">${escapeHtml(overallProvisioningLabel(actions))}</strong>
+      </div>
+      <div class="provisioning-action-grid">
+        ${actions.map((action) => `
+          <article class="provisioning-action-card" data-status="${escapeHtml(action.status)}">
+            <div>
+              <span>${escapeHtml(action.title)}</span>
+              <strong>${escapeHtml(action.label)}</strong>
+            </div>
+            <p>${escapeHtml(action.summary)}</p>
+            <code>${escapeHtml(action.command)}</code>
+            <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="scan-line" data-report-jump="${escapeHtml(action.target)}">${escapeHtml(action.cta)}</button>
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function provisioningActions(report = {}) {
+  const webService = report.web_server === "apache" ? "apache2" : "nginx";
+  const webCheck = report.web_server === "apache" ? "sudo apache2ctl configtest" : "sudo nginx -t";
+  const fpmService = report.php_version ? `php${report.php_version}-fpm` : "php-fpm";
+  const dbService = report.database === "mariadb" ? "mariadb" : "mysql";
+  const appRoot = report.web_root || "/home/사이트계정/public_html";
+  const appUrl = report.app_url || accessLink(report.domain || "example.com", report.phase).html.replace(/<[^>]+>/g, "");
+  const mailSkipped = report.mail_mode === "none";
+
+  return [
+    provisioningAction("웹서버/vhost", report.vhost_checks, {
+      target: "report-vhost",
+      summary: "도메인 요청을 앱 문서 루트와 PHP-FPM으로 연결합니다.",
+      command: `${webCheck} && sudo systemctl reload ${webService}`,
+    }),
+    provisioningAction("PHP-FPM", report.runtime_checks, {
+      target: "report-runtime",
+      summary: "사이트 계정으로 PHP 풀을 실행하고 메모리 기준 튜닝값을 적용합니다.",
+      command: `sudo systemctl restart ${fpmService}`,
+    }),
+    provisioningAction("데이터베이스", report.database_checks, {
+      target: "report-database",
+      summary: "앱 전용 DB와 DB 계정을 만들고 root 전용 비밀 파일에 저장합니다.",
+      command: `sudo systemctl restart ${dbService}`,
+    }),
+    provisioningAction("SSL/Certbot", report.certbot_checks, {
+      target: "report-ssl",
+      summary: "주 도메인과 www 도메인 인증서를 발급하고 자동 갱신을 검증합니다.",
+      command: "sudo certbot renew --dry-run --no-random-sleep-on-renew",
+    }),
+    provisioningAction("메일 발송", report.mail_checks, {
+      target: "report-mail",
+      summary: mailSkipped ? "메일 발송 설정을 선택하지 않아 건너뛰었습니다." : "Postfix 또는 SMTP 릴레이 발송 설정을 확인합니다.",
+      command: mailSkipped ? "설정 안 함" : "sudo systemctl restart postfix",
+      forceStatus: mailSkipped ? "info" : null,
+      forceLabel: mailSkipped ? "건너뜀" : null,
+    }),
+    provisioningAction("웹앱", report.app_checks, {
+      target: "report-app",
+      summary: "앱 소스, .env, 권한, 설치 화면 또는 Laravel 런타임을 확인합니다.",
+      command: report.app_profile === "gnuboard7" || report.app_package === "gnuboard7"
+        ? `브라우저에서 ${appUrl} 접속`
+        : `cd ${appRoot} && php artisan about`,
+    }),
+  ];
+}
+
+function provisioningAction(title, checks, options) {
+  const status = options.forceStatus || provisioningStatus(checks);
+  return {
+    title,
+    status,
+    label: options.forceLabel || provisioningStatusLabel(status),
+    summary: provisioningSummary(status, options.summary),
+    command: options.command,
+    target: options.target,
+    cta: status === "fail" ? "실패 항목 확인" : status === "warn" ? "후속 확인" : "상세 확인",
+  };
+}
+
+function provisioningStatus(checks) {
+  const rows = Array.isArray(checks) ? checks : [];
+  if (!rows.length) {
+    return "pending";
+  }
+  if (rows.some((check) => check.status === "fail")) {
+    return "fail";
+  }
+  if (rows.some((check) => ["manual", "deferred", "warn", "unknown"].includes(check.status))) {
+    return "warn";
+  }
+  if (rows.some((check) => check.status === "pass")) {
+    return "pass";
+  }
+  if (rows.every((check) => check.status === "skipped")) {
+    return "info";
+  }
+  return "pending";
+}
+
+function provisioningStatusLabel(status) {
+  const labels = {
+    pass: "완료",
+    warn: "후속 확인",
+    fail: "실패",
+    info: "건너뜀",
+    pending: "대기",
+  };
+  return labels[status] || "대기";
+}
+
+function provisioningSummary(status, summary) {
+  if (status === "fail") {
+    return `${summary} 실패 항목을 먼저 해결해야 다음 운영 확인으로 넘어갑니다.`;
+  }
+  if (status === "warn") {
+    return `${summary} 자동 처리 뒤 사람이 확인할 후속 작업이 남았습니다.`;
+  }
+  return summary;
+}
+
+function overallProvisioningStatus(actions) {
+  if (actions.some((action) => action.status === "fail")) {
+    return "fail";
+  }
+  if (actions.some((action) => action.status === "warn" || action.status === "pending")) {
+    return "warn";
+  }
+  return "pass";
+}
+
+function overallProvisioningLabel(actions) {
+  return provisioningStatusLabel(overallProvisioningStatus(actions));
+}
+
+function checksCard(title, checks, id = "") {
   const rows = Array.isArray(checks) && checks.length ? checks : [{ name: "없음", status: "pending", message: "표시할 항목이 없습니다." }];
   return `
-    <section class="report-card">
+    <section class="report-card"${id ? ` id="${escapeHtml(id)}"` : ""}>
       <h3>${escapeHtml(title)}</h3>
       <div class="result-list mt-3">
         ${rows.map((check) => {
@@ -2437,6 +2584,17 @@ function bindEvents() {
 
   document.querySelectorAll("[data-next]").forEach((button) => {
     button.addEventListener("click", () => showStep(button.dataset.next));
+  });
+
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-report-jump]");
+    if (!button) {
+      return;
+    }
+    const target = document.getElementById(button.dataset.reportJump);
+    if (target) {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   });
 
   document.querySelectorAll('input[name="install_template"]').forEach((radio) => {

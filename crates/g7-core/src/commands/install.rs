@@ -124,6 +124,14 @@ impl InstallCheck {
         }
     }
 
+    fn manual(name: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            status: "manual".to_string(),
+            message: message.into(),
+        }
+    }
+
     fn fail(name: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -1900,10 +1908,15 @@ fn install_gnuboard7_app<R: CommandRunner>(
         plan,
         owned,
         LaravelRuntimeKind::Gnuboard7,
+        LaravelRuntimeOptions::browser_installer(),
     )?);
     checks.push(InstallCheck::pass(
         "app-install-screen",
-        format!("Gnuboard7 should be available at {app_url}."),
+        format!("그누보드7 브라우저 설치 화면을 {app_url} 에 준비했습니다."),
+    ));
+    checks.push(InstallCheck::manual(
+        "app-post-install",
+        "브라우저 설치를 끝낸 뒤 마이그레이션, 최적화, queue/scheduler/Reverb 서비스 시작 여부를 후속 점검하세요.",
     ));
 
     Ok(checks)
@@ -1984,6 +1997,7 @@ fn install_laravel_app<R: CommandRunner>(
         plan,
         owned,
         LaravelRuntimeKind::Laravel,
+        LaravelRuntimeOptions::full(),
     )?);
     checks.push(InstallCheck::pass(
         "app-install-screen",
@@ -2079,6 +2093,37 @@ enum LaravelRuntimeKind {
     Laravel,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LaravelRuntimeOptions {
+    run_migrations: bool,
+    run_optimize: bool,
+    verify_about: bool,
+    write_services: bool,
+    enable_services: bool,
+}
+
+impl LaravelRuntimeOptions {
+    fn full() -> Self {
+        Self {
+            run_migrations: true,
+            run_optimize: true,
+            verify_about: true,
+            write_services: true,
+            enable_services: true,
+        }
+    }
+
+    fn browser_installer() -> Self {
+        Self {
+            run_migrations: false,
+            run_optimize: false,
+            verify_about: false,
+            write_services: true,
+            enable_services: false,
+        }
+    }
+}
+
 struct AppSystemdUnit {
     name: &'static str,
     content: String,
@@ -2091,6 +2136,7 @@ fn configure_laravel_runtime<R: CommandRunner>(
     plan: &plan::InstallPlan,
     owned: &mut Vec<String>,
     kind: LaravelRuntimeKind,
+    options: LaravelRuntimeOptions,
 ) -> Result<Vec<InstallCheck>> {
     let cwd = paths.resolve(&plan.web_root);
     let mut checks = Vec::new();
@@ -2146,62 +2192,95 @@ fn configure_laravel_runtime<R: CommandRunner>(
         &mut checks,
         "Linked public storage.",
     )?;
-    run_artisan_step(
-        probe,
-        &cwd,
-        "artisan-migrate",
-        ["migrate", "--force"],
-        &mut checks,
-        "Applied database migrations.",
-    )?;
-    run_artisan_step(
-        probe,
-        &cwd,
-        "artisan-optimize",
-        ["optimize"],
-        &mut checks,
-        "Cached Laravel runtime metadata.",
-    )?;
-    run_artisan_step(
-        probe,
-        &cwd,
-        "artisan-about",
-        ["about"],
-        &mut checks,
-        "Verified Laravel artisan runtime.",
-    )?;
-
-    for unit in app_systemd_units(plan, kind) {
-        let unit_path = systemd_unit_path(unit.name);
-        write_new_file(paths, &unit_path, &unit.content, owned)?;
-        checks.push(InstallCheck::pass(
-            format!("app-service-file:{}", unit.name),
-            format!("Wrote systemd unit `{unit_path}`."),
+    if options.run_migrations {
+        run_artisan_step(
+            probe,
+            &cwd,
+            "artisan-migrate",
+            ["migrate", "--force"],
+            &mut checks,
+            "Applied database migrations.",
+        )?;
+    } else {
+        checks.push(InstallCheck::manual(
+            "artisan-migrate",
+            "브라우저 설치 화면에서 앱 설치를 완료한 뒤 필요 시 `php artisan migrate --force`를 실행하세요.",
         ));
     }
 
-    let output = probe
-        .systemd_daemon_reload()
-        .map_err(|err| command_error("systemd-daemon-reload", "systemctl daemon-reload", err))?;
-    require_success("systemd-daemon-reload", "systemctl daemon-reload", output)?;
-    checks.push(InstallCheck::pass(
-        "systemd-daemon-reload",
-        "Reloaded systemd units after app service creation.",
-    ));
-
-    for unit in app_systemd_units(plan, kind)
-        .into_iter()
-        .filter(|unit| unit.enable_now)
-    {
-        let command = format!("systemctl enable --now {}", unit.name);
-        let output = probe
-            .enable_service_now(unit.name)
-            .map_err(|err| command_error("app-service-enable", &command, err))?;
-        require_success("app-service-enable", command, output)?;
-        checks.push(InstallCheck::pass(
-            format!("app-service:{}", unit.name),
-            format!("Enabled and started `{}`.", unit.name),
+    if options.run_optimize {
+        run_artisan_step(
+            probe,
+            &cwd,
+            "artisan-optimize",
+            ["optimize"],
+            &mut checks,
+            "Cached Laravel runtime metadata.",
+        )?;
+    } else {
+        checks.push(InstallCheck::manual(
+            "artisan-optimize",
+            "브라우저 설치 완료 후 `php artisan optimize`로 캐시를 갱신하세요.",
         ));
+    }
+
+    if options.verify_about {
+        run_artisan_step(
+            probe,
+            &cwd,
+            "artisan-about",
+            ["about"],
+            &mut checks,
+            "Verified Laravel artisan runtime.",
+        )?;
+    } else {
+        checks.push(InstallCheck::manual(
+            "artisan-about",
+            "브라우저 설치 완료 후 `php artisan about`으로 앱 런타임을 확인하세요.",
+        ));
+    }
+
+    if options.write_services {
+        let units = app_systemd_units(plan, kind);
+        for unit in &units {
+            let unit_path = systemd_unit_path(unit.name);
+            write_new_file(paths, &unit_path, &unit.content, owned)?;
+            checks.push(InstallCheck::pass(
+                format!("app-service-file:{}", unit.name),
+                format!("Wrote systemd unit `{unit_path}`."),
+            ));
+        }
+
+        let output = probe.systemd_daemon_reload().map_err(|err| {
+            command_error("systemd-daemon-reload", "systemctl daemon-reload", err)
+        })?;
+        require_success("systemd-daemon-reload", "systemctl daemon-reload", output)?;
+        checks.push(InstallCheck::pass(
+            "systemd-daemon-reload",
+            "Reloaded systemd units after app service creation.",
+        ));
+
+        for unit in units
+            .into_iter()
+            .filter(|unit| unit.enable_now && options.enable_services)
+        {
+            let command = format!("systemctl enable --now {}", unit.name);
+            let output = probe
+                .enable_service_now(unit.name)
+                .map_err(|err| command_error("app-service-enable", &command, err))?;
+            require_success("app-service-enable", command, output)?;
+            checks.push(InstallCheck::pass(
+                format!("app-service:{}", unit.name),
+                format!("Enabled and started `{}`.", unit.name),
+            ));
+        }
+
+        if !options.enable_services {
+            checks.push(InstallCheck::manual(
+                "app-services-enable",
+                "앱 브라우저 설치를 끝낸 뒤 필요한 queue/scheduler/Reverb 서비스를 `systemctl enable --now`로 시작하세요.",
+            ));
+        }
     }
 
     Ok(checks)
@@ -4267,11 +4346,17 @@ mod tests {
             report
                 .app_checks
                 .iter()
-                .any(|check| { check.name == "artisan-migrate" && check.status == "pass" })
+                .any(|check| { check.name == "artisan-migrate" && check.status == "manual" })
         );
         assert!(report.app_checks.iter().any(|check| {
-            check.name == "app-service:g7-queue.service" && check.status == "pass"
+            check.name == "app-service-file:g7-queue.service" && check.status == "pass"
         }));
+        assert!(
+            report
+                .app_checks
+                .iter()
+                .any(|check| { check.name == "app-services-enable" && check.status == "manual" })
+        );
         assert!(
             report
                 .app_checks
@@ -4862,12 +4947,6 @@ mod tests {
                 runner.push_output(CommandOutput::success("npm build ok\n"));
                 runner.push_output(CommandOutput::success("key generated\n"));
                 runner.push_output(CommandOutput::success("storage linked\n"));
-                runner.push_output(CommandOutput::success("migrated\n"));
-                runner.push_output(CommandOutput::success("optimized\n"));
-                runner.push_output(CommandOutput::success("artisan about\n"));
-                runner.push_output(CommandOutput::success(""));
-                runner.push_output(CommandOutput::success(""));
-                runner.push_output(CommandOutput::success(""));
                 runner.push_output(CommandOutput::success(""));
             }
             "wordpress" => {

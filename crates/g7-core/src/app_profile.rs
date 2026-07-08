@@ -143,9 +143,10 @@ const GNUBOARD7_PROFILE: AppProfile = AppProfile {
         "run composer install",
         "build frontend assets",
         "create .env and APP_KEY",
-        "run migrations",
         "link storage",
-        "cache Laravel config/routes/views",
+        "open browser installer at /install",
+        "run migrations and optimization after browser install",
+        "enable queue, scheduler, and Reverb after browser install",
     ],
     health_checks: &[
         "GET /",

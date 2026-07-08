@@ -2,7 +2,7 @@
 
 Ubuntu VPS에 `g7inst`를 설치하고 웹 마법사로 그누보드7/워드프레스/라라벨용 서버 구성과 사이트 프로비저닝을 진행하는 도구입니다.
 
-> 현재 공개 릴리스는 `g7inst` 설치, 서버 점검, 웹 마법사, apt 패키지 설치, Nginx/Apache 도메인 연결 설정(vhost), PHP-FPM/DB 사양 튜닝, DB 앱 계정 생성, 웹서버별 Let's Encrypt 인증서 발급/갱신 검증, 그누보드7/Laravel Composer·NPM·Artisan·queue·scheduler·Reverb 구성, WordPress 설치 링크, 상세 설정 안내서 저장까지 검증합니다.
+> 현재 공개 릴리스는 `g7inst` 설치, 서버 점검, 웹 마법사, apt 패키지 설치, Nginx/Apache 도메인 연결 설정(vhost), PHP-FPM/DB 사양 튜닝, DB 앱 계정 생성, 웹서버별 Let's Encrypt 인증서 발급/갱신 검증, 그누보드7 브라우저 설치 화면 준비, Laravel Composer·NPM·Artisan·queue·scheduler 구성, WordPress 설치 링크, 6단계 세부 설정 액션 패널, 상세 설정 안내서 저장까지 검증합니다.
 
 ## 무엇부터 보면 되나요?
 

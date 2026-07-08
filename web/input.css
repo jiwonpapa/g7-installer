@@ -316,6 +316,75 @@
     @apply break-words font-semibold;
   }
 
+  .provisioning-actions {
+    @apply grid gap-4;
+  }
+
+  .provisioning-actions-heading {
+    @apply flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between;
+  }
+
+  .provisioning-actions-heading p {
+    @apply mt-1 text-sm leading-6 text-base-content/60;
+  }
+
+  .provisioning-actions-heading > strong {
+    @apply inline-flex w-fit shrink-0 items-center rounded-full px-3 py-1 text-xs font-semibold;
+  }
+
+  .provisioning-action-grid {
+    @apply grid gap-3 lg:grid-cols-2;
+  }
+
+  .provisioning-action-card {
+    @apply grid min-w-0 gap-3 rounded-md border border-base-300 bg-base-100 p-4 text-sm shadow-sm;
+  }
+
+  .provisioning-action-card > div {
+    @apply flex min-w-0 items-start justify-between gap-3;
+  }
+
+  .provisioning-action-card span {
+    @apply block break-words font-semibold;
+  }
+
+  .provisioning-action-card strong {
+    @apply inline-flex shrink-0 rounded-full px-2 py-1 text-xs font-semibold;
+  }
+
+  .provisioning-action-card p {
+    @apply text-xs leading-5 text-base-content/60;
+  }
+
+  .provisioning-action-card code {
+    @apply block overflow-x-auto rounded-md bg-base-200 px-3 py-2 font-mono text-xs leading-5;
+  }
+
+  .provisioning-action-card .btn {
+    @apply justify-self-start;
+  }
+
+  .provisioning-actions-heading > strong[data-status="pass"],
+  .provisioning-action-card[data-status="pass"] strong {
+    @apply bg-success text-success-content;
+  }
+
+  .provisioning-actions-heading > strong[data-status="warn"],
+  .provisioning-action-card[data-status="warn"] strong,
+  .provisioning-actions-heading > strong[data-status="pending"],
+  .provisioning-action-card[data-status="pending"] strong {
+    @apply bg-warning text-warning-content;
+  }
+
+  .provisioning-action-card[data-status="info"] strong {
+    @apply bg-info text-info-content;
+  }
+
+  .provisioning-actions-heading > strong[data-status="fail"],
+  .provisioning-action-card[data-status="fail"] strong {
+    @apply bg-error text-error-content;
+  }
+
   .report-list {
     @apply mt-3 grid gap-2;
   }
