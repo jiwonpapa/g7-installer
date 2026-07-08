@@ -64,6 +64,7 @@ const CERTBOT_HTTP01_SMOKE_CONTENT: &str = "g7-installer-certbot-http01-ok\n";
 const SWAP_FILE_PATH: &str = "/swapfile";
 const SWAP_UNIT_PATH: &str = "/etc/systemd/system/swapfile.swap";
 const SWAP_SYSCTL_PATH: &str = "/etc/sysctl.d/99-g7-installer-swap.conf";
+const GNUBOARD7_DRIVER_SETTINGS_PATH: &str = "storage/app/settings/drivers.json";
 const GNUBOARD7_REQUIRED_FILES: &[&str] = &[
     "artisan",
     "composer.json",
@@ -2492,6 +2493,7 @@ fn install_gnuboard7_app<R: CommandRunner>(
     ];
     checks.extend(source_checks);
     checks.extend(deployed_checks);
+    checks.extend(write_gnuboard7_driver_settings(paths, plan, owned)?);
     checks.extend(apply_app_permissions(probe, paths, plan, owned)?);
     checks.extend(configure_laravel_runtime(
         probe,
@@ -2511,6 +2513,91 @@ fn install_gnuboard7_app<R: CommandRunner>(
     ));
 
     Ok(checks)
+}
+
+fn write_gnuboard7_driver_settings(
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+    owned: &mut Vec<String>,
+) -> Result<Vec<InstallCheck>> {
+    let settings_dir = format!("{}/storage/app/settings", plan.web_root);
+    create_owned_dir_if_absent(paths, &settings_dir, owned)?;
+    let path = format!("{}/{}", plan.web_root, GNUBOARD7_DRIVER_SETTINGS_PATH);
+    write_tracked_file(
+        paths,
+        &path,
+        &gnuboard7_driver_settings_content(plan)?,
+        owned,
+    )?;
+
+    let (cache_driver, session_driver) = gnuboard7_runtime_drivers(plan);
+    Ok(vec![InstallCheck::pass(
+        "gnuboard7-driver-settings",
+        format!(
+            "Preseeded Gnuboard7 driver settings at {path}; cache={cache_driver}, session={session_driver}, queue=sync."
+        ),
+    )])
+}
+
+fn gnuboard7_runtime_drivers(plan: &plan::InstallPlan) -> (&'static str, &'static str) {
+    if plan.redis_mode == "enable" {
+        ("redis", "redis")
+    } else {
+        ("file", "file")
+    }
+}
+
+fn gnuboard7_driver_settings_content(plan: &plan::InstallPlan) -> Result<String> {
+    let (cache_driver, session_driver) = gnuboard7_runtime_drivers(plan);
+    let seconds = match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs(),
+        Err(_) => 0,
+    };
+    let value = serde_json::json!({
+        "_meta": {
+            "version": "1.0.0",
+            "updated_at": format!("g7inst-{seconds}")
+        },
+        "storage_driver": "local",
+        "s3_bucket": "",
+        "s3_region": "ap-northeast-2",
+        "s3_access_key": "",
+        "s3_secret_key": "",
+        "s3_url": "",
+        "cache_driver": cache_driver,
+        "redis_host": "127.0.0.1",
+        "redis_port": 6379,
+        "redis_password": "",
+        "redis_database": 0,
+        "memcached_host": "127.0.0.1",
+        "memcached_port": 11211,
+        "session_driver": session_driver,
+        "session_lifetime": 120,
+        "queue_driver": "sync",
+        "log_driver": "daily",
+        "log_level": "error",
+        "log_days": 14,
+        "websocket_enabled": false,
+        "websocket_app_id": "",
+        "websocket_app_key": "",
+        "websocket_app_secret": "",
+        "websocket_host": "localhost",
+        "websocket_port": 8080,
+        "websocket_scheme": "https",
+        "websocket_verify_ssl": true,
+        "websocket_server_host": "127.0.0.1",
+        "websocket_server_port": 8080,
+        "websocket_server_scheme": "http",
+        "search_engine_driver": "mysql-fulltext"
+    });
+
+    let mut content = serde_json::to_string_pretty(&value).map_err(|source| {
+        Error::InstallVerificationFailed {
+            checks: format!("failed to render Gnuboard7 driver settings: {source}"),
+        }
+    })?;
+    content.push('\n');
+    Ok(content)
 }
 
 fn install_laravel_app<R: CommandRunner>(
@@ -3516,11 +3603,14 @@ pm.max_requests = 500
 
 php_admin_value[open_basedir] = {web_root}:/tmp
 php_admin_value[session.save_path] = /tmp
+request_slowlog_timeout = 2s
+slowlog = /var/log/php{php_version}-fpm-{site_user}-slow.log
 catch_workers_output = yes
 "#,
         site_user = plan.site_user,
         socket = php_fpm_site_socket(plan),
         web_root = plan.web_root,
+        php_version = plan.php_version,
         php_max_children = sizing.php_max_children,
         php_start_servers = sizing.php_start_servers,
         php_min_spare_servers = sizing.php_min_spare_servers,
@@ -3556,10 +3646,21 @@ opcache.enable_file_override = 1
 fn nginx_runtime_tuning_content(sizing: &plan::ResolvedMemorySizing) -> String {
     format!(
         r#"# Managed by g7inst. This file is included inside the nginx http context.
+log_format g7_timing '$remote_addr - $remote_user [$time_local] "$request" '
+                     '$status $body_bytes_sent "$http_referer" "$http_user_agent" '
+                     'rt=$request_time uct=$upstream_connect_time '
+                     'uht=$upstream_header_time urt=$upstream_response_time';
+
 client_max_body_size {upload_limit};
 keepalive_timeout {keepalive};
 fastcgi_buffers {fastcgi_buffers};
 fastcgi_buffer_size 32k;
+gzip on;
+gzip_vary on;
+gzip_proxied any;
+gzip_comp_level 5;
+gzip_min_length 1024;
+gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript image/svg+xml;
 "#,
         upload_limit = sizing.php_upload_limit.to_ascii_lowercase(),
         keepalive = sizing.nginx_keepalive_timeout,
@@ -3592,6 +3693,8 @@ innodb_buffer_pool_size = {buffer_pool}
 max_connections = {max_connections}
 tmp_table_size = {tmp_table_size}
 max_heap_table_size = {tmp_table_size}
+slow_query_log = ON
+long_query_time = 0.5
 "#,
         buffer_pool = sizing.db_buffer_pool,
         max_connections = sizing.db_max_connections,
@@ -3626,11 +3729,16 @@ fn nginx_vhost_content_with_socket(plan: &plan::InstallPlan, php_socket: &str) -
     let redirect_blocks = nginx_redirect_blocks(plan);
     let reverb_proxy = nginx_reverb_proxy_block(plan);
     let certbot_http01_location = nginx_certbot_http01_challenge_location();
+    let static_cache_locations = nginx_static_cache_locations();
 
     format!(
-        "{redirect_blocks}server {{\n    listen 80;\n    listen [::]:80;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n{certbot_http01_location}\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n{reverb_proxy}\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
+        "{redirect_blocks}server {{\n    listen 80;\n    listen [::]:80;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    access_log /var/log/nginx/g7-access.log g7_timing;\n    error_log /var/log/nginx/g7-error.log;\n\n{certbot_http01_location}{static_cache_locations}\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n{reverb_proxy}\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
         root = plan.app_document_root,
     )
+}
+
+fn nginx_static_cache_locations() -> &'static str {
+    "    location ^~ /build/ {\n        access_log off;\n        expires 30d;\n        add_header Cache-Control \"public, max-age=2592000, immutable\" always;\n        try_files $uri =404;\n    }\n\n    location ^~ /assets/ {\n        access_log off;\n        expires 30d;\n        add_header Cache-Control \"public, max-age=2592000, immutable\" always;\n        try_files $uri =404;\n    }\n\n    location ~* \\.(?:css|js|mjs|map|jpg|jpeg|png|gif|webp|avif|svg|ico|woff2?|ttf|eot)$ {\n        access_log off;\n        expires 30d;\n        add_header Cache-Control \"public, max-age=2592000, immutable\" always;\n        try_files $uri =404;\n    }\n"
 }
 
 fn nginx_certbot_http01_challenge_location() -> &'static str {
@@ -3739,9 +3847,10 @@ fn nginx_tls_vhost_content(plan: &plan::InstallPlan, php_socket: &str) -> String
     let canonical_redirect = nginx_https_canonical_redirect(plan);
     let reverb_proxy = nginx_reverb_proxy_block(plan);
     let certbot_http01_location = nginx_certbot_http01_challenge_location();
+    let static_cache_locations = nginx_static_cache_locations();
 
     format!(
-        "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {http_hosts};\n    root {root};\n\n{certbot_http01_location}\n    location / {{\n        return 301 https://$host$request_uri;\n    }}\n}}\n\n{canonical_redirect}server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    ssl_certificate /etc/letsencrypt/live/{cert_name}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{cert_name}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_prefer_server_ciphers off;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    add_header X-Content-Type-Options nosniff always;\n    add_header X-Frame-Options SAMEORIGIN always;\n    add_header Referrer-Policy strict-origin-when-cross-origin always;\n\n{certbot_http01_location}\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n{reverb_proxy}\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
+        "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {http_hosts};\n    root {root};\n\n{certbot_http01_location}\n    location / {{\n        return 301 https://$host$request_uri;\n    }}\n}}\n\n{canonical_redirect}server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    ssl_certificate /etc/letsencrypt/live/{cert_name}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{cert_name}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_prefer_server_ciphers off;\n\n    access_log /var/log/nginx/g7-access.log g7_timing;\n    error_log /var/log/nginx/g7-error.log;\n\n    add_header X-Content-Type-Options nosniff always;\n    add_header X-Frame-Options SAMEORIGIN always;\n    add_header Referrer-Policy strict-origin-when-cross-origin always;\n\n{certbot_http01_location}{static_cache_locations}\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n{reverb_proxy}\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
         root = plan.app_document_root,
     )
 }
@@ -5026,12 +5135,22 @@ mod tests {
         let nginx_vhost = fs::read_to_string(fs_root.join("etc/nginx/sites-available/g7.conf"))?;
         assert!(nginx_vhost.contains("proxy_pass http://127.0.0.1:8080;"));
         assert!(nginx_vhost.contains("location /app"));
+        assert!(nginx_vhost.contains("access_log /var/log/nginx/g7-access.log g7_timing;"));
+        assert!(nginx_vhost.contains("location ^~ /build/"));
+        assert!(nginx_vhost.contains("public, max-age=2592000, immutable"));
         assert!(
             fs_root
                 .join("etc/nginx/conf.d/g7-runtime-tuning.conf")
                 .exists()
         );
+        let nginx_runtime =
+            fs::read_to_string(fs_root.join("etc/nginx/conf.d/g7-runtime-tuning.conf"))?;
+        assert!(nginx_runtime.contains("log_format g7_timing"));
+        assert!(nginx_runtime.contains("gzip_comp_level 5"));
         assert!(fs_root.join("etc/php/8.3/fpm/pool.d/g7-g7.conf").exists());
+        let php_pool = fs::read_to_string(fs_root.join("etc/php/8.3/fpm/pool.d/g7-g7.conf"))?;
+        assert!(php_pool.contains("request_slowlog_timeout = 2s"));
+        assert!(php_pool.contains("slowlog = /var/log/php8.3-fpm-g7-slow.log"));
         assert!(
             fs_root
                 .join("etc/php/8.3/fpm/conf.d/99-g7-installer.ini")
@@ -5045,9 +5164,18 @@ mod tests {
                 .exists()
         );
         assert!(fs_root.join("etc/mysql/conf.d/g7-installer.cnf").exists());
+        let database_runtime =
+            fs::read_to_string(fs_root.join("etc/mysql/conf.d/g7-installer.cnf"))?;
+        assert!(database_runtime.contains("slow_query_log = ON"));
+        assert!(database_runtime.contains("long_query_time = 0.5"));
         assert!(fs_root.join("etc/g7-installer/secrets.toml").exists());
         assert!(fs_root.join("var/log/g7-installer/setup-guide.md").exists());
         assert!(fs_root.join("home/g7/public_html/.env").exists());
+        assert!(
+            fs_root
+                .join("home/g7/public_html/storage/app/settings/drivers.json")
+                .exists()
+        );
         assert!(fs_root.join("etc/systemd/system/g7-queue.service").exists());
         assert!(
             fs_root
@@ -5074,6 +5202,12 @@ mod tests {
         assert!(app_env.contains("BROADCAST_CONNECTION=reverb"));
         assert!(app_env.contains("VITE_REVERB_HOST=example.com"));
         assert!(app_env.contains("VITE_REVERB_PORT=443"));
+        let driver_settings = fs::read_to_string(
+            fs_root.join("home/g7/public_html/storage/app/settings/drivers.json"),
+        )?;
+        assert!(driver_settings.contains("\"cache_driver\": \"redis\""));
+        assert!(driver_settings.contains("\"session_driver\": \"redis\""));
+        assert!(driver_settings.contains("\"queue_driver\": \"sync\""));
         let recorded = probe.runner().recorded();
         let app_copy_index = recorded
             .iter()
@@ -5222,6 +5356,11 @@ mod tests {
                 .app_checks
                 .iter()
                 .any(|check| { check.name == "composer-install" && check.status == "pass" })
+        );
+        assert!(
+            report.app_checks.iter().any(|check| {
+                check.name == "gnuboard7-driver-settings" && check.status == "pass"
+            })
         );
         assert!(
             report
