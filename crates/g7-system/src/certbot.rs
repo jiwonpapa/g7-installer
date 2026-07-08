@@ -38,6 +38,7 @@ pub fn renew_dry_run<R: CommandRunner>(
             .arg("renew")
             .arg("--dry-run")
             .arg("--non-interactive")
+            .arg("--no-random-sleep-on-renew")
             .arg("--cert-name")
             .arg(cert_name),
     )
@@ -58,7 +59,7 @@ pub fn delete_cert<R: CommandRunner>(
 
 #[cfg(test)]
 mod tests {
-    use super::{certonly_webroot, delete_cert};
+    use super::{certonly_webroot, delete_cert, renew_dry_run};
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
 
@@ -106,6 +107,30 @@ mod tests {
                 OsString::from("--cert-name"),
                 OsString::from("example.com"),
                 OsString::from("--non-interactive"),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn renew_dry_run_disables_random_sleep() -> std::result::Result<(), Box<dyn std::error::Error>>
+    {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success(""));
+
+        renew_dry_run(&runner, "example.com")?;
+        let recorded = runner.recorded();
+
+        assert_eq!(recorded[0].program, OsString::from("certbot"));
+        assert_eq!(
+            recorded[0].args,
+            vec![
+                OsString::from("renew"),
+                OsString::from("--dry-run"),
+                OsString::from("--non-interactive"),
+                OsString::from("--no-random-sleep-on-renew"),
+                OsString::from("--cert-name"),
+                OsString::from("example.com"),
             ]
         );
         Ok(())

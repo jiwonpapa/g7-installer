@@ -1766,11 +1766,29 @@ fn apply_app_phase<R: CommandRunner>(
     let app_url = app_access_url(plan, summary);
     let mut checks = match plan.app_profile.as_str() {
         "gnuboard7" => install_gnuboard7_app(probe, paths, plan, owned, &app_url)?,
-        "wordpress" => install_wordpress_app(probe, paths, plan)?,
+        "wordpress" => install_wordpress_app(probe, paths, plan, owned)?,
         "laravel" => install_laravel_app(probe, paths, plan, owned, &app_url)?,
-        _ => install_placeholder_app(paths, plan, owned)?,
+        _ => {
+            let mut checks = install_placeholder_app(paths, plan, owned)?;
+            checks.extend(apply_app_permissions(probe, paths, plan, owned)?);
+            checks
+        }
     };
 
+    checks.push(InstallCheck::pass(
+        "app-url",
+        format!("Open {app_url} to continue or verify the selected app install."),
+    ));
+    Ok(checks)
+}
+
+fn apply_app_permissions<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+    owned: &mut Vec<String>,
+) -> Result<Vec<InstallCheck>> {
+    let mut checks = Vec::new();
     ensure_app_writable_dirs(paths, plan, owned)?;
     let owner_group = format!("{}:www-data", plan.site_user);
     let command = format!("chown -R {owner_group} {}", plan.web_root);
@@ -1804,10 +1822,6 @@ fn apply_app_phase<R: CommandRunner>(
         ));
     }
 
-    checks.push(InstallCheck::pass(
-        "app-url",
-        format!("Open {app_url} to continue or verify the selected app install."),
-    ));
     Ok(checks)
 }
 
@@ -1879,6 +1893,7 @@ fn install_gnuboard7_app<R: CommandRunner>(
             ),
         ),
     ];
+    checks.extend(apply_app_permissions(probe, paths, plan, owned)?);
     checks.extend(configure_laravel_runtime(
         probe,
         paths,
@@ -1962,6 +1977,7 @@ fn install_laravel_app<R: CommandRunner>(
             ),
         ),
     ];
+    checks.extend(apply_app_permissions(probe, paths, plan, owned)?);
     checks.extend(configure_laravel_runtime(
         probe,
         paths,
@@ -1981,6 +1997,7 @@ fn install_wordpress_app<R: CommandRunner>(
     probe: &SystemProbe<R>,
     paths: &InstallPaths,
     plan: &plan::InstallPlan,
+    owned: &mut Vec<String>,
 ) -> Result<Vec<InstallCheck>> {
     remove_existing_path(paths, WORDPRESS_EXTRACT_DIR)?;
     let output = probe
@@ -2028,14 +2045,15 @@ fn install_wordpress_app<R: CommandRunner>(
         output,
     )?;
 
-    Ok(vec![
-        InstallCheck::pass(
-            "app-source",
-            format!(
-                "Downloaded WordPress latest.zip and copied it into {}.",
-                plan.web_root
-            ),
+    let mut checks = vec![InstallCheck::pass(
+        "app-source",
+        format!(
+            "Downloaded WordPress latest.zip and copied it into {}.",
+            plan.web_root
         ),
+    )];
+    checks.extend(apply_app_permissions(probe, paths, plan, owned)?);
+    checks.extend([
         InstallCheck::pass(
             "app-install-screen",
             format!(
@@ -2051,7 +2069,8 @@ fn install_wordpress_app<R: CommandRunner>(
                 plan.database_name, plan.database_user
             ),
         },
-    ])
+    ]);
+    Ok(checks)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2510,7 +2529,7 @@ fn laravel_env_content(
     let app_key = random_laravel_app_key()?;
     let redis_enabled = plan.redis_mode == "enable";
     let mut env = format!(
-        "APP_NAME=\"{}\"\nAPP_ENV=production\nAPP_KEY=base64:{app_key}\nAPP_DEBUG=false\nAPP_URL={app_url}\n\nDB_CONNECTION=mysql\nDB_HOST=127.0.0.1\nDB_PORT=3306\nDB_DATABASE={}\nDB_USERNAME={}\nDB_PASSWORD=\"{}\"\n\nCACHE_STORE={}\nSESSION_DRIVER={}\nQUEUE_CONNECTION={}\nREDIS_CLIENT=phpredis\nREDIS_HOST=127.0.0.1\nREDIS_PORT=6379\nREDIS_PASSWORD=null\n\n",
+        "APP_NAME=\"{}\"\nAPP_ENV=production\nAPP_KEY=base64:{app_key}\nAPP_DEBUG=false\nAPP_URL={app_url}\n\nDB_CONNECTION=mysql\nDB_HOST=localhost\nDB_PORT=3306\nDB_DATABASE={}\nDB_USERNAME={}\nDB_PASSWORD=\"{}\"\n\nCACHE_STORE={}\nSESSION_DRIVER={}\nQUEUE_CONNECTION={}\nREDIS_CLIENT=phpredis\nREDIS_HOST=127.0.0.1\nREDIS_PORT=6379\nREDIS_PASSWORD=null\n\n",
         plan.app_profile_label,
         plan.database_name,
         plan.database_user,
@@ -3973,7 +3992,8 @@ fn setup_guide_content(
         }
     }
     content.push_str("- SSL 자동갱신 타이머: `sudo systemctl status certbot.timer`\n");
-    content.push_str("- SSL 갱신 테스트: `sudo certbot renew --dry-run`\n");
+    content
+        .push_str("- SSL 갱신 테스트: `sudo certbot renew --dry-run --no-random-sleep-on-renew`\n");
     content.push_str("\n## 설치 결과\n\n");
     content.push_str(&format!(
         "- 완료 단계: `{}`\n",
@@ -4121,9 +4141,40 @@ mod tests {
                 .exists()
         );
         let app_env = fs::read_to_string(fs_root.join("home/g7/public_html/.env"))?;
+        assert!(app_env.contains("DB_HOST=localhost"));
+        assert!(!app_env.contains("DB_HOST=127.0.0.1"));
         assert!(app_env.contains("BROADCAST_CONNECTION=reverb"));
         assert!(app_env.contains("VITE_REVERB_HOST=example.com"));
         assert!(app_env.contains("VITE_REVERB_PORT=443"));
+        let recorded = probe.runner().recorded();
+        let app_copy_index = recorded
+            .iter()
+            .position(|spec| {
+                spec.display()
+                    == "cp -a /var/lib/g7-installer/app-source/gnuboard7/. /home/g7/public_html"
+            })
+            .ok_or_else(|| std::io::Error::other("missing gnuboard7 app copy command"))?;
+        let app_chown_index = recorded
+            .iter()
+            .enumerate()
+            .skip(app_copy_index + 1)
+            .find(|(_, spec)| spec.display() == "chown -R g7:www-data /home/g7/public_html")
+            .map(|(index, _)| index)
+            .ok_or_else(|| std::io::Error::other("missing app chown command after copy"))?;
+        let storage_chmod_index = recorded
+            .iter()
+            .enumerate()
+            .skip(app_copy_index + 1)
+            .find(|(_, spec)| spec.display() == "chmod -R 0775 /home/g7/public_html/storage")
+            .map(|(index, _)| index)
+            .ok_or_else(|| std::io::Error::other("missing storage chmod command after copy"))?;
+        let composer_index = recorded
+            .iter()
+            .position(|spec| spec.display().starts_with("composer install "))
+            .ok_or_else(|| std::io::Error::other("missing composer install command"))?;
+        assert!(app_copy_index < app_chown_index);
+        assert!(app_chown_index < composer_index);
+        assert!(storage_chmod_index < composer_index);
         assert!(
             report
                 .owned_files
@@ -4802,6 +4853,7 @@ mod tests {
             "gnuboard7" => {
                 runner.push_output(CommandOutput::success("cloned\n"));
                 runner.push_output(CommandOutput::success(""));
+                push_successful_app_permission_outputs(runner, install_plan);
                 runner.push_output(CommandOutput::success("composer ok\n"));
                 runner.push_output(CommandOutput::success("npm install ok\n"));
                 runner.push_output(CommandOutput::success("npm build ok\n"));
@@ -4819,10 +4871,12 @@ mod tests {
                 runner.push_output(CommandOutput::success(""));
                 runner.push_output(CommandOutput::success(""));
                 runner.push_output(CommandOutput::success(""));
+                push_successful_app_permission_outputs(runner, install_plan);
             }
             "laravel" => {
                 runner.push_output(CommandOutput::success("cloned\n"));
                 runner.push_output(CommandOutput::success(""));
+                push_successful_app_permission_outputs(runner, install_plan);
                 runner.push_output(CommandOutput::success("composer ok\n"));
                 runner.push_output(CommandOutput::success("npm install ok\n"));
                 runner.push_output(CommandOutput::success("npm build ok\n"));
@@ -4835,8 +4889,16 @@ mod tests {
                 runner.push_output(CommandOutput::success(""));
                 runner.push_output(CommandOutput::success(""));
             }
-            _ => {}
+            _ => {
+                push_successful_app_permission_outputs(runner, install_plan);
+            }
         }
+    }
+
+    fn push_successful_app_permission_outputs(
+        runner: &FakeCommandRunner,
+        install_plan: &super::plan::InstallPlan,
+    ) {
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         for _writable_path in super::app_writable_paths(install_plan) {
