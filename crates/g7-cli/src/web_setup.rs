@@ -306,14 +306,19 @@ struct InstallApiReport {
     database_password_policy: &'static str,
     app_package: String,
     site_user: String,
+    web_root_mode: String,
     web_root: String,
     app_url: String,
+    www_mode: String,
+    redis: String,
     mail_mode: String,
     smtp_host: Option<String>,
     smtp_port: Option<u16>,
     smtp_from: Option<String>,
     smtp_encryption: Option<String>,
     dns_check: bool,
+    security_profile: String,
+    ssh_policy: String,
     phase: String,
     state_path: String,
     owned_files_path: String,
@@ -333,6 +338,7 @@ struct InstallApiReport {
     vhost_checks: Vec<InstallApiCheck>,
     app_checks: Vec<InstallApiCheck>,
     setup_guide_path: String,
+    backup_manifest_path: String,
     app_requirements: Vec<InstallApiCheck>,
 }
 
@@ -1091,11 +1097,13 @@ fn run_provision_action(
         "database" => provision_database(report),
         "ssl" => provision_ssl(report),
         "mail" => provision_mail(report),
+        "security" => provision_security(report),
         "app" => provision_app(report),
         _ => {
             return Err(
-                ApiError::bad_request(format!("unsupported provision action: {action}"))
-                    .with_hint("지원 작업은 webserver, php, database, ssl, mail, app 입니다."),
+                ApiError::bad_request(format!("unsupported provision action: {action}")).with_hint(
+                    "지원 작업은 webserver, php, database, ssl, mail, security, app 입니다.",
+                ),
             );
         }
     };
@@ -1241,6 +1249,34 @@ fn provision_mail(report: &serde_json::Value) -> Vec<InstallApiCheck> {
             None,
         ),
     ]
+}
+
+fn provision_security(report: &serde_json::Value) -> Vec<InstallApiCheck> {
+    let security_profile =
+        report_string(report, "security_profile").unwrap_or_else(|| "standard".to_string());
+    let ssh_policy =
+        report_string(report, "ssh_policy").unwrap_or_else(|| "audit-only".to_string());
+    let mut checks = vec![InstallApiCheck {
+        name: "security-policy".to_string(),
+        status: "manual".to_string(),
+        message: format!(
+            "보안 수준은 `{security_profile}`, SSH 정책은 `{ssh_policy}`입니다. SSH 차단을 피하기 위해 자동 변경 대신 점검 결과를 확인하세요."
+        ),
+    }];
+
+    checks.push(run_command_check(
+        "ssh-service-active",
+        "systemctl",
+        &["is-active", "--quiet", "ssh"],
+        None,
+    ));
+    checks.push(run_command_check(
+        "ufw-status",
+        "ufw",
+        &["status", "verbose"],
+        None,
+    ));
+    checks
 }
 
 fn provision_app(report: &serde_json::Value) -> Vec<InstallApiCheck> {
@@ -1959,14 +1995,19 @@ fn install_to_api(report: install::InstallReport, database_version: String) -> I
         database_password_policy: report.database_password_policy,
         app_package: report.app_profile,
         site_user: report.site_user,
+        web_root_mode: report.web_root_mode,
         web_root: report.web_root,
         app_url: report.app_url,
+        www_mode: report.www_mode,
+        redis: report.redis_mode,
         mail_mode: report.mail_mode,
         smtp_host: report.smtp_host,
         smtp_port: report.smtp_port,
         smtp_from: report.smtp_from,
         smtp_encryption: report.smtp_encryption,
         dns_check: report.dns_check,
+        security_profile: report.security_profile,
+        ssh_policy: report.ssh_policy,
         phase: report.phase,
         state_path: report.state_path.display().to_string(),
         owned_files_path: report.owned_files_path.display().to_string(),
@@ -1986,6 +2027,7 @@ fn install_to_api(report: install::InstallReport, database_version: String) -> I
         vhost_checks: install_checks_to_api(report.vhost_checks),
         app_checks: install_checks_to_api(report.app_checks),
         setup_guide_path: report.setup_guide_path.display().to_string(),
+        backup_manifest_path: report.backup_manifest_path.display().to_string(),
         app_requirements: install_checks_to_api(report.app_requirements),
     }
 }
@@ -2735,6 +2777,7 @@ mod tests {
                 vhost_checks: Vec::new(),
                 app_checks: Vec::new(),
                 setup_guide_path: PathBuf::from("/var/log/g7-installer/setup-guide.md"),
+                backup_manifest_path: PathBuf::from("/var/backups/g7-installer/manifest.json"),
                 app_requirements: vec![install::InstallCheck {
                     name: "php-version".to_string(),
                     status: "pass".to_string(),
@@ -2756,6 +2799,10 @@ mod tests {
         );
         assert_eq!(install_api.package_checks[0].name, "nginx");
         assert_eq!(install_api.state_path, "/var/lib/g7-installer/state.json");
+        assert_eq!(
+            install_api.backup_manifest_path,
+            "/var/backups/g7-installer/manifest.json"
+        );
         assert_eq!(
             install_api.owned_files,
             vec!["/etc/g7-installer/config.toml".to_string()]

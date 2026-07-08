@@ -378,6 +378,10 @@
     @apply break-words font-semibold;
   }
 
+  .download-actions {
+    @apply flex flex-wrap gap-2;
+  }
+
   .provisioning-actions {
     @apply grid gap-4;
   }

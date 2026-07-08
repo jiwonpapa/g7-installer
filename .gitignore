@@ -29,6 +29,10 @@ id_dsa.pub
 # Coverage and profiling outputs
 /coverage/
 /tarpaulin-report.html
+/test-results/
+/web/test-results/
+/playwright-report/
+/web/playwright-report/
 *.profraw
 *.profdata
 

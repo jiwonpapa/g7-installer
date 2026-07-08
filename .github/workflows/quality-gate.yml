@@ -1,0 +1,50 @@
+name: quality-gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  rust-and-web:
+    name: local quality gate
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Static and Rust gate
+        run: |
+          bash -n scripts/*.sh
+          scripts/web-static-smoke.sh
+          scripts/setup-auth-smoke.sh
+          node --check web/app.js
+          cargo fmt --check
+          cargo test
+          cargo clippy --all-targets -- -D warnings
+          cargo doc --no-deps
+          cargo llvm-cov --workspace --all-targets --summary-only --fail-under-lines 75
+
+      - name: Build web assets
+        run: |
+          cd web
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Browser wizard E2E
+        run: |
+          cd web
+          bunx playwright install chromium
+          bun run e2e

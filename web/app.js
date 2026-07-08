@@ -238,6 +238,7 @@ const iconSvg = {
   "chevron-left": "<path d=\"m15 18-6-6 6-6\" />",
   "chevron-right": "<path d=\"m9 18 6-6-6-6\" />",
   "clipboard-list": "<rect width=\"8\" height=\"4\" x=\"8\" y=\"2\" rx=\"1\" ry=\"1\" /> <path d=\"M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2\" /> <path d=\"M12 11h4\" /> <path d=\"M12 16h4\" /> <path d=\"M8 11h.01\" /> <path d=\"M8 16h.01\" />",
+  "download": "<path d=\"M12 15V3\" /> <path d=\"m7 10 5 5 5-5\" /> <path d=\"M5 21h14\" />",
   "file-check": "<path d=\"M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z\" /> <path d=\"M14 2v5a1 1 0 0 0 1 1h5\" /> <path d=\"m9 15 2 2 4-4\" />",
   "home": "<path d=\"M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8\" /> <path d=\"M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z\" />",
   "log-in": "<path d=\"m10 17 5-5-5-5\" /> <path d=\"M15 12H3\" /> <path d=\"M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4\" />",
@@ -1376,7 +1377,7 @@ function renderRecoveryStatus(status) {
   recoveryActionButtons("reset").forEach((button) => {
     button.disabled = !status?.can_reset;
     button.title = status?.can_reset
-      ? "설치기가 만든 계정, DB, 인증서, 서비스, 웹루트/설정 파일, 패키지, 메타데이터를 정리합니다."
+      ? "설치기가 만든 계정, DB, 서비스, 웹루트/설정 파일, 패키지, 메타데이터를 정리합니다. 인증서는 보존합니다."
       : (status?.can_rollback ? "패키지 설치 직후에는 패키지 되돌리기를 먼저 사용하세요." : "설치기 소유 기록이 없어 정리할 수 없습니다.");
   });
 
@@ -2085,7 +2086,10 @@ function renderInstallReport(report) {
       ["소유 파일 목록", report.owned_files_path],
       ["소유 파일 수", ownedFileCountLabel(report)],
       ["설정 안내서", report.setup_guide_path || "-"],
+      ["복구 매니페스트", report.backup_manifest_path || "-"],
     ], note),
+    completionStateCard(report),
+    reportDownloadCard(report, "방금 생성됨"),
     operationsGuideCard(report, link),
     healthChecklistCard(report),
     listCard("완료된 작업", report.completed_steps),
@@ -2160,8 +2164,11 @@ function renderSavedReport(payload) {
       ["SMTP 서버", report.smtp_host || "-"],
       ["DNS/IP 확인", report.dns_check ? "수행" : "건너뜀"],
       ["설정 안내서", report.setup_guide_path || "-"],
+      ["복구 매니페스트", report.backup_manifest_path || "-"],
       ["소유 파일 수", ownedFileCountLabel(report)],
     ], note),
+    completionStateCard(report),
+    reportDownloadCard(report, payload.path),
     operationsGuideCard(report, link),
     healthChecklistCard(report),
     compactListCard("다음 단계", [
@@ -2181,7 +2188,7 @@ function renderResetReport(report) {
   nodes.reportOutput.innerHTML = [
     reportSummaryCard("재설치 초기화 완료", [
       ["미리보기", report.dry_run ? "예" : "아니오"],
-      ["의미", "설치기가 만든 계정, DB, 인증서, 서비스, 웹루트/설정 파일, 패키지, 메타데이터를 정리했습니다."],
+      ["의미", "설치기가 만든 계정, DB, 서비스, 웹루트/설정 파일, 패키지, 메타데이터를 정리했습니다. Let's Encrypt 인증서는 보존했습니다."],
     ]),
     actionCard("리소스 처리", report.actions),
     listCard("삭제됨", report.removed),
@@ -2231,6 +2238,156 @@ function ownedFileCountLabel(report = {}) {
   return Array.isArray(report.owned_files) ? `${report.owned_files.length}개` : "-";
 }
 
+function completedCheckNames(checks = []) {
+  return new Set((Array.isArray(checks) ? checks : [])
+    .filter((check) => check.status === "pass")
+    .map((check) => check.name));
+}
+
+function completionStateRows(report = {}) {
+  const appChecks = completedCheckNames(report.app_checks);
+  const completed = isInstallCompleted(report);
+  const appProfile = report.app_profile || report.app_package;
+  const appInstallVerified = appProfile === "gnuboard7"
+    ? appChecks.has("g7-install-lock")
+    : completed;
+
+  return [
+    {
+      label: "서버 준비",
+      status: completed ? "pass" : "fail",
+      message: completed
+        ? "웹서버, PHP-FPM, DB, SSL, 앱 파일 배치가 완료되었습니다."
+        : "중단 단계가 있어 서버 준비가 끝나지 않았습니다.",
+    },
+    {
+      label: "앱 설치 준비",
+      status: completed && report.app_url ? "pass" : "warn",
+      message: completed && report.app_url
+        ? `${appPackageLabel(appProfile)} 설치/준비 링크가 생성되었습니다.`
+        : "앱 설치 링크는 기본 구성이 끝나야 표시됩니다.",
+    },
+    {
+      label: "실제 앱 설치 검증",
+      status: appInstallVerified ? "pass" : "manual",
+      message: appInstallVerified
+        ? "앱 설치 완료 신호를 확인했습니다."
+        : "브라우저 설치 화면 완료 후 7단계 웹앱 카드에서 다시 확인하세요.",
+    },
+  ];
+}
+
+function completionStateCard(report = {}) {
+  return `
+    <section class="report-card">
+      <h3>설치 완료 상태</h3>
+      <p class="mt-2 text-sm text-base-content/60">완료는 서버 준비, 앱 설치 준비, 실제 앱 설치 검증을 분리해서 판단합니다.</p>
+      <div class="result-list mt-3">
+        ${completionStateRows(report).map((row) => `
+          <div class="result-row" data-status="${escapeHtml(checkStatus(row.status))}">
+            <div class="result-copy">
+              <span>${escapeHtml(row.label)}</span>
+              <p>${escapeHtml(row.message)}</p>
+            </div>
+            <strong>${escapeHtml(statusLabel[row.status] || row.status)}</strong>
+          </div>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function reportDownloadCard(report = {}, payloadPath = "") {
+  return `
+    <section class="report-card">
+      <h3>리포트 저장</h3>
+      <p class="mt-2 text-sm text-base-content/60">비밀번호 원문은 포함하지 않고, 설치 결과와 확인 경로만 저장합니다.</p>
+      <div class="download-actions mt-4">
+        <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="download" data-download-report="json">리포트 JSON</button>
+        <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="download" data-download-report="md">설정 안내서 MD</button>
+        <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="download" data-download-report="summary">요약 TXT</button>
+      </div>
+      <dl class="mt-4">
+        <div><dt>서버 리포트</dt><dd>${escapeHtml(payloadPath || "/var/log/g7-installer/report.json")}</dd></div>
+        <div><dt>설정 안내서</dt><dd>${escapeHtml(report.setup_guide_path || "/var/log/g7-installer/setup-guide.md")}</dd></div>
+        <div><dt>복구 매니페스트</dt><dd>${escapeHtml(report.backup_manifest_path || "/var/backups/g7-installer/manifest.json")}</dd></div>
+      </dl>
+    </section>
+  `;
+}
+
+function reportSummaryText(report = {}) {
+  return [
+    `도메인: ${report.domain || "-"}`,
+    `상태: ${report.phase || "-"}`,
+    `앱: ${appPackageLabel(report.app_profile || report.app_package)}`,
+    `웹서버/PHP: ${runtimeLabel(report.web_server)} / ${phpRuntimeLabel(report.php_version, report.php_source)}`,
+    `DB: ${databaseLabel(report.database)} / ${report.database_name || "-"}`,
+    `웹루트: ${report.web_root || "-"}`,
+    `문서 루트: ${report.app_document_root || "-"}`,
+    `앱 링크: ${report.app_url || "-"}`,
+    `설정 안내서: ${report.setup_guide_path || "-"}`,
+    `복구 매니페스트: ${report.backup_manifest_path || "-"}`,
+  ].join("\n");
+}
+
+function setupGuideMarkdown(report = {}) {
+  return [
+    `# G7 Installer 설치 요약 - ${report.domain || "unknown"}`,
+    "",
+    "## 완료 상태",
+    ...completionStateRows(report).map((row) => `- ${row.label}: ${statusLabel[row.status] || row.status} - ${row.message}`),
+    "",
+    "## 주요 경로",
+    `- 웹루트: ${report.web_root || "-"}`,
+    `- 앱 문서 루트: ${report.app_document_root || "-"}`,
+    `- 설정 안내서: ${report.setup_guide_path || "-"}`,
+    `- 리포트 JSON: ${report.state_path ? "/var/log/g7-installer/report.json" : "-"}`,
+    `- 복구 매니페스트: ${report.backup_manifest_path || "-"}`,
+    "",
+    "## 서비스 명령",
+    `- 웹서버: sudo systemctl reload ${report.web_server === "apache" ? "apache2" : "nginx"}`,
+    `- PHP-FPM: sudo systemctl restart php${report.php_version || "8.3"}-fpm`,
+    `- DB: sudo systemctl restart ${report.database === "mariadb" ? "mariadb" : "mysql"}`,
+    "- SSL 갱신 확인: sudo certbot renew --dry-run --no-random-sleep-on-renew",
+    "",
+  ].join("\n");
+}
+
+function safeFilenamePart(value) {
+  return String(value || "g7-installer").replace(/[^a-zA-Z0-9._-]/g, "-");
+}
+
+function downloadTextFile(filename, mime, content) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function downloadReport(format) {
+  const report = currentReport();
+  if (!report || typeof report !== "object") {
+    setAlert(nodes.reportStatus, "warning", "저장할 리포트 없음", "먼저 리포트를 새로고침하세요.");
+    return;
+  }
+
+  const domain = safeFilenamePart(report.domain);
+  if (format === "md") {
+    downloadTextFile(`${domain}-setup-guide.md`, "text/markdown;charset=utf-8", setupGuideMarkdown(report));
+  } else if (format === "summary") {
+    downloadTextFile(`${domain}-install-summary.txt`, "text/plain;charset=utf-8", reportSummaryText(report));
+  } else {
+    downloadTextFile(`${domain}-report.json`, "application/json;charset=utf-8", `${JSON.stringify(report, null, 2)}\n`);
+  }
+  log(`리포트 저장: ${format}`);
+}
+
 function operationsGuideCard(report = {}, link = null) {
   const webService = report.web_server === "apache" ? "apache2" : "nginx";
   const fpmService = report.php_version ? `php${report.php_version}-fpm` : "php-fpm";
@@ -2244,6 +2401,7 @@ function operationsGuideCard(report = {}, link = null) {
     ["DB 재시작", `sudo systemctl restart ${dbService}`],
     ["SSL 갱신 점검", `sudo certbot renew --dry-run --cert-name ${report.domain || "도메인"}`],
     ["설정 안내서", report.setup_guide_path || "-"],
+    ["복구 매니페스트", report.backup_manifest_path || "-"],
   ], "7단계 세부 설정에서 항목별 실행/검증 결과를 다시 확인합니다.");
 }
 
@@ -2511,6 +2669,27 @@ function provisioningActions(report = {}) {
         `smtp_port = ${report.smtp_port || "-"}`,
         `smtp_from = ${report.smtp_from || "-"}`,
         "smtp_password = ******",
+      ],
+    }),
+    provisioningAction("security", "보안/방화벽", [...(report.safety_checks || []), ...(report.firewall_checks || [])], {
+      summary: "신규 VPS 기준 보안 정책, SSH 정책, UFW/공개 포트 상태를 확인합니다.",
+      command: "sudo ufw status verbose && sudo systemctl is-active ssh",
+      settings: [
+        ["보안 수준", report.security_profile || "standard"],
+        ["SSH 정책", report.ssh_policy || "audit-only"],
+        ["공개 포트", "22/tcp, 80/tcp, 443/tcp"],
+        ["적용 방식", "자동 변경보다 점검/승인 우선"],
+      ],
+      files: [
+        configFile("/etc/ssh/sshd_config", "SSH 접속 정책"),
+        configFile("/etc/ufw/user.rules", "UFW IPv4 규칙"),
+        configFile("/etc/ufw/user6.rules", "UFW IPv6 규칙"),
+      ],
+      preview: [
+        `security_profile = ${report.security_profile || "standard"}`,
+        `ssh_policy = ${report.ssh_policy || "audit-only"}`,
+        "ports = 22/tcp, 80/tcp, 443/tcp",
+        "rule = SSH 자동 차단을 피하기 위해 점검/승인 후 적용",
       ],
     }),
     provisioningAction("app", "웹앱/G7 건강검사", report.app_checks, {
@@ -3080,11 +3259,11 @@ function recoveryConfirmContent(action) {
 
   return {
     title: "재설치 초기화를 실행할까요?",
-    message: "신규 VPS 전용 작업입니다. 설치기가 만든 계정, DB, 인증서, 서비스, 웹루트/설정 파일, 패키지, 메타데이터를 정리합니다.",
+    message: "신규 VPS 전용 작업입니다. 설치기가 만든 계정, DB, 서비스, 웹루트/설정 파일, 패키지, 메타데이터를 정리합니다. Let's Encrypt 인증서는 보존합니다.",
     yesClass: "btn btn-primary icon-button",
     rows: [
-      ["대상", "installer가 생성한 사이트 계정, DB/DB 계정, 인증서, 서비스, 웹루트/설정 파일, 새 패키지, 상태 파일"],
-      ["보존", "설치 전부터 있던 패키지와 운영자가 만든 파일"],
+      ["대상", "installer가 생성한 사이트 계정, DB/DB 계정, 서비스, 웹루트/설정 파일, 새 패키지, 상태 파일"],
+      ["보존", "설치 전부터 있던 패키지, 운영자가 만든 파일, Let's Encrypt 인증서"],
       ["실행 후", "서버 점검 단계로 돌아가 다시 설치할 수 있습니다."],
     ],
   };
@@ -3285,7 +3464,7 @@ async function runRecoveryAction(action, button) {
       successTitle,
       action === "rollback"
         ? "서비스 중지, apt 패키지 제거, 설치 기록 정리를 완료했습니다."
-        : "installer가 만든 리소스를 정리해 재설치 가능 상태로 되돌렸습니다.",
+        : "installer가 만든 리소스를 정리해 재설치 가능 상태로 되돌렸습니다. 인증서는 보존했습니다.",
     );
     log(successTitle);
     clearWizardState();
@@ -3430,6 +3609,14 @@ function bindEvents() {
     if (target) {
       target.scrollIntoView({ behavior: "smooth", block: "start" });
     }
+  });
+
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-download-report]");
+    if (!button) {
+      return;
+    }
+    downloadReport(button.dataset.downloadReport || "json");
   });
 
   document.addEventListener("click", (event) => {

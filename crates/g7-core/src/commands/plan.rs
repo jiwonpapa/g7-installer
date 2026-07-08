@@ -9,6 +9,7 @@
 
 use crate::app_profile::{AppFollowupStep, AppRequirement, resolve_app_profile};
 use crate::{Error, Result};
+use std::collections::HashSet;
 
 pub use crate::app_profile::DEFAULT_APP_PROFILE;
 use g7_state::owned_files::OWNED_FILES_PATH;
@@ -1012,6 +1013,30 @@ fn packages(input: PackageInput<'_>) -> Vec<PlanPackage> {
         });
     }
 
+    let mut planned_package_names: HashSet<String> = packages
+        .iter()
+        .flat_map(|package| package.name.split_whitespace())
+        .map(ToOwned::to_owned)
+        .collect();
+    for extension in input.app_profile.php_extensions {
+        if let Some(package) = package_phase_php_extension_package(extension, input.php_version) {
+            if planned_package_names.insert(package.clone()) {
+                packages.push(PlanPackage {
+                    name: package,
+                    description: "선택한 앱 프로필의 PHP 확장 요구사항입니다.",
+                });
+            }
+        }
+    }
+    for package in input.app_profile.system_packages {
+        if planned_package_names.insert((*package).to_string()) {
+            packages.push(PlanPackage {
+                name: (*package).to_string(),
+                description: "선택한 앱 프로필의 시스템 도구 요구사항입니다.",
+            });
+        }
+    }
+
     packages
 }
 
@@ -1392,7 +1417,10 @@ fn package_phase_php_extension_package(extension: &str, php_version: &str) -> Op
         "gd" => "gd",
         "imagick" => "imagick",
         "intl" => "intl",
+        "ldap" => "ldap",
+        "maxminddb" => "maxminddb",
         "mbstring" => "mbstring",
+        "memcached" => "memcached",
         "mysqli" | "mysqlnd" | "pdo_mysql" => "mysql",
         "redis" => "redis",
         "zip" => "zip",

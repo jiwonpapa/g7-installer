@@ -5,19 +5,20 @@ Date: 2026-07-08
 ## Current Status
 
 - Local regression gate exists: `scripts/quality-gate.sh`.
-- Local gate covers shell syntax, web static smoke, setup auth smoke, JS syntax, `cargo fmt --check`, `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo doc --no-deps`, `cargo llvm-cov --fail-under-lines 75`, and web CSS build.
+- Local gate covers shell syntax, web static smoke, setup auth smoke, JS syntax, `cargo fmt --check`, `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo doc --no-deps`, `cargo llvm-cov --fail-under-lines 75`, and web CSS build. Set `G7_WEB_E2E=1` to also run the browser wizard E2E locally.
 - Current measured line coverage is 79.30%.
 - Web controller line coverage is 81.72%.
 - Release assets are Linux musl binaries for x86_64 and aarch64 plus `checksums.txt`.
 - `scripts/ops-harness.sh` verifies a disposable Ubuntu 24.04 server through install, report validation, setup-guide capture, and full installer reset. The reset path removes installer-created services, account, DB/user, packages, owned files, and metadata for a fresh reinstall attempt while preserving Let's Encrypt certificates to avoid duplicate issuance limits.
-- GitHub Actions workflow is not present in this workspace yet.
+- GitHub Actions workflow is present at `.github/workflows/quality-gate.yml`.
+- Browser-driven wizard E2E exists at `scripts/web-ui-e2e.spec.mjs` and covers route rendering, report downloads, plan auto-review, and provision cards against mocked controller APIs.
 
 ## Gaps Found
 
 - `main` branch is not protected.
 - The old `scripts/g7-test-smoke.sh` treated `g7inst doctor` exit status as install permission. `doctor` reports `install_allowed` in stdout, so the smoke check could produce a false result.
 - Package rollback verification used `ssh` inside a file-fed loop. Without `ssh -n`, the first SSH call could consume the remaining package list from stdin.
-- No browser-driven web UI E2E harness exists yet.
+- Browser-driven web UI E2E uses mocked controller APIs locally. Full root-capable install E2E remains covered by `scripts/ops-harness.sh` on a disposable Ubuntu VPS.
 - CLI print-path coverage is still weaker than core command coverage.
 
 ## Improvements Applied
@@ -27,6 +28,8 @@ Date: 2026-07-08
 - Added web controller API/session/error-path regression coverage.
 - Added `scripts/web-static-smoke.sh` to catch wizard, theme, progress, reset, rollback, and localized error UI regressions.
 - Added `scripts/setup-auth-smoke.sh` to block password-login regressions and assert non-root `g7inst setup` fails with sudo guidance.
+- Added `.github/workflows/quality-gate.yml` to run Rust/static/web gates and Playwright wizard E2E in GitHub Actions.
+- Added `scripts/web-ui-e2e.spec.mjs` to exercise route-based wizard screens, report download controls, and provision cards in a browser.
 - Extended the web static smoke to reject password login form/API/server-account verifier regressions.
 - Raised the default local line-coverage gate from 60% to 75%.
 - Remote harness commands now run with `ssh -n` so package verification loops inspect every package.
@@ -51,10 +54,9 @@ Date: 2026-07-08
 
 The following cannot be completed from the local workspace alone:
 
-1. Add and push `.github/workflows/quality-gate.yml` so Actions activates.
-2. Enable branch protection for `main`.
-3. Require the `quality-gate / local quality gate` check before merging or pushing to protected branches.
-4. Add browser-driven web UI E2E once the controller can be exercised safely in an isolated root-capable environment.
+1. Enable branch protection for `main`.
+2. Require the `quality-gate / local quality gate` check before merging or pushing to protected branches.
+3. Keep `scripts/ops-harness.sh` as the disposable-server proof because local browser E2E intentionally mocks privileged server mutation APIs.
 
 Suggested CI jobs:
 

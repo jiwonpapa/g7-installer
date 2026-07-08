@@ -129,7 +129,9 @@ http://127.0.0.1:7717/?token=...
 
 웹 UI는 `패키지 설치/검증 -> 사이트 계정/웹루트 -> 웹서버 vhost/HTTP 검증 -> PHP-FPM/런타임 튜닝 -> DB 튜닝/계정 생성 -> SSL 인증서/HTTPS 검증 -> 웹앱 파일 배치 -> 리포트 생성` 순서로 진행합니다. 한 단계라도 실패하면 다음 단계로 넘어가지 않고 중단 리포트를 보여줍니다.
 
-설치가 끝나면 웹 UI 결과 리포트와 서버의 `/var/log/g7-installer/setup-guide.md`를 확인합니다. 이 Markdown 안내서에는 웹루트, PHP-FPM pool, DB 설정, 인증서, 앱 systemd unit, 주요 `systemctl` 명령, 비밀 파일 위치가 정리됩니다. PDF가 필요하면 브라우저 인쇄/PDF 저장으로 내보내는 방식을 권장합니다.
+설치가 끝나면 웹 UI 결과 리포트와 서버의 `/var/log/g7-installer/setup-guide.md`를 확인합니다. 이 Markdown 안내서에는 웹루트, PHP-FPM pool, DB 설정, 인증서, 앱 systemd unit, 주요 `systemctl` 명령, 비밀 파일 위치가 정리됩니다. 웹 UI에서는 리포트 JSON, 요약 TXT, 설정 안내서 MD를 바로 저장할 수 있습니다. PDF가 필요하면 브라우저 인쇄/PDF 저장으로 내보내는 방식을 권장합니다.
+
+`/var/backups/g7-installer/manifest.json`은 설치기가 만든 설정/상태/소유 파일을 추적하는 복구 매니페스트입니다. DB 덤프나 웹루트 운영 데이터 백업이 아니므로 실제 운영 백업은 별도 도구나 VPS 스냅샷으로 처리합니다.
 
 ## 시작 스크립트
 
@@ -182,3 +184,4 @@ sudo g7inst reset --yes
 - [Lightsail 상세 안내](docs/lightsail-ubuntu24-setup-guide.md)
 - [SPEC](SPEC.md)
 - [운영 하네스 감사](docs/ops-harness-audit.md)
+- [추천 도구 배너 JSON 정책](docs/promo-manifest.md)

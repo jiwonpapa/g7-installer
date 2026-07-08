@@ -3,9 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node --max-old-space-size=256 ./node_modules/.bin/tailwindcss -i ./input.css -o ./dist/app.css --minify"
+    "build": "node --max-old-space-size=256 ./node_modules/.bin/tailwindcss -i ./input.css -o ./dist/app.css --minify",
+    "e2e": "cd .. && web/node_modules/.bin/playwright test scripts/web-ui-e2e.spec.mjs --reporter=line"
   },
   "devDependencies": {
+    "@playwright/test": "^1.54.1",
     "daisyui": "^4.12.24",
     "lucide-static": "^1.23.0",
     "tailwindcss": "^3.4.17"

@@ -42,6 +42,7 @@ const BACKUP_DIR: &str = "/var/backups/g7-installer";
 const LOG_PATH: &str = "/var/log/g7-installer/install.log";
 const REPORT_PATH: &str = "/var/log/g7-installer/report.json";
 const ROLLBACK_PATH: &str = "/var/lib/g7-installer/rollback.json";
+const BACKUP_MANIFEST_PATH: &str = "/var/backups/g7-installer/manifest.json";
 const LOCAL_HOSTS_PATH: &str = "/etc/g7-installer/local-hosts.txt";
 const PHP_READY_FILENAME: &str = "g7inst-ready.php";
 const SECRETS_PATH: &str = "/etc/g7-installer/secrets.toml";
@@ -117,6 +118,7 @@ pub struct InstallReport {
     pub vhost_checks: Vec<InstallCheck>,
     pub app_checks: Vec<InstallCheck>,
     pub setup_guide_path: PathBuf,
+    pub backup_manifest_path: PathBuf,
     pub app_requirements: Vec<InstallCheck>,
 }
 
@@ -753,6 +755,19 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         ),
         &mut owned_file_list,
     )?;
+    write_tracked_file(
+        paths,
+        BACKUP_MANIFEST_PATH,
+        &backup_manifest_content(
+            &install_plan,
+            &state.phase,
+            &owned_file_list,
+            &completed_steps,
+        )?,
+        &mut owned_file_list,
+    )?;
+    completed_steps.push("backup-manifest-written".to_string());
+    state.completed_steps = completed_steps.clone();
     persist_progress(
         &progress,
         &mut owned_files,
@@ -811,6 +826,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         vhost_checks: apply_summary.vhost_checks,
         app_checks: apply_summary.app_checks,
         setup_guide_path: paths.resolve(SETUP_GUIDE_PATH),
+        backup_manifest_path: paths.resolve(BACKUP_MANIFEST_PATH),
         app_requirements: app_requirements_to_checks(install_plan.app_requirements),
     })
 }
@@ -1668,32 +1684,12 @@ fn php_fpm_pool_value_check(
 }
 
 fn required_php_extensions(plan: &plan::InstallPlan) -> Vec<&'static str> {
-    let mut extensions = match plan.app_profile.as_str() {
-        "wordpress" => vec![
-            "curl", "fileinfo", "gd", "intl", "json", "mbstring", "mysqli", "openssl", "xml", "zip",
-        ],
-        "laravel" => vec![
-            "bcmath",
-            "curl",
-            "ctype",
-            "fileinfo",
-            "json",
-            "mbstring",
-            "openssl",
-            "pdo_mysql",
-            "tokenizer",
-            "xml",
-            "zip",
-        ],
-        _ => vec![
-            "bcmath",
+    let mut extensions = match crate::app_profile::resolve_app_profile(&plan.app_profile) {
+        Ok(profile) => profile.php_extensions.to_vec(),
+        Err(_) => vec![
             "curl",
             "fileinfo",
-            "gd",
-            "intl",
-            "json",
             "mbstring",
-            "mysqli",
             "openssl",
             "pdo_mysql",
             "xml",
@@ -4205,6 +4201,19 @@ fn write_new_file(
     Ok(())
 }
 
+fn write_tracked_file(
+    paths: &InstallPaths,
+    path: &str,
+    content: &str,
+    owned: &mut Vec<String>,
+) -> Result<()> {
+    write_existing_file(paths, path, content)?;
+    if !owned.iter().any(|owned_path| owned_path == path) {
+        owned.push(path.to_string());
+    }
+    Ok(())
+}
+
 fn write_existing_file(paths: &InstallPaths, path: &str, content: &str) -> Result<()> {
     let target = paths.resolve(path);
     if let Some(parent) = target.parent() {
@@ -4349,6 +4358,48 @@ fn rollback_content(owned: &[String]) -> String {
         .join(",\n");
 
     format!("{{\n  \"version\": 1,\n  \"created_paths\": [\n{files}\n  ]\n}}\n")
+}
+
+fn backup_manifest_content(
+    plan: &plan::InstallPlan,
+    phase: &str,
+    owned: &[String],
+    completed_steps: &[String],
+) -> Result<String> {
+    let value = serde_json::json!({
+        "version": 1,
+        "kind": "g7-installer-recovery-manifest",
+        "domain": &plan.domain,
+        "phase": phase,
+        "scope": "installer-created configuration/state manifest, not a full site data backup",
+        "config_paths": {
+            "config": CONFIG_PATH,
+            "state": STATE_PATH,
+            "owned_files": OWNED_FILES_PATH,
+            "rollback": ROLLBACK_PATH,
+            "report": REPORT_PATH,
+            "setup_guide": SETUP_GUIDE_PATH,
+            "secrets": SECRETS_PATH
+        },
+        "site_paths": {
+            "web_root": &plan.web_root,
+            "app_document_root": &plan.app_document_root
+        },
+        "certificate_policy": {
+            "path": format!("/etc/letsencrypt/live/{}", plan.domain),
+            "reset": "preserve existing Let's Encrypt certificates to avoid duplicate issuance limits"
+        },
+        "completed_steps": completed_steps,
+        "owned_paths": owned
+    });
+
+    let mut payload =
+        serde_json::to_string_pretty(&value).map_err(|source| Error::FileWriteFailed {
+            path: BACKUP_MANIFEST_PATH.to_string(),
+            source: io::Error::other(source),
+        })?;
+    payload.push('\n');
+    Ok(payload)
 }
 
 fn report_content(
@@ -4502,6 +4553,10 @@ fn report_content(
         serde_json::json!(SETUP_GUIDE_PATH),
     );
     value.insert(
+        "backup_manifest_path".to_string(),
+        serde_json::json!(BACKUP_MANIFEST_PATH),
+    );
+    value.insert(
         "app_requirements".to_string(),
         serde_json::json!(requirements_json(&plan.app_requirements)),
     );
@@ -4619,6 +4674,9 @@ fn setup_guide_content(
     content.push_str(&format!("- 설치 상태: `{STATE_PATH}`\n"));
     content.push_str(&format!("- 설치 리포트(JSON): `{REPORT_PATH}`\n"));
     content.push_str(&format!("- 설정 안내서(MD): `{SETUP_GUIDE_PATH}`\n"));
+    content.push_str(&format!(
+        "- 복구 매니페스트(JSON): `{BACKUP_MANIFEST_PATH}`\n"
+    ));
     content.push_str(&format!("- 기본 설정: `{CONFIG_PATH}`\n"));
     content.push_str(&format!("- 비밀 설정: `{SECRETS_PATH}`\n"));
     content.push_str("\n## 설정 파일\n\n");
@@ -4728,6 +4786,7 @@ fn setup_guide_content(
     content.push_str(&checks_markdown(&summary.app_checks));
     content.push_str("\n## 주의\n\n");
     content.push_str("- VPS 전체 복구는 제공자 스냅샷을 기준으로 처리합니다.\n");
+    content.push_str("- 복구 매니페스트는 설치기가 만든 설정/상태 추적용이며 DB 덤프나 웹루트 운영 데이터 백업이 아닙니다.\n");
     content.push_str("- 설치기가 소유하지 않은 기존 서비스/파일은 자동 삭제하지 않습니다.\n");
     content.push_str("- PDF가 필요하면 이 Markdown을 웹 UI에서 표시한 뒤 브라우저 인쇄/PDF 저장으로 내보내는 방식을 권장합니다.\n");
     content
