@@ -451,12 +451,14 @@
               <div>
                 <span class="step-eyebrow">4단계</span>
                 <h2>설치 사양 확정</h2>
-                <p>선택한 사양, 프로비저닝 계획, 변경 예정 항목을 확인한 뒤 기본 서버 구성 단계로 넘어갑니다.</p>
+                <p>이전 단계에서 선택한 사양을 자동으로 설치 계획으로 정리합니다. 맞으면 진행하고, 다르면 이전으로 돌아가 수정합니다.</p>
               </div>
-              <button id="plan-button" class="btn btn-primary icon-button" type="button" data-icon="clipboard-list">계획 생성</button>
+              <button id="plan-button" class="btn btn-primary icon-button" type="button" data-icon="refresh-cw">계획 새로고침</button>
             </div>
             <div id="plan-status" class="mt-5 hidden"></div>
-            <pre id="plan-output" class="code-box mt-5">옵션을 확인한 뒤 계획 생성을 누르세요.</pre>
+            <div id="plan-output" class="plan-review mt-5">
+              <div class="empty-state">선택한 사양을 바탕으로 설치 계획을 자동 생성합니다.</div>
+            </div>
             <div class="wizard-actions">
               <button class="btn btn-ghost icon-button" type="button" data-icon="chevron-left" data-next="options">이전</button>
               <button id="confirm-spec-button" class="btn btn-primary icon-button" type="button" data-icon="check" data-next="install" disabled>이 사양으로 진행</button>

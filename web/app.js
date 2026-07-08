@@ -11,6 +11,8 @@ const state = {
   installCompleted: false,
   doctorReport: null,
   planReport: null,
+  planSignature: null,
+  planGenerating: false,
   savedReportPayload: null,
   recoveryStatus: null,
   currentOperation: null,
@@ -51,6 +53,7 @@ const nodes = {
   reportProgress: document.querySelector("#report-progress"),
   packageProgressList: document.querySelector("#package-progress-list"),
   checkNextButton: document.querySelector("#check-next-button"),
+  planButton: document.querySelector("#plan-button"),
   confirmSpecButton: document.querySelector("#confirm-spec-button"),
   installButton: document.querySelector("#install-button"),
   installResultButton: document.querySelector("#install-result-button"),
@@ -627,7 +630,7 @@ function showStep(nextStep, options = {}) {
       nodes.planStatus,
       "warning",
       "설치 사양 확정이 필요합니다",
-      "계획 생성을 완료한 뒤 이 사양으로 진행 버튼을 누르세요.",
+      "4단계에서 자동 생성된 설치 계획을 확인한 뒤 이 사양으로 진행 버튼을 누르세요.",
     );
     step = "plan";
   }
@@ -666,6 +669,9 @@ function showStep(nextStep, options = {}) {
 
   refreshSitePasswordState();
   saveWizardState();
+  if (state.activeStep === "plan") {
+    void generatePlan({ auto: true });
+  }
 }
 
 function optionPayload() {
@@ -801,6 +807,7 @@ function refreshFormState(options = {}) {
 
   if (!preservePlan) {
     state.planReport = null;
+    state.planSignature = null;
     state.savedReportPayload = null;
     setPlanReady(false);
   }
@@ -849,25 +856,18 @@ function refreshSummary() {
   nodes.summaryApp.textContent = appPackageLabel(payload.app_package);
 }
 
-function renderDraftPlan() {
-  const payload = optionPayload();
-  nodes.planOutput.textContent = [
-    "설치 계획 요청값",
-    `도메인: ${payload.domain}`,
-    `웹서버: ${runtimeLabel(payload.web_server)}`,
-    `PHP: ${phpRuntimeLabel(payload.php_version, payload.php_source)}`,
-    `데이터베이스: ${databaseLabel(payload.database)} (${databaseVersionLabel(payload.database_version)})`,
-    `설치할 앱: ${appPackageLabel(payload.app_package)}`,
-    `사이트 계정: ${payload.site_user}`,
-    `웹루트 방식: ${payload.web_root_mode}`,
-    `www 처리: ${payload.www_mode}`,
-    `Redis: ${payload.redis === "enable" ? "사용" : "미사용"}`,
-    `메일: ${mailModeLabel(payload.mail_mode)}`,
-    `보안 수준: ${payload.security_profile}`,
-    `SSH 정책: ${payload.ssh_policy}`,
-    "",
-    "계획 생성 버튼을 누르면 실제 plan 결과로 교체됩니다.",
-  ].join("\n");
+function planRequestSignature(payload = optionPayload()) {
+  const { site_password: _sitePassword, site_password_confirm: _sitePasswordConfirm, ...safePayload } = payload;
+  return JSON.stringify(safePayload);
+}
+
+function planPlaceholderHtml(title, message) {
+  return `
+    <section class="report-card">
+      <h3>${escapeHtml(title)}</h3>
+      <p class="mt-3 whitespace-pre-line text-sm text-base-content/60">${escapeHtml(message)}</p>
+    </section>
+  `;
 }
 
 function runtimeLabel(value) {
@@ -1043,6 +1043,85 @@ async function runDoctorCheck() {
   await refreshRecoveryStatus();
   log(`서버 점검 완료: install_allowed=${report.install_allowed}`);
   return report;
+}
+
+async function generatePlan(options = {}) {
+  if (state.planGenerating) {
+    return state.planReport;
+  }
+
+  const payload = optionPayload();
+  const signature = planRequestSignature(payload);
+  const auto = Boolean(options.auto);
+  const force = Boolean(options.force);
+
+  if (!force && state.planReady && state.planReport && state.planSignature === signature) {
+    return state.planReport;
+  }
+
+  const passwordError = validateSitePassword(payload);
+  if (passwordError) {
+    setAlert(nodes.planStatus, "error", "사이트 계정 비밀번호 확인 필요", passwordError);
+    nodes.planOutput.innerHTML = planPlaceholderHtml(
+      "사양 확인 필요",
+      `${passwordError}\n이전으로 돌아가 사이트 계정 비밀번호를 다시 입력하세요.`,
+    );
+    setPlanReady(false);
+    renderPackageProgress([]);
+    saveWizardState();
+    log(passwordError);
+    return null;
+  }
+
+  state.planGenerating = true;
+  hideAlert(nodes.planStatus);
+  setPlanReady(false);
+  renderPackageProgress([]);
+  nodes.planOutput.innerHTML = planPlaceholderHtml(
+    "설치 계획 생성 중",
+    "선택한 사양으로 설치할 패키지, 생성 파일, 서비스 설정을 계산하고 있습니다.",
+  );
+  if (auto) {
+    log("설치 계획 자동 생성");
+  } else {
+    log("설치 계획 새로고침");
+  }
+
+  try {
+    const report = await apiFetch("/api/plan", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    state.planReport = report;
+    state.planSignature = signature;
+    nodes.planOutput.innerHTML = renderPlanReport(report);
+    renderPackageProgress(flattenPlanPackages(report.packages));
+    setAlert(
+      nodes.planStatus,
+      "success",
+      "사양 확인 준비 완료",
+      `${report.packages.length}개 패키지 묶음과 ${report.files.length}개 파일 변경 계획을 정리했습니다. 맞으면 이 사양으로 진행하고, 다르면 이전으로 돌아가 수정하세요.`,
+    );
+    setPlanReady(true);
+    state.installCompleted = false;
+    setReportReady(false);
+    refreshInstallButtonState();
+    saveWizardState();
+    log(`설치 계획 준비 완료: packages=${report.packages.length}, files=${report.files.length}`);
+    return report;
+  } catch (error) {
+    state.planReport = null;
+    state.planSignature = null;
+    nodes.planOutput.innerHTML = planPlaceholderHtml("설치 계획 생성 실패", formatError(error));
+    setAlert(nodes.planStatus, "error", "설치 계획 생성 실패", formatError(error));
+    setPlanReady(false);
+    renderPackageProgress([]);
+    saveWizardState();
+    log(formatError(error));
+    return null;
+  } finally {
+    state.planGenerating = false;
+  }
 }
 
 function markStage(stage, status) {
@@ -1860,60 +1939,102 @@ function urlLink(url) {
   };
 }
 
+function compactListCard(title, rows, emptyText = "없음") {
+  const items = Array.isArray(rows) && rows.length ? rows : [emptyText];
+  return `
+    <section class="report-card">
+      <h3>${escapeHtml(title)}</h3>
+      <ul class="report-list">
+        ${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+      </ul>
+    </section>
+  `;
+}
+
+function packagePlanCard(packages) {
+  const rows = flattenPlanPackages(packages);
+  return `
+    <section class="report-card">
+      <h3>설치할 패키지</h3>
+      <div class="result-list mt-3">
+        ${rows.length ? rows.map((item) => `
+          <div class="result-row" data-status="info">
+            <div class="result-copy">
+              <span>${escapeHtml(item.name)}</span>
+              <p>${escapeHtml(item.description)}</p>
+            </div>
+            <strong>패키지</strong>
+          </div>
+        `).join("") : `
+          <div class="empty-state">설치할 패키지가 없습니다.</div>
+        `}
+      </div>
+    </section>
+  `;
+}
+
+function provisioningPlanCard(provisioning) {
+  const sections = Array.isArray(provisioning) ? provisioning : [];
+  return `
+    <section class="report-card">
+      <h3>서버 설정 계획</h3>
+      <div class="result-list mt-3">
+        ${sections.length ? sections.map((section) => {
+          const settings = Array.isArray(section.settings) && section.settings.length
+            ? section.settings.slice(0, 4).map((item) => `${item.key}: ${item.value}`).join(" / ")
+            : "상세 설정 없음";
+          return `
+            <div class="result-row" data-status="info">
+              <div class="result-copy">
+                <span>${escapeHtml(section.title || "설정")}</span>
+                <p>${escapeHtml(`${section.summary || ""} ${settings}`.trim())}</p>
+              </div>
+              <strong>설정</strong>
+            </div>
+          `;
+        }).join("") : `
+          <div class="empty-state">추가 서버 설정 계획이 없습니다.</div>
+        `}
+      </div>
+    </section>
+  `;
+}
+
 function renderPlanReport(report) {
-  const packages = report.packages.length
-    ? report.packages.map((item) => `- ${item.name}: ${item.description}`).join("\n")
-    : "- 없음";
-  const files = report.files.length
-    ? report.files.map((item) => `- ${item.path} (${item.action})`).join("\n")
-    : "- 없음";
-  const services = report.services.length
-    ? report.services.map((item) => `- ${item.name} (${item.action})`).join("\n")
-    : "- 없음";
-  const ports = report.ports.length
-    ? report.ports.map((item) => `- ${item.port}/${item.protocol}: ${item.purpose}`).join("\n")
-    : "- 없음";
-  const provisioning = Array.isArray(report.provisioning) && report.provisioning.length
-    ? report.provisioning.map((section) => {
-        const settings = Array.isArray(section.settings) && section.settings.length
-          ? section.settings.map((item) => `  - ${item.key}: ${item.value}`).join("\n")
-          : "  - 설정 없음";
-        return `- ${section.title}: ${section.summary}\n${settings}`;
-      }).join("\n")
-    : "- 없음";
-  const stopConditions = report.stop_conditions.length
-    ? report.stop_conditions.map((item) => `- ${item}`).join("\n")
-    : "- 없음";
+  const files = Array.isArray(report.files)
+    ? report.files.map((item) => `${item.path} (${item.action})`)
+    : [];
+  const services = Array.isArray(report.services)
+    ? report.services.map((item) => `${item.name} (${item.action})`)
+    : [];
+  const ports = Array.isArray(report.ports)
+    ? report.ports.map((item) => `${item.port}/${item.protocol}: ${item.purpose}`)
+    : [];
+  const stopConditions = Array.isArray(report.stop_conditions) ? report.stop_conditions : [];
 
   return [
-    "설치 계획 요약",
-    `도메인: ${report.domain}`,
-    `웹서버: ${runtimeLabel(report.web_server)}`,
-    `PHP: ${phpRuntimeLabel(report.php_version, report.php_source)}`,
-    `데이터베이스: ${databaseLabel(report.database)} (${databaseVersionLabel(report.database_version)})`,
-    `설치할 앱: ${appPackageLabel(report.app_package)} - 서버 스택 준비 후 마지막 설치 대상`,
-    `앱 문서 루트: ${report.app_document_root || "-"}`,
-    `사이트 계정: ${report.site_user}`,
-    `웹루트: ${report.web_root}`,
-    "",
-    "설치 예정 패키지:",
-    packages,
-    "",
-    "생성/변경 예정 파일:",
-    files,
-    "",
-    "서비스 계획:",
-    services,
-    "",
-    "포트 계획:",
-    ports,
-    "",
-    "프로비저닝 계획:",
-    provisioning,
-    "",
-    "중단 조건:",
-    stopConditions,
-  ].join("\n");
+    reportSummaryCard("선택한 설치 사양", [
+      ["도메인", report.domain],
+      ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / ${phpRuntimeLabel(report.php_version, report.php_source)}`],
+      ["데이터베이스", `${databaseLabel(report.database)} (${databaseVersionLabel(report.database_version)})`],
+      ["앱 패키지", `${appPackageLabel(report.app_package)} - 서버 스택 준비 후 마지막 설치 대상`],
+      ["사이트 계정", report.site_user],
+      ["웹루트", report.web_root],
+      ["앱 문서 루트", report.app_document_root || "-"],
+      ["배포 모드", report.deployment_mode || "public"],
+    ], "이 사양이 맞으면 아래 설치 패키지와 변경 항목을 확인한 뒤 진행하세요. 다르면 이전으로 돌아가 사양을 수정하세요."),
+    packagePlanCard(report.packages),
+    provisioningPlanCard(report.provisioning),
+    compactListCard("생성/변경 예정 파일", files),
+    compactListCard("서비스 계획", services),
+    compactListCard("포트 계획", ports),
+    compactListCard("진행 전 확인", [
+      "맞으면 이 사양으로 진행을 눌러 5단계 기본 구성을 시작합니다.",
+      "안 맞으면 이전을 눌러 3단계 설치 방식에서 사양을 수정합니다.",
+      "수정 후 4단계로 돌아오면 계획은 자동으로 다시 생성됩니다.",
+    ]),
+    stopConditions.length ? compactListCard("중단 조건", stopConditions) : "",
+  ].join("");
 }
 
 function renderErrorReport(title, message) {
@@ -2029,6 +2150,7 @@ function resetWizardForRetry(options = {}) {
   clearWizardState();
   state.doctorReport = null;
   state.planReport = null;
+  state.planSignature = null;
   state.savedReportPayload = null;
   state.recoveryStatus = null;
   setPlanReady(false);
@@ -2044,7 +2166,7 @@ function resetWizardForRetry(options = {}) {
   hideReportProgress();
   resetInstallStages();
   nodes.doctorResults.innerHTML = `<div class="empty-state">아직 점검 전입니다. 점검 실행을 누르세요.</div>`;
-  nodes.planOutput.textContent = "옵션을 확인한 뒤 계획 생성을 누르세요.";
+  nodes.planOutput.innerHTML = `<div class="empty-state">선택한 사양을 바탕으로 설치 계획을 자동 생성합니다.</div>`;
   renderPackageProgress([]);
   nodes.reportOutput.innerHTML = `<div class="empty-state">아직 리포트가 없습니다.</div>`;
   refreshInstallButtonState();
@@ -2066,7 +2188,8 @@ function restoreWizardState() {
   }
   if (saved.planReport) {
     state.planReport = saved.planReport;
-    nodes.planOutput.textContent = renderPlanReport(saved.planReport);
+    state.planSignature = planRequestSignature(optionPayload());
+    nodes.planOutput.innerHTML = renderPlanReport(saved.planReport);
     renderPackageProgress(flattenPlanPackages(saved.planReport.packages));
     setPlanReady(true);
   }
@@ -2186,6 +2309,7 @@ async function runRecoveryAction(action, button) {
     clearWizardState();
     state.installCompleted = false;
     state.planReport = null;
+    state.planSignature = null;
     state.savedReportPayload = null;
     setPlanReady(false);
     setReportReady(false);
@@ -2335,42 +2459,9 @@ function bindEvents() {
     });
   });
 
-  document.querySelector("#plan-button").addEventListener("click", async (event) => {
-    await withBusy(event.currentTarget, "생성 중", async () => {
-      try {
-        const payload = optionPayload();
-        const passwordError = validateSitePassword(payload);
-        if (passwordError) {
-          setAlert(nodes.planStatus, "error", "설치 계획 생성 실패", passwordError);
-          log(passwordError);
-          return;
-        }
-        hideAlert(nodes.planStatus);
-        setPlanReady(false);
-        log("설치 계획 생성");
-        const report = await apiFetch("/api/plan", {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-        state.planReport = report;
-        nodes.planOutput.textContent = renderPlanReport(report);
-        renderPackageProgress(flattenPlanPackages(report.packages));
-        setAlert(nodes.planStatus, "success", "설치 계획 생성 완료", `${report.packages.length}개 패키지 묶음과 ${report.files.length}개 파일 변경 계획을 확인했습니다.`);
-        setPlanReady(true);
-        state.installCompleted = false;
-        setReportReady(false);
-        refreshInstallButtonState();
-        saveWizardState();
-        log(`설치 계획 준비 완료: packages=${report.packages.length}, files=${report.files.length}`);
-      } catch (error) {
-        state.planReport = null;
-        nodes.planOutput.textContent = formatError(error);
-        setAlert(nodes.planStatus, "error", "설치 계획 생성 실패", formatError(error));
-        setPlanReady(false);
-        renderPackageProgress([]);
-        saveWizardState();
-        log(formatError(error));
-      }
+  nodes.planButton.addEventListener("click", async (event) => {
+    await withBusy(event.currentTarget, "새로고침", async () => {
+      await generatePlan({ force: true });
     });
   });
 
