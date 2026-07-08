@@ -23,6 +23,14 @@ pub fn create_login_user<R: CommandRunner>(
     )
 }
 
+pub fn set_login_password<R: CommandRunner>(
+    runner: &R,
+    user: &str,
+    password: &str,
+) -> Result<CommandOutput, CommandError> {
+    runner.run(&CommandSpec::new("chpasswd").stdin_bytes(format!("{user}:{password}\n")))
+}
+
 pub fn chown_recursive<R: CommandRunner>(
     runner: &R,
     owner_group: &str,
@@ -46,7 +54,9 @@ pub fn chmod_recursive<R: CommandRunner>(
 
 #[cfg(test)]
 mod tests {
-    use super::{chmod_recursive, chown_recursive, create_login_user, user_exists};
+    use super::{
+        chmod_recursive, chown_recursive, create_login_user, set_login_password, user_exists,
+    };
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
 
@@ -57,17 +67,22 @@ mod tests {
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
 
         assert!(!user_exists(&runner, "g7")?);
         create_login_user(&runner, "g7")?;
+        set_login_password(&runner, "g7", "0808dong!!")?;
         chown_recursive(&runner, "g7:www-data", "/home/g7/public_html")?;
         chmod_recursive(&runner, "0755", "/home/g7/public_html")?;
 
         let recorded = runner.recorded();
         assert_eq!(recorded[0].program, OsString::from("id"));
         assert_eq!(recorded[1].program, OsString::from("useradd"));
-        assert_eq!(recorded[2].program, OsString::from("chown"));
-        assert_eq!(recorded[3].program, OsString::from("chmod"));
+        assert_eq!(recorded[2].program, OsString::from("chpasswd"));
+        assert_eq!(recorded[2].args, Vec::<OsString>::new());
+        assert_eq!(recorded[2].stdin, Some(b"g7:0808dong!!\n".to_vec()));
+        assert_eq!(recorded[3].program, OsString::from("chown"));
+        assert_eq!(recorded[4].program, OsString::from("chmod"));
         Ok(())
     }
 }

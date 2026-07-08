@@ -1,12 +1,14 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::ffi::OsString;
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandSpec {
     pub program: OsString,
     pub args: Vec<OsString>,
+    pub stdin: Option<Vec<u8>>,
 }
 
 impl CommandSpec {
@@ -14,6 +16,7 @@ impl CommandSpec {
         Self {
             program: program.into(),
             args: Vec::new(),
+            stdin: None,
         }
     }
 
@@ -28,6 +31,11 @@ impl CommandSpec {
         S: Into<OsString>,
     {
         self.args.extend(args.into_iter().map(Into::into));
+        self
+    }
+
+    pub fn stdin_bytes(mut self, stdin: impl Into<Vec<u8>>) -> Self {
+        self.stdin = Some(stdin.into());
         self
     }
 
@@ -63,13 +71,44 @@ pub struct RealCommandRunner;
 
 impl CommandRunner for RealCommandRunner {
     fn run(&self, spec: &CommandSpec) -> Result<CommandOutput, CommandError> {
-        let output = Command::new(&spec.program)
-            .args(&spec.args)
-            .output()
-            .map_err(|err| CommandError::Execute {
+        let mut command = Command::new(&spec.program);
+        command.args(&spec.args);
+
+        let output = if let Some(stdin) = &spec.stdin {
+            let mut child = command
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|err| CommandError::Execute {
+                    program: display_os(&spec.program),
+                    message: err.to_string(),
+                })?;
+
+            let mut child_stdin = child.stdin.take().ok_or_else(|| CommandError::Execute {
+                program: display_os(&spec.program),
+                message: "failed to open command stdin".to_string(),
+            })?;
+            child_stdin
+                .write_all(stdin)
+                .map_err(|err| CommandError::Execute {
+                    program: display_os(&spec.program),
+                    message: err.to_string(),
+                })?;
+            drop(child_stdin);
+
+            child
+                .wait_with_output()
+                .map_err(|err| CommandError::Execute {
+                    program: display_os(&spec.program),
+                    message: err.to_string(),
+                })?
+        } else {
+            command.output().map_err(|err| CommandError::Execute {
                 program: display_os(&spec.program),
                 message: err.to_string(),
-            })?;
+            })?
+        };
 
         Ok(CommandOutput {
             status: output.status.code().map_or(128, |code| code),
@@ -148,6 +187,15 @@ mod tests {
             spec.args,
             vec![OsString::from("update"), OsString::from("-y")]
         );
+        assert_eq!(spec.stdin, None);
+    }
+
+    #[test]
+    fn command_spec_keeps_stdin_out_of_display() {
+        let spec = CommandSpec::new("chpasswd").stdin_bytes(b"g7:secret\n".to_vec());
+
+        assert_eq!(spec.display(), "chpasswd");
+        assert_eq!(spec.stdin, Some(b"g7:secret\n".to_vec()));
     }
 
     #[test]

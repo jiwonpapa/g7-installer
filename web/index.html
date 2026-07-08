@@ -218,6 +218,26 @@
                   </span>
                   <input name="site_user" class="input input-bordered w-full" value="g7" />
                 </label>
+                <label class="field">
+                  <span class="field-label">
+                    사이트 계정 비밀번호
+                    <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="사이트 계정 비밀번호 도움말">?</button>
+                    <span class="help-text">SFTP 접속과 사이트 파일 관리에 사용할 Linux 계정 비밀번호입니다. sudo 권한은 주지 않습니다.</span>
+                  </span>
+                  </span>
+                  <input name="site_password" id="site-password" class="input input-bordered w-full" type="password" autocomplete="new-password" minlength="8" required />
+                </label>
+                <label class="field">
+                  <span class="field-label">
+                    비밀번호 확인
+                    <span class="help-wrap">
+                    <button class="help-circle" type="button" aria-label="비밀번호 확인 도움말">?</button>
+                    <span class="help-text">오타 방지를 위해 같은 비밀번호를 한 번 더 입력합니다.</span>
+                  </span>
+                  </span>
+                  <input name="site_password_confirm" id="site-password-confirm" class="input input-bordered w-full" type="password" autocomplete="new-password" minlength="8" required />
+                </label>
               </div>
 
               <details class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-100">

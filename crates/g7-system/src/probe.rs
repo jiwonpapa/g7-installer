@@ -2,7 +2,9 @@ use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use crate::account::{chmod_recursive, chown_recursive, create_login_user, user_exists};
+use crate::account::{
+    chmod_recursive, chown_recursive, create_login_user, set_login_password, user_exists,
+};
 use crate::apt::{apt_candidate_available, apt_install, apt_purge, apt_update};
 use crate::certbot::renew_dry_run;
 use crate::command::{CommandError, CommandOutput, CommandRunner, RealCommandRunner};
@@ -142,6 +144,14 @@ impl<R: CommandRunner> SystemProbe<R> {
 
     pub fn create_login_user(&self, user: &str) -> Result<CommandOutput, SystemProbeError> {
         create_login_user(&self.runner, user).map_err(SystemProbeError::Command)
+    }
+
+    pub fn set_login_password(
+        &self,
+        user: &str,
+        password: &str,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        set_login_password(&self.runner, user, password).map_err(SystemProbeError::Command)
     }
 
     pub fn chown_recursive(

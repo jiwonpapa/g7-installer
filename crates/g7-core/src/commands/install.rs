@@ -164,6 +164,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     probe: &SystemProbe<R>,
     paths: &InstallPaths,
 ) -> Result<InstallReport> {
+    let site_user_password = options.site_user_password.clone();
     let install_plan = plan::build_with_options(domain, options)?;
     let doctor_report = doctor::run_with_probe(probe);
 
@@ -287,12 +288,77 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         &report_content(&install_plan, &state.phase, &apply_summary, None)?,
     )?;
 
+    let site_checks = match apply_site_phase(
+        probe,
+        paths,
+        &install_plan,
+        &mut owned_file_list,
+        site_user_password.as_deref(),
+    ) {
+        Ok(site_checks) => site_checks,
+        Err(err) => {
+            apply_summary.safety_checks = safety_checks(&install_plan, "vhost-failed");
+            apply_summary.vhost_checks = vec![InstallCheck::fail(
+                "site-provision",
+                format!("Site account and web root setup failed: {err}"),
+            )];
+            state.set_phase(InstallerPhase::VhostFailed);
+            state.completed_steps = completed_steps.clone();
+            owned_files.files = owned_file_list.clone();
+            write_owned_files(&owned_files_path, &owned_files).map_err(|source| {
+                Error::FileWriteFailed {
+                    path: OWNED_FILES_PATH.to_string(),
+                    source,
+                }
+            })?;
+            write_existing_file(paths, ROLLBACK_PATH, &rollback_content(&owned_file_list))?;
+            write_state_file(&state_path, &state).map_err(|source| Error::FileWriteFailed {
+                path: STATE_PATH.to_string(),
+                source,
+            })?;
+            write_existing_file(
+                paths,
+                REPORT_PATH,
+                &report_content(
+                    &install_plan,
+                    &state.phase,
+                    &apply_summary,
+                    Some(&err.to_string()),
+                )?,
+            )?;
+            return Err(err);
+        }
+    };
+
+    apply_summary.vhost_checks = site_checks;
+    completed_steps.push("site-user-verified".to_string());
+    if site_user_password.is_some() {
+        completed_steps.push("site-user-password-set".to_string());
+    }
+    completed_steps.push("web-root-created".to_string());
+    state.completed_steps = completed_steps.clone();
+    owned_files.files = owned_file_list.clone();
+    write_owned_files(&owned_files_path, &owned_files).map_err(|source| {
+        Error::FileWriteFailed {
+            path: OWNED_FILES_PATH.to_string(),
+            source,
+        }
+    })?;
+    write_existing_file(paths, ROLLBACK_PATH, &rollback_content(&owned_file_list))?;
+    write_state_file(&state_path, &state).map_err(|source| Error::FileWriteFailed {
+        path: STATE_PATH.to_string(),
+        source,
+    })?;
+    write_existing_file(
+        paths,
+        REPORT_PATH,
+        &report_content(&install_plan, &state.phase, &apply_summary, None)?,
+    )?;
+
     match apply_vhost_phase(probe, paths, &install_plan, &mut owned_file_list) {
         Ok(vhost_checks) => {
             if !vhost_checks.is_empty() {
-                apply_summary.vhost_checks = vhost_checks;
-                completed_steps.push("site-user-verified".to_string());
-                completed_steps.push("web-root-created".to_string());
+                apply_summary.vhost_checks.extend(vhost_checks);
                 completed_steps.push("vhost-written".to_string());
                 completed_steps.push("vhost-enabled".to_string());
                 completed_steps.push("nginx-config-tested".to_string());
@@ -320,7 +386,9 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
                 )?;
             } else {
                 apply_summary.safety_checks = safety_checks(&install_plan, "packages-installed");
-                apply_summary.vhost_checks = deferred_vhost_checks(&install_plan);
+                apply_summary
+                    .vhost_checks
+                    .extend(deferred_vhost_checks(&install_plan));
                 write_existing_file(
                     paths,
                     REPORT_PATH,
@@ -496,16 +564,13 @@ fn apply_package_phase<R: CommandRunner>(
     })
 }
 
-fn apply_vhost_phase<R: CommandRunner>(
+fn apply_site_phase<R: CommandRunner>(
     probe: &SystemProbe<R>,
     paths: &InstallPaths,
     plan: &plan::InstallPlan,
     owned: &mut Vec<String>,
+    site_user_password: Option<&str>,
 ) -> Result<Vec<InstallCheck>> {
-    if plan.web_server != "nginx" {
-        return Ok(Vec::new());
-    }
-
     let mut checks = Vec::new();
     ensure_supported_web_root(plan)?;
 
@@ -526,6 +591,20 @@ fn apply_vhost_phase<R: CommandRunner>(
         checks.push(InstallCheck::pass(
             "site-user",
             format!("Linux account `{}` was created.", plan.site_user),
+        ));
+    }
+
+    if let Some(password) = site_user_password {
+        let output = probe
+            .set_login_password(&plan.site_user, password)
+            .map_err(|err| command_error("site-user-password", "chpasswd", err))?;
+        require_success("site-user-password", "chpasswd", output)?;
+        checks.push(InstallCheck::pass(
+            "site-user-password",
+            format!(
+                "Password was set for Linux account `{}` for SFTP/login use.",
+                plan.site_user
+            ),
         ));
     }
 
@@ -564,6 +643,20 @@ fn apply_vhost_phase<R: CommandRunner>(
         ),
     ));
 
+    Ok(checks)
+}
+
+fn apply_vhost_phase<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+    owned: &mut Vec<String>,
+) -> Result<Vec<InstallCheck>> {
+    if plan.web_server != "nginx" {
+        return Ok(Vec::new());
+    }
+
+    let mut checks = Vec::new();
     write_new_file(
         paths,
         g7_system::nginx::G7_SITE_AVAILABLE,
@@ -1751,6 +1844,38 @@ mod tests {
     }
 
     #[test]
+    fn install_sets_site_account_password_when_requested()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let os_release_path = write_temp_os_release()?;
+        let fs_root = create_temp_fs_root()?;
+        let options = super::plan::PlanOptions {
+            site_user_password: Some("0808dong!!".to_string()),
+            ..super::plan::PlanOptions::default()
+        };
+        let probe =
+            clean_root_probe_for_options(&os_release_path, &fs_root, "example.com", &options)?;
+        let paths = InstallPaths::with_root(&fs_root);
+
+        let report = run_with_probe_and_paths("example.com".to_string(), options, &probe, &paths)?;
+
+        assert!(
+            report
+                .completed_steps
+                .contains(&"site-user-password-set".to_string())
+        );
+        assert!(
+            report
+                .vhost_checks
+                .iter()
+                .any(|check| check.name == "site-user-password" && check.status == "pass")
+        );
+
+        fs::remove_file(os_release_path)?;
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
     fn install_fails_before_install_when_package_candidate_is_missing()
     -> std::result::Result<(), Box<dyn std::error::Error>> {
         let os_release_path = write_temp_os_release()?;
@@ -1849,7 +1974,7 @@ mod tests {
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         let plan = super::plan::build_with_options(domain.to_string(), options.clone())?;
-        push_successful_apply_outputs(&runner, &plan);
+        push_successful_apply_outputs(&runner, &plan, options.site_user_password.is_some());
 
         Ok(SystemProbe::new(runner)
             .with_os_release_path(os_release_path)
@@ -1859,6 +1984,7 @@ mod tests {
     fn push_successful_apply_outputs(
         runner: &FakeCommandRunner,
         install_plan: &super::plan::InstallPlan,
+        site_password_set: bool,
     ) {
         let packages = super::package_names(install_plan);
         let services = super::managed_services(install_plan);
@@ -1890,7 +2016,7 @@ mod tests {
         }
         push_successful_network_outputs(runner, install_plan);
         push_successful_mail_outputs(runner, install_plan);
-        push_successful_vhost_outputs(runner, install_plan);
+        push_successful_site_and_vhost_outputs(runner, install_plan, site_password_set);
     }
 
     fn push_successful_network_outputs(
@@ -1920,18 +2046,22 @@ mod tests {
         }
     }
 
-    fn push_successful_vhost_outputs(
+    fn push_successful_site_and_vhost_outputs(
         runner: &FakeCommandRunner,
         install_plan: &super::plan::InstallPlan,
+        site_password_set: bool,
     ) {
+        runner.push_output(CommandOutput::failure(1, "no such user"));
+        runner.push_output(CommandOutput::success(""));
+        if site_password_set {
+            runner.push_output(CommandOutput::success(""));
+        }
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
         if install_plan.web_server != "nginx" {
             return;
         }
 
-        runner.push_output(CommandOutput::failure(1, "no such user"));
-        runner.push_output(CommandOutput::success(""));
-        runner.push_output(CommandOutput::success(""));
-        runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));

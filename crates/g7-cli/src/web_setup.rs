@@ -113,6 +113,10 @@ struct SetupRequest {
     database_version: String,
     app_package: String,
     site_user: String,
+    #[serde(default)]
+    site_password: Option<String>,
+    #[serde(default)]
+    site_password_confirm: Option<String>,
     web_root_mode: String,
     web_root: Option<String>,
     www_mode: String,
@@ -672,6 +676,7 @@ async fn api_plan(
 ) -> std::result::Result<impl IntoResponse, ApiError> {
     let session = require_authenticated_session(&state, &headers, peer.ip())?;
     require_csrf(&headers, &session)?;
+    validate_site_password_request(&request)?;
     emit_log(&state, "building install plan");
     let domain = request.domain.clone();
     let database_version = normalize_database_version(&request.database_version);
@@ -697,6 +702,7 @@ async fn api_install_prepare(
 ) -> std::result::Result<impl IntoResponse, ApiError> {
     let session = require_authenticated_session(&state, &headers, peer.ip())?;
     require_csrf(&headers, &session)?;
+    validate_site_password_request(&request)?;
 
     if state.install_running.swap(true, Ordering::SeqCst) {
         emit_log(&state, "install request rejected: already running");
@@ -976,6 +982,9 @@ fn options_from_request(request: SetupRequest) -> plan::PlanOptions {
         request.php_version,
         request.database,
         request.site_user,
+        request
+            .site_password
+            .filter(|value| !value.trim().is_empty()),
         request.web_root_mode,
         request.web_root.filter(|value| !value.trim().is_empty()),
         request.www_mode,
@@ -991,6 +1000,42 @@ fn options_from_request(request: SetupRequest) -> plan::PlanOptions {
         request.preserve_config,
         request.dns_check,
     )
+}
+
+fn validate_site_password_request(request: &SetupRequest) -> std::result::Result<(), ApiError> {
+    let password = request.site_password.as_deref().unwrap_or("");
+    let confirm = request.site_password_confirm.as_deref().unwrap_or("");
+
+    if password.is_empty() {
+        return Err(ApiError::bad_request("사이트 계정 비밀번호를 입력하세요.")
+            .with_hint("이 비밀번호는 사이트 파일 SFTP 접속과 Linux 계정 로그인에 사용됩니다."));
+    }
+
+    if password != confirm {
+        return Err(
+            ApiError::bad_request("사이트 계정 비밀번호 확인이 일치하지 않습니다.")
+                .with_hint("비밀번호와 확인 입력값을 다시 입력하세요."),
+        );
+    }
+
+    if password.len() < 8 {
+        return Err(
+            ApiError::bad_request("사이트 계정 비밀번호는 8자 이상이어야 합니다.")
+                .with_hint("콜론, 줄바꿈, 제어문자는 사용할 수 없습니다."),
+        );
+    }
+
+    if password
+        .chars()
+        .any(|ch| ch == ':' || ch == '\n' || ch == '\r' || ch.is_control())
+    {
+        return Err(ApiError::bad_request(
+            "사이트 계정 비밀번호에 사용할 수 없는 문자가 있습니다.",
+        )
+        .with_hint("콜론, 줄바꿈, 제어문자는 사용할 수 없습니다."));
+    }
+
+    Ok(())
 }
 
 fn doctor_to_api(report: doctor::DoctorReport) -> DoctorApiReport {
@@ -1551,6 +1596,8 @@ mod tests {
             database_version: "apt-default".to_string(),
             app_package: "gnuboard7".to_string(),
             site_user: "g7".to_string(),
+            site_password: Some("0808dong!!".to_string()),
+            site_password_confirm: Some("0808dong!!".to_string()),
             web_root_mode: "public-html".to_string(),
             web_root: Some("  ".to_string()),
             www_mode: "redirect-to-root".to_string(),

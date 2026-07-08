@@ -356,6 +356,9 @@ function formValues() {
   const values = {};
   const form = new FormData(nodes.optionsForm);
   form.forEach((value, key) => {
+    if (key === "site_password" || key === "site_password_confirm") {
+      return;
+    }
     values[key] = value;
   });
   return values;
@@ -579,6 +582,8 @@ function optionPayload() {
     database_version: form.get("database_version"),
     app_package: form.get("app_package"),
     site_user: form.get("site_user")?.trim() || "g7",
+    site_password: form.get("site_password") || "",
+    site_password_confirm: form.get("site_password_confirm") || "",
     web_root_mode: form.get("web_root_mode"),
     web_root: customWebRoot || null,
     www_mode: form.get("www_mode"),
@@ -594,6 +599,22 @@ function optionPayload() {
     preserve_config: true,
     dns_check: true,
   };
+}
+
+function validateSitePassword(payload) {
+  if (!payload.site_password) {
+    return "사이트 계정 비밀번호를 입력하세요.";
+  }
+  if (payload.site_password !== payload.site_password_confirm) {
+    return "사이트 계정 비밀번호 확인이 일치하지 않습니다.";
+  }
+  if (payload.site_password.length < 8) {
+    return "사이트 계정 비밀번호는 8자 이상이어야 합니다.";
+  }
+  if (/[:\n\r\x00-\x1F\x7F]/.test(payload.site_password)) {
+    return "사이트 계정 비밀번호에는 콜론, 줄바꿈, 제어문자를 사용할 수 없습니다.";
+  }
+  return null;
 }
 
 function setFormValue(name, value) {
@@ -1555,8 +1576,7 @@ function installConfirmSummaryHtml(payload) {
   `).join("")}</dl>`;
 }
 
-function confirmInstallStart() {
-  const payload = optionPayload();
+function confirmInstallStart(payload = optionPayload()) {
   if (!nodes.installConfirmDialog?.showModal) {
     return Promise.resolve(window.confirm("기본 서버 구성을 시작할까요?"));
   }
@@ -1904,12 +1924,19 @@ function bindEvents() {
   document.querySelector("#plan-button").addEventListener("click", async (event) => {
     await withBusy(event.currentTarget, "생성 중", async () => {
       try {
+        const payload = optionPayload();
+        const passwordError = validateSitePassword(payload);
+        if (passwordError) {
+          setAlert(nodes.planStatus, "error", "설치 계획 생성 실패", passwordError);
+          log(passwordError);
+          return;
+        }
         hideAlert(nodes.planStatus);
         setPlanReady(false);
         log("설치 계획 생성");
         const report = await apiFetch("/api/plan", {
           method: "POST",
-          body: JSON.stringify(optionPayload()),
+          body: JSON.stringify(payload),
         });
         state.planReport = report;
         nodes.planOutput.textContent = renderPlanReport(report);
@@ -1939,7 +1966,15 @@ function bindEvents() {
       return;
     }
 
-    const confirmed = await confirmInstallStart();
+    const payload = optionPayload();
+    const passwordError = validateSitePassword(payload);
+    if (passwordError) {
+      setAlert(nodes.installStatus, "error", "기본 서버 구성 실패", passwordError);
+      log(passwordError);
+      return;
+    }
+
+    const confirmed = await confirmInstallStart(payload);
     if (!confirmed) {
       log("기본 서버 구성 취소");
       return;
@@ -1961,7 +1996,7 @@ function bindEvents() {
       log("기본 서버 구성 시작");
       const report = await apiFetch("/api/install/prepare", {
         method: "POST",
-        body: JSON.stringify(optionPayload()),
+        body: JSON.stringify(payload),
       });
       renderInstallReport(report);
       await refreshRecoveryStatus();

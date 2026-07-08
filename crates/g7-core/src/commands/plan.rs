@@ -418,6 +418,7 @@ pub struct PlanOptions {
     pub php_version: String,
     pub database_engine: String,
     pub site_user: String,
+    pub site_user_password: Option<String>,
     pub web_root_mode: String,
     pub custom_web_root: Option<String>,
     pub www_mode: String,
@@ -443,6 +444,7 @@ impl Default for PlanOptions {
             php_version: DEFAULT_PHP_VERSION.to_string(),
             database_engine: DEFAULT_DATABASE_ENGINE.to_string(),
             site_user: DEFAULT_SITE_USER.to_string(),
+            site_user_password: None,
             web_root_mode: DEFAULT_WEB_ROOT_MODE.to_string(),
             custom_web_root: None,
             www_mode: DEFAULT_WWW_MODE.to_string(),
@@ -477,6 +479,7 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         &SUPPORTED_DATABASE_ENGINES,
     )?;
     let site_user = normalize_site_user(options.site_user)?;
+    validate_site_user_password(options.site_user_password.as_deref())?;
     let web_root_mode = normalize_web_root_mode(options.web_root_mode, &options.custom_web_root)?;
     let web_root = web_root_for(
         &domain,
@@ -1796,6 +1799,33 @@ fn normalize_site_user(site_user: String) -> Result<String> {
             supported: "Linux account name using letters, digits, underscore, or dash".to_string(),
         })
     }
+}
+
+fn validate_site_user_password(password: Option<&str>) -> Result<()> {
+    let Some(password) = password else {
+        return Ok(());
+    };
+
+    if password.len() < 8 {
+        return Err(Error::InvalidOption {
+            field: "site-password",
+            value: "<redacted>".to_string(),
+            supported: "at least 8 characters".to_string(),
+        });
+    }
+
+    let unsupported = password
+        .chars()
+        .any(|ch| ch == ':' || ch == '\n' || ch == '\r' || ch.is_control());
+    if unsupported {
+        return Err(Error::InvalidOption {
+            field: "site-password",
+            value: "<redacted>".to_string(),
+            supported: "no colon, newline, or control characters".to_string(),
+        });
+    }
+
+    Ok(())
 }
 
 fn normalize_web_root_mode(mode: String, custom_web_root: &Option<String>) -> Result<String> {
