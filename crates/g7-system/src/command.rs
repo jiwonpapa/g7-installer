@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -9,6 +10,7 @@ pub struct CommandSpec {
     pub program: OsString,
     pub args: Vec<OsString>,
     pub stdin: Option<Vec<u8>>,
+    pub cwd: Option<PathBuf>,
 }
 
 impl CommandSpec {
@@ -17,6 +19,7 @@ impl CommandSpec {
             program: program.into(),
             args: Vec::new(),
             stdin: None,
+            cwd: None,
         }
     }
 
@@ -36,6 +39,11 @@ impl CommandSpec {
 
     pub fn stdin_bytes(mut self, stdin: impl Into<Vec<u8>>) -> Self {
         self.stdin = Some(stdin.into());
+        self
+    }
+
+    pub fn current_dir(mut self, cwd: impl Into<PathBuf>) -> Self {
+        self.cwd = Some(cwd.into());
         self
     }
 
@@ -73,6 +81,9 @@ impl CommandRunner for RealCommandRunner {
     fn run(&self, spec: &CommandSpec) -> Result<CommandOutput, CommandError> {
         let mut command = Command::new(&spec.program);
         command.args(&spec.args);
+        if let Some(cwd) = &spec.cwd {
+            command.current_dir(cwd);
+        }
 
         let output = if let Some(stdin) = &spec.stdin {
             let mut child = command
@@ -196,6 +207,19 @@ mod tests {
 
         assert_eq!(spec.display(), "chpasswd");
         assert_eq!(spec.stdin, Some(b"g7:secret\n".to_vec()));
+    }
+
+    #[test]
+    fn command_spec_records_current_dir_separately() {
+        let spec = CommandSpec::new("composer")
+            .arg("install")
+            .current_dir("/srv/example");
+
+        assert_eq!(spec.display(), "composer install");
+        assert_eq!(
+            spec.cwd.as_deref(),
+            Some(std::path::Path::new("/srv/example"))
+        );
     }
 
     #[test]

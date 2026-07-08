@@ -156,7 +156,12 @@ fn validate_reset_path(path: &str) -> Result<()> {
         "/etc/apache2/sites-available/g7.conf",
         "/etc/apache2/sites-enabled/g7.conf",
         "/etc/systemd/system/g7-queue.service",
+        "/etc/systemd/system/g7-scheduler.service",
+        "/etc/systemd/system/g7-scheduler.timer",
         "/etc/systemd/system/g7-reverb.service",
+        "/etc/systemd/system/laravel-queue.service",
+        "/etc/systemd/system/laravel-scheduler.service",
+        "/etc/systemd/system/laravel-scheduler.timer",
         "/usr/local/bin/g7",
         "/tmp/g7",
     ];

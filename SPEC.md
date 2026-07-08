@@ -2,12 +2,12 @@
 
 ## 1. 목적
 
-G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 자동 구성하는 Rust 기반 서버 CLI입니다.
+G7 Installer는 새 Ubuntu VPS에 그누보드7 중심의 PHP 웹앱 운영 환경을 자동 구성하는 Rust 기반 서버 CLI입니다.
 
-목표는 초보 사용자가 VPS에 접속한 뒤 최소 명령으로 그누보드7 설치를 완료하게 하는 것입니다.
+목표는 초보 사용자가 VPS에 접속한 뒤 최소 명령으로 그누보드7, WordPress, Laravel 설치 기반을 완료하게 하는 것입니다.
 
 ```bash
-curl -fsSL https://get.gnuboard7.org | sudo bash
+curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7-installer/main/scripts/bootstrap.sh | sudo bash
 sudo g7inst setup
 ```
 
@@ -31,9 +31,9 @@ gnuboard/g7-installer
 
 G7 본체와의 관계:
 
-- 설치기는 GitHub Releases에서 G7 배포 ZIP을 다운로드합니다.
-- G7 레포를 직접 수정하지 않습니다.
-- 설치 완료 후 G7의 기존 `/install` 웹 인스톨러 또는 CLI 설치 흐름을 사용합니다.
+- 설치기는 G7/Laravel 앱 소스를 받아 Composer, NPM, Artisan, systemd 서비스 구성을 수행합니다.
+- WordPress는 최신 배포 zip을 받아 설치 화면으로 연결합니다.
+- 각 앱 본체 레포를 직접 수정하지 않습니다.
 
 ## 3. 지원 범위
 
@@ -71,7 +71,7 @@ cPanel, Plesk, Cafe24 같은 관리형/공유호스팅
 ### 4.1 bootstrap
 
 ```bash
-curl -fsSL https://get.gnuboard7.org | sudo bash
+curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7-installer/main/scripts/bootstrap.sh | sudo bash
 ```
 
 역할:
@@ -157,10 +157,10 @@ sudo g7inst self-update
 15. Redis 설치 및 localhost-only hardening
 16. 선택 DB 설치
 17. DB 및 DB 사용자 생성, 앱 DB 비밀번호 랜덤 생성
-18. G7 릴리스 다운로드
-19. checksum 검증
+18. 선택 앱 소스 다운로드
+19. Composer/NPM/Artisan 구성 또는 WordPress 설치 화면 준비
 20. 선택한 웹루트(`/home/<site-user>/public_html`, `/home/<site-user>/www`, `/var/www/<domain>`, custom)에 배치
-21. `.env` 생성 또는 G7 웹 인스톨러 연결 준비
+21. `.env` 생성 및 앱 런타임 설정
 22. 메일 발송 설정 반영
 23. 파일 권한 설정
 24. 선택 웹서버 vhost 생성
@@ -225,7 +225,12 @@ g7inst doctor
 /etc/apache2/sites-available/g7.conf
 /etc/apache2/sites-enabled/g7.conf
 /etc/systemd/system/g7-queue.service
+/etc/systemd/system/g7-scheduler.service
+/etc/systemd/system/g7-scheduler.timer
 /etc/systemd/system/g7-reverb.service
+/etc/systemd/system/laravel-queue.service
+/etc/systemd/system/laravel-scheduler.service
+/etc/systemd/system/laravel-scheduler.timer
 ```
 
 `owned-files.json`은 installer가 만든 파일만 추적합니다. 추적되지 않은 운영 파일은 자동 수정하지 않습니다.

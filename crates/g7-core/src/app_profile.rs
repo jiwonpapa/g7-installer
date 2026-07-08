@@ -133,6 +133,7 @@ const GNUBOARD7_PROFILE: AppProfile = AppProfile {
     system_packages: &["composer", "nodejs", "npm"],
     services: &[
         "g7-queue.service",
+        "g7-scheduler.service",
         "g7-scheduler.timer",
         "g7-reverb.service",
     ],
@@ -163,7 +164,11 @@ const LARAVEL_PROFILE: AppProfile = AppProfile {
     document_root: DocumentRootStrategy::PublicSubdir,
     php_extensions: LARAVEL_EXTENSIONS,
     system_packages: &["composer", "nodejs", "npm"],
-    services: &["laravel-queue.service", "laravel-scheduler.timer"],
+    services: &[
+        "laravel-queue.service",
+        "laravel-scheduler.service",
+        "laravel-scheduler.timer",
+    ],
     writable_paths: &["storage", "bootstrap/cache"],
     post_install_steps: &[
         "fetch application source",

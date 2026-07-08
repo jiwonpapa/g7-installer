@@ -48,8 +48,11 @@ const SECRETS_PATH: &str = "/etc/g7-installer/secrets.toml";
 const SETUP_GUIDE_PATH: &str = "/var/log/g7-installer/setup-guide.md";
 const GNUBOARD7_REPO_URL: &str = "https://github.com/gnuboard/g7.git";
 const GNUBOARD7_RELEASE_REF: &str = "7.0.0";
+const LARAVEL_REPO_URL: &str = "https://github.com/laravel/laravel.git";
+const LARAVEL_RELEASE_REF: &str = "12.x";
 const APP_SOURCE_DIR: &str = "/var/lib/g7-installer/app-source";
 const GNUBOARD7_SOURCE_DIR: &str = "/var/lib/g7-installer/app-source/gnuboard7";
+const LARAVEL_SOURCE_DIR: &str = "/var/lib/g7-installer/app-source/laravel";
 const WORDPRESS_DOWNLOAD_URL: &str = "https://wordpress.org/latest.zip";
 const WORDPRESS_ARCHIVE_PATH: &str = "/var/lib/g7-installer/app-source/wordpress.zip";
 const WORDPRESS_EXTRACT_DIR: &str = "/var/lib/g7-installer/app-source/wordpress-extract";
@@ -626,7 +629,13 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         }
     }
 
-    match apply_app_phase(probe, paths, &install_plan, &mut owned_file_list) {
+    match apply_app_phase(
+        probe,
+        paths,
+        &install_plan,
+        &mut owned_file_list,
+        &apply_summary,
+    ) {
         Ok(app_checks) => {
             let app_source_ready = app_checks
                 .iter()
@@ -1228,13 +1237,24 @@ fn deferred_vhost_checks(plan: &plan::InstallPlan) -> Vec<InstallCheck> {
 }
 
 fn apache_http_modules() -> &'static [&'static str] {
-    &["proxy_fcgi", "setenvif", "rewrite", "headers"]
+    &[
+        "proxy",
+        "proxy_http",
+        "proxy_wstunnel",
+        "proxy_fcgi",
+        "setenvif",
+        "rewrite",
+        "headers",
+    ]
 }
 
 fn apache_tls_modules() -> &'static [&'static str] {
     &[
         "ssl",
         "http2",
+        "proxy",
+        "proxy_http",
+        "proxy_wstunnel",
         "proxy_fcgi",
         "setenvif",
         "rewrite",
@@ -1661,18 +1681,22 @@ fn apply_app_phase<R: CommandRunner>(
     paths: &InstallPaths,
     plan: &plan::InstallPlan,
     owned: &mut Vec<String>,
+    summary: &ApplySummary,
 ) -> Result<Vec<InstallCheck>> {
     fs::create_dir_all(paths.resolve(APP_SOURCE_DIR)).map_err(|source| Error::FileWriteFailed {
         path: APP_SOURCE_DIR.to_string(),
         source,
     })?;
 
+    let app_url = app_access_url(plan, summary);
     let mut checks = match plan.app_profile.as_str() {
-        "gnuboard7" => install_gnuboard7_app(probe, paths, plan)?,
+        "gnuboard7" => install_gnuboard7_app(probe, paths, plan, owned, &app_url)?,
         "wordpress" => install_wordpress_app(probe, paths, plan)?,
+        "laravel" => install_laravel_app(probe, paths, plan, owned, &app_url)?,
         _ => install_placeholder_app(paths, plan, owned)?,
     };
 
+    ensure_app_writable_dirs(paths, plan, owned)?;
     let owner_group = format!("{}:www-data", plan.site_user);
     let command = format!("chown -R {owner_group} {}", plan.web_root);
     let output = probe
@@ -1692,12 +1716,22 @@ fn apply_app_phase<R: CommandRunner>(
         ),
     ));
 
+    for writable_path in app_writable_paths(plan) {
+        let target = format!("{}/{}", plan.web_root, writable_path);
+        let command = format!("chmod -R 0775 {target}");
+        let output = probe
+            .chmod_recursive("0775", &target)
+            .map_err(|err| command_error("app-writable-permissions", &command, err))?;
+        require_success("app-writable-permissions", command, output)?;
+        checks.push(InstallCheck::pass(
+            format!("app-writable:{writable_path}"),
+            format!("Set writable runtime path `{target}` to mode 0775."),
+        ));
+    }
+
     checks.push(InstallCheck::pass(
         "app-url",
-        format!(
-            "Open {} to continue the selected app install.",
-            app_entry_url(plan)
-        ),
+        format!("Open {app_url} to continue or verify the selected app install."),
     ));
     Ok(checks)
 }
@@ -1706,6 +1740,8 @@ fn install_gnuboard7_app<R: CommandRunner>(
     probe: &SystemProbe<R>,
     paths: &InstallPaths,
     plan: &plan::InstallPlan,
+    owned: &mut Vec<String>,
+    app_url: &str,
 ) -> Result<Vec<InstallCheck>> {
     remove_existing_path(paths, GNUBOARD7_SOURCE_DIR)?;
     let output = probe
@@ -1749,10 +1785,10 @@ fn install_gnuboard7_app<R: CommandRunner>(
     write_existing_file(
         paths,
         &format!("{}/.env", plan.web_root),
-        &laravel_env_content(plan, &db_password),
+        &laravel_env_content(plan, &db_password, app_url, LaravelRuntimeKind::Gnuboard7)?,
     )?;
 
-    Ok(vec![
+    let mut checks = vec![
         InstallCheck::pass(
             "app-source",
             format!(
@@ -1767,14 +1803,103 @@ fn install_gnuboard7_app<R: CommandRunner>(
                 plan.database_name, plan.database_user
             ),
         ),
+    ];
+    checks.extend(configure_laravel_runtime(
+        probe,
+        paths,
+        plan,
+        owned,
+        LaravelRuntimeKind::Gnuboard7,
+    )?);
+    checks.push(InstallCheck::pass(
+        "app-install-screen",
+        format!("Gnuboard7 should be available at {app_url}."),
+    ));
+
+    Ok(checks)
+}
+
+fn install_laravel_app<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+    owned: &mut Vec<String>,
+    app_url: &str,
+) -> Result<Vec<InstallCheck>> {
+    remove_existing_path(paths, LARAVEL_SOURCE_DIR)?;
+    let output = probe
+        .git_clone(LARAVEL_REPO_URL, LARAVEL_RELEASE_REF, LARAVEL_SOURCE_DIR)
+        .map_err(|err| {
+            command_error(
+                "laravel-source",
+                format!(
+                    "git clone --depth 1 --branch {LARAVEL_RELEASE_REF} {LARAVEL_REPO_URL} {LARAVEL_SOURCE_DIR}"
+                ),
+                err,
+            )
+        })?;
+    require_success(
+        "laravel-source",
+        format!(
+            "git clone --depth 1 --branch {LARAVEL_RELEASE_REF} {LARAVEL_REPO_URL} {LARAVEL_SOURCE_DIR}"
+        ),
+        output,
+    )?;
+
+    let output = probe
+        .copy_dir_contents(LARAVEL_SOURCE_DIR, &plan.web_root)
+        .map_err(|err| {
+            command_error(
+                "laravel-copy",
+                format!("cp -a {LARAVEL_SOURCE_DIR}/. {}", plan.web_root),
+                err,
+            )
+        })?;
+    require_success(
+        "laravel-copy",
+        format!("cp -a {LARAVEL_SOURCE_DIR}/. {}", plan.web_root),
+        output,
+    )?;
+
+    let db_password =
+        read_database_password(paths)?.ok_or_else(|| Error::InstallVerificationFailed {
+            checks: format!("database password was not found at {SECRETS_PATH}"),
+        })?;
+    write_existing_file(
+        paths,
+        &format!("{}/.env", plan.web_root),
+        &laravel_env_content(plan, &db_password, app_url, LaravelRuntimeKind::Laravel)?,
+    )?;
+
+    let mut checks = vec![
         InstallCheck::pass(
-            "app-install-screen",
+            "app-source",
             format!(
-                "Gnuboard7 browser installer should be available at {}.",
-                app_entry_url(plan)
+                "Checked out Laravel skeleton {LARAVEL_RELEASE_REF} into {}.",
+                plan.web_root
             ),
         ),
-    ])
+        InstallCheck::pass(
+            "app-env",
+            format!(
+                "Wrote Laravel .env with DB name `{}` and user `{}`; password remains in {SECRETS_PATH}.",
+                plan.database_name, plan.database_user
+            ),
+        ),
+    ];
+    checks.extend(configure_laravel_runtime(
+        probe,
+        paths,
+        plan,
+        owned,
+        LaravelRuntimeKind::Laravel,
+    )?);
+    checks.push(InstallCheck::pass(
+        "app-install-screen",
+        format!("Laravel should be available at {app_url}."),
+    ));
+
+    Ok(checks)
 }
 
 fn install_wordpress_app<R: CommandRunner>(
@@ -1852,6 +1977,275 @@ fn install_wordpress_app<R: CommandRunner>(
             ),
         },
     ])
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LaravelRuntimeKind {
+    Gnuboard7,
+    Laravel,
+}
+
+struct AppSystemdUnit {
+    name: &'static str,
+    content: String,
+    enable_now: bool,
+}
+
+fn configure_laravel_runtime<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+    owned: &mut Vec<String>,
+    kind: LaravelRuntimeKind,
+) -> Result<Vec<InstallCheck>> {
+    let cwd = paths.resolve(&plan.web_root);
+    let mut checks = Vec::new();
+
+    let output = probe.composer_install(&cwd).map_err(|err| {
+        command_error(
+            "composer-install",
+            "composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction",
+            err,
+        )
+    })?;
+    require_success(
+        "composer-install",
+        "composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction",
+        output,
+    )?;
+    checks.push(InstallCheck::pass(
+        "composer-install",
+        format!("Installed PHP dependencies in {}.", plan.web_root),
+    ));
+
+    let output = probe
+        .npm_install(&cwd)
+        .map_err(|err| command_error("npm-install", "npm install", err))?;
+    require_success("npm-install", "npm install", output)?;
+    checks.push(InstallCheck::pass(
+        "npm-install",
+        format!("Installed frontend dependencies in {}.", plan.web_root),
+    ));
+
+    let output = probe
+        .npm_run_build(&cwd)
+        .map_err(|err| command_error("npm-build", "npm run build", err))?;
+    require_success("npm-build", "npm run build", output)?;
+    checks.push(InstallCheck::pass(
+        "npm-build",
+        "Built frontend assets with npm run build.",
+    ));
+
+    run_artisan_step(
+        probe,
+        &cwd,
+        "artisan-key-generate",
+        ["key:generate", "--force"],
+        &mut checks,
+        "Generated Laravel APP_KEY.",
+    )?;
+    run_artisan_step(
+        probe,
+        &cwd,
+        "artisan-storage-link",
+        ["storage:link"],
+        &mut checks,
+        "Linked public storage.",
+    )?;
+    run_artisan_step(
+        probe,
+        &cwd,
+        "artisan-migrate",
+        ["migrate", "--force"],
+        &mut checks,
+        "Applied database migrations.",
+    )?;
+    run_artisan_step(
+        probe,
+        &cwd,
+        "artisan-optimize",
+        ["optimize"],
+        &mut checks,
+        "Cached Laravel runtime metadata.",
+    )?;
+    run_artisan_step(
+        probe,
+        &cwd,
+        "artisan-about",
+        ["about"],
+        &mut checks,
+        "Verified Laravel artisan runtime.",
+    )?;
+
+    for unit in app_systemd_units(plan, kind) {
+        let unit_path = systemd_unit_path(unit.name);
+        write_new_file(paths, &unit_path, &unit.content, owned)?;
+        checks.push(InstallCheck::pass(
+            format!("app-service-file:{}", unit.name),
+            format!("Wrote systemd unit `{unit_path}`."),
+        ));
+    }
+
+    let output = probe
+        .systemd_daemon_reload()
+        .map_err(|err| command_error("systemd-daemon-reload", "systemctl daemon-reload", err))?;
+    require_success("systemd-daemon-reload", "systemctl daemon-reload", output)?;
+    checks.push(InstallCheck::pass(
+        "systemd-daemon-reload",
+        "Reloaded systemd units after app service creation.",
+    ));
+
+    for unit in app_systemd_units(plan, kind)
+        .into_iter()
+        .filter(|unit| unit.enable_now)
+    {
+        let command = format!("systemctl enable --now {}", unit.name);
+        let output = probe
+            .enable_service_now(unit.name)
+            .map_err(|err| command_error("app-service-enable", &command, err))?;
+        require_success("app-service-enable", command, output)?;
+        checks.push(InstallCheck::pass(
+            format!("app-service:{}", unit.name),
+            format!("Enabled and started `{}`.", unit.name),
+        ));
+    }
+
+    Ok(checks)
+}
+
+fn run_artisan_step<R: CommandRunner, const N: usize>(
+    probe: &SystemProbe<R>,
+    cwd: &Path,
+    step: &'static str,
+    args: [&'static str; N],
+    checks: &mut Vec<InstallCheck>,
+    message: &'static str,
+) -> Result<()> {
+    let command = format!("php artisan {}", args.join(" "));
+    let output = probe
+        .artisan(cwd, args)
+        .map_err(|err| command_error(step, &command, err))?;
+    require_success(step, command, output)?;
+    checks.push(InstallCheck::pass(step, message));
+    Ok(())
+}
+
+fn app_systemd_units(plan: &plan::InstallPlan, kind: LaravelRuntimeKind) -> Vec<AppSystemdUnit> {
+    let prefix = match kind {
+        LaravelRuntimeKind::Gnuboard7 => "g7",
+        LaravelRuntimeKind::Laravel => "laravel",
+    };
+    let mut units = vec![
+        AppSystemdUnit {
+            name: match kind {
+                LaravelRuntimeKind::Gnuboard7 => "g7-queue.service",
+                LaravelRuntimeKind::Laravel => "laravel-queue.service",
+            },
+            content: queue_service_content(plan),
+            enable_now: true,
+        },
+        AppSystemdUnit {
+            name: match kind {
+                LaravelRuntimeKind::Gnuboard7 => "g7-scheduler.service",
+                LaravelRuntimeKind::Laravel => "laravel-scheduler.service",
+            },
+            content: scheduler_service_content(plan, prefix),
+            enable_now: false,
+        },
+        AppSystemdUnit {
+            name: match kind {
+                LaravelRuntimeKind::Gnuboard7 => "g7-scheduler.timer",
+                LaravelRuntimeKind::Laravel => "laravel-scheduler.timer",
+            },
+            content: scheduler_timer_content(prefix),
+            enable_now: true,
+        },
+    ];
+
+    if kind == LaravelRuntimeKind::Gnuboard7 {
+        units.push(AppSystemdUnit {
+            name: "g7-reverb.service",
+            content: reverb_service_content(plan),
+            enable_now: true,
+        });
+    }
+
+    units
+}
+
+fn queue_service_content(plan: &plan::InstallPlan) -> String {
+    format!(
+        "[Unit]\nDescription={} queue worker\nAfter=network.target {}\n\n[Service]\nType=simple\nUser={}\nGroup=www-data\nWorkingDirectory={}\nExecStart=/usr/bin/php artisan queue:work --sleep=3 --tries=3 --timeout=90\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=multi-user.target\n",
+        plan.app_profile_label,
+        database_service_name(plan),
+        plan.site_user,
+        plan.web_root,
+    )
+}
+
+fn scheduler_service_content(plan: &plan::InstallPlan, prefix: &str) -> String {
+    format!(
+        "[Unit]\nDescription={prefix} Laravel scheduler\nAfter=network.target {}\n\n[Service]\nType=oneshot\nUser={}\nGroup=www-data\nWorkingDirectory={}\nExecStart=/usr/bin/php artisan schedule:run\n",
+        database_service_name(plan),
+        plan.site_user,
+        plan.web_root,
+    )
+}
+
+fn scheduler_timer_content(prefix: &str) -> String {
+    format!(
+        "[Unit]\nDescription={prefix} Laravel scheduler every minute\n\n[Timer]\nOnCalendar=*:0/1\nAccuracySec=10s\nPersistent=true\nUnit={prefix}-scheduler.service\n\n[Install]\nWantedBy=timers.target\n"
+    )
+}
+
+fn reverb_service_content(plan: &plan::InstallPlan) -> String {
+    format!(
+        "[Unit]\nDescription=Gnuboard7 Reverb websocket server\nAfter=network.target {}\n\n[Service]\nType=simple\nUser={}\nGroup=www-data\nWorkingDirectory={}\nExecStart=/usr/bin/php artisan reverb:start --host=127.0.0.1 --port=8080\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=multi-user.target\n",
+        database_service_name(plan),
+        plan.site_user,
+        plan.web_root,
+    )
+}
+
+fn systemd_unit_path(unit: &str) -> String {
+    format!("/etc/systemd/system/{unit}")
+}
+
+fn app_runtime_unit_names(plan: &plan::InstallPlan) -> &'static [&'static str] {
+    match plan.app_profile.as_str() {
+        "gnuboard7" => &[
+            "g7-queue.service",
+            "g7-scheduler.service",
+            "g7-scheduler.timer",
+            "g7-reverb.service",
+        ],
+        "laravel" => &[
+            "laravel-queue.service",
+            "laravel-scheduler.service",
+            "laravel-scheduler.timer",
+        ],
+        _ => &[],
+    }
+}
+
+fn ensure_app_writable_dirs(
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+    owned: &mut Vec<String>,
+) -> Result<()> {
+    for writable_path in app_writable_paths(plan) {
+        let target = format!("{}/{}", plan.web_root, writable_path);
+        create_owned_dir_if_absent(paths, &target, owned)?;
+    }
+    Ok(())
+}
+
+fn app_writable_paths(plan: &plan::InstallPlan) -> &'static [&'static str] {
+    match plan.app_profile.as_str() {
+        "gnuboard7" | "laravel" => &["storage", "bootstrap/cache"],
+        "wordpress" => &["wp-content/uploads"],
+        _ => &[],
+    }
 }
 
 fn install_placeholder_app(
@@ -2016,25 +2410,77 @@ fn read_database_password(paths: &InstallPaths) -> Result<Option<String>> {
     }))
 }
 
-fn laravel_env_content(plan: &plan::InstallPlan, db_password: &str) -> String {
-    let app_key = random_hex_secret().unwrap_or_else(|_| "change-me-after-install".to_string());
+fn laravel_env_content(
+    plan: &plan::InstallPlan,
+    db_password: &str,
+    app_url: &str,
+    kind: LaravelRuntimeKind,
+) -> Result<String> {
+    let app_key = random_laravel_app_key()?;
     let redis_enabled = plan.redis_mode == "enable";
-    format!(
-        "APP_NAME=\"{}\"\nAPP_ENV=production\nAPP_KEY={app_key}\nAPP_DEBUG=false\nAPP_URL=http://{}\n\nDB_CONNECTION=mysql\nDB_HOST=127.0.0.1\nDB_PORT=3306\nDB_DATABASE={}\nDB_USERNAME={}\nDB_PASSWORD=\"{}\"\n\nCACHE_STORE={}\nSESSION_DRIVER={}\nQUEUE_CONNECTION={}\nREDIS_HOST=127.0.0.1\nREDIS_PORT=6379\nREDIS_PASSWORD=null\n\nMAIL_MAILER={}\n",
+    let mut env = format!(
+        "APP_NAME=\"{}\"\nAPP_ENV=production\nAPP_KEY=base64:{app_key}\nAPP_DEBUG=false\nAPP_URL={app_url}\n\nDB_CONNECTION=mysql\nDB_HOST=127.0.0.1\nDB_PORT=3306\nDB_DATABASE={}\nDB_USERNAME={}\nDB_PASSWORD=\"{}\"\n\nCACHE_STORE={}\nSESSION_DRIVER={}\nQUEUE_CONNECTION={}\nREDIS_CLIENT=phpredis\nREDIS_HOST=127.0.0.1\nREDIS_PORT=6379\nREDIS_PASSWORD=null\n\n",
         plan.app_profile_label,
-        primary_http_host(plan),
         plan.database_name,
         plan.database_user,
         db_password.replace('"', "\\\""),
         if redis_enabled { "redis" } else { "file" },
         if redis_enabled { "redis" } else { "file" },
         if redis_enabled { "redis" } else { "database" },
-        if plan.mail_mode == "none" {
-            "log"
+    );
+    env.push_str(&mail_env_content(plan));
+    if kind == LaravelRuntimeKind::Gnuboard7 {
+        let public_reverb_port = if app_url.starts_with("https://") {
+            "443"
         } else {
-            "smtp"
-        },
-    )
+            "80"
+        };
+        let public_reverb_scheme = if app_url.starts_with("https://") {
+            "https"
+        } else {
+            "http"
+        };
+        env.push_str(&format!(
+            "\nBROADCAST_CONNECTION=reverb\nREVERB_APP_ID=g7\nREVERB_APP_KEY=g7-local\nREVERB_APP_SECRET=g7-local-secret\nREVERB_SERVER_HOST=127.0.0.1\nREVERB_SERVER_PORT=8080\nREVERB_HOST=127.0.0.1\nREVERB_PORT=8080\nREVERB_SCHEME=http\nVITE_REVERB_APP_KEY=g7-local\nVITE_REVERB_HOST={}\nVITE_REVERB_PORT={public_reverb_port}\nVITE_REVERB_SCHEME={public_reverb_scheme}\n",
+            primary_http_host(plan)
+        ));
+    }
+    Ok(env)
+}
+
+fn mail_env_content(plan: &plan::InstallPlan) -> String {
+    match plan.mail_mode.as_str() {
+        "local-postfix" => {
+            let from = plan
+                .smtp_from
+                .clone()
+                .unwrap_or_else(|| format!("noreply@{}", plan.domain));
+            format!(
+                "MAIL_MAILER=smtp\nMAIL_HOST=127.0.0.1\nMAIL_PORT=25\nMAIL_USERNAME=null\nMAIL_PASSWORD=null\nMAIL_ENCRYPTION=null\nMAIL_FROM_ADDRESS=\"{from}\"\nMAIL_FROM_NAME=\"{}\"\n",
+                plan.app_profile_label
+            )
+        }
+        "smtp-relay" => {
+            let host = plan.smtp_host.clone().unwrap_or_default();
+            let port = plan.smtp_port.unwrap_or(587);
+            let encryption = plan
+                .smtp_encryption
+                .clone()
+                .unwrap_or_else(|| "tls".to_string());
+            let from = plan
+                .smtp_from
+                .clone()
+                .unwrap_or_else(|| format!("noreply@{}", plan.domain));
+            format!(
+                "MAIL_MAILER=smtp\nMAIL_HOST={host}\nMAIL_PORT={port}\nMAIL_USERNAME=null\nMAIL_PASSWORD=null\nMAIL_ENCRYPTION={encryption}\nMAIL_FROM_ADDRESS=\"{from}\"\nMAIL_FROM_NAME=\"{}\"\n",
+                plan.app_profile_label
+            )
+        }
+        _ => format!(
+            "MAIL_MAILER=log\nMAIL_FROM_ADDRESS=\"noreply@{}\"\nMAIL_FROM_NAME=\"{}\"\n",
+            plan.domain, plan.app_profile_label
+        ),
+    }
 }
 
 fn placeholder_app_content(plan: &plan::InstallPlan) -> String {
@@ -2205,9 +2651,10 @@ fn apache_vhost_content_with_socket(plan: &plan::InstallPlan, php_socket: &str) 
     let redirect_blocks = apache_http_redirect_blocks(plan);
     let (server_name, aliases) = apache_app_hosts(plan);
     let server_alias = apache_server_alias_line(&aliases);
+    let reverb_proxy = apache_reverb_proxy_block(plan);
 
     format!(
-        "{redirect_blocks}<VirtualHost *:80>\n    ServerName {server_name}\n{server_alias}    DocumentRoot {root}\n\n    ErrorLog ${{APACHE_LOG_DIR}}/g7-error.log\n    CustomLog ${{APACHE_LOG_DIR}}/g7-access.log combined\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n\n    <FilesMatch \\.php$>\n        SetHandler \"proxy:unix:{php_socket}|fcgi://localhost/\"\n    </FilesMatch>\n\n    <DirectoryMatch \"^/.*/\\.git/\">\n        Require all denied\n    </DirectoryMatch>\n</VirtualHost>\n",
+        "{redirect_blocks}<VirtualHost *:80>\n    ServerName {server_name}\n{server_alias}    DocumentRoot {root}\n\n    ErrorLog ${{APACHE_LOG_DIR}}/g7-error.log\n    CustomLog ${{APACHE_LOG_DIR}}/g7-access.log combined\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n{reverb_proxy}\n    <FilesMatch \\.php$>\n        SetHandler \"proxy:unix:{php_socket}|fcgi://localhost/\"\n    </FilesMatch>\n\n    <DirectoryMatch \"^/.*/\\.git/\">\n        Require all denied\n    </DirectoryMatch>\n</VirtualHost>\n",
         root = plan.app_document_root,
     )
 }
@@ -2220,9 +2667,10 @@ fn nginx_vhost_content(plan: &plan::InstallPlan) -> String {
 fn nginx_vhost_content_with_socket(plan: &plan::InstallPlan, php_socket: &str) -> String {
     let app_hosts = nginx_app_hosts(plan);
     let redirect_blocks = nginx_redirect_blocks(plan);
+    let reverb_proxy = nginx_reverb_proxy_block(plan);
 
     format!(
-        "{redirect_blocks}server {{\n    listen 80;\n    listen [::]:80;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
+        "{redirect_blocks}server {{\n    listen 80;\n    listen [::]:80;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n{reverb_proxy}\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
         root = plan.app_document_root,
     )
 }
@@ -2234,6 +2682,22 @@ fn nginx_app_hosts(plan: &plan::InstallPlan) -> String {
         _ if !plan.domain.starts_with("www.") => format!("{} www.{}", plan.domain, plan.domain),
         _ => plan.domain.clone(),
     }
+}
+
+fn nginx_reverb_proxy_block(plan: &plan::InstallPlan) -> &'static str {
+    if plan.app_profile != "gnuboard7" {
+        return "";
+    }
+
+    "\n    location /app {\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection \"upgrade\";\n        proxy_pass http://127.0.0.1:8080;\n    }\n\n    location /apps {\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_pass http://127.0.0.1:8080;\n    }\n"
+}
+
+fn apache_reverb_proxy_block(plan: &plan::InstallPlan) -> &'static str {
+    if plan.app_profile != "gnuboard7" {
+        return "";
+    }
+
+    "\n    ProxyPreserveHost On\n    ProxyPass /app ws://127.0.0.1:8080/app\n    ProxyPassReverse /app ws://127.0.0.1:8080/app\n    ProxyPass /apps http://127.0.0.1:8080/apps\n    ProxyPassReverse /apps http://127.0.0.1:8080/apps\n"
 }
 
 fn secrets_content(plan: &plan::InstallPlan, db_password: &str) -> String {
@@ -2305,9 +2769,10 @@ fn nginx_tls_vhost_content(plan: &plan::InstallPlan, php_socket: &str) -> String
     let cert_name = &plan.domain;
     let app_hosts = nginx_app_hosts(plan);
     let canonical_redirect = nginx_https_canonical_redirect(plan);
+    let reverb_proxy = nginx_reverb_proxy_block(plan);
 
     format!(
-        "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {http_hosts};\n    return 301 https://$host$request_uri;\n}}\n\n{canonical_redirect}server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    ssl_certificate /etc/letsencrypt/live/{cert_name}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{cert_name}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_prefer_server_ciphers off;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    add_header X-Content-Type-Options nosniff always;\n    add_header X-Frame-Options SAMEORIGIN always;\n    add_header Referrer-Policy strict-origin-when-cross-origin always;\n\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
+        "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {http_hosts};\n    return 301 https://$host$request_uri;\n}}\n\n{canonical_redirect}server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    ssl_certificate /etc/letsencrypt/live/{cert_name}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{cert_name}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_prefer_server_ciphers off;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    add_header X-Content-Type-Options nosniff always;\n    add_header X-Frame-Options SAMEORIGIN always;\n    add_header Referrer-Policy strict-origin-when-cross-origin always;\n\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n{reverb_proxy}\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
         root = plan.app_document_root,
     )
 }
@@ -2318,9 +2783,10 @@ fn apache_tls_vhost_content(plan: &plan::InstallPlan, php_socket: &str) -> Strin
     let canonical_redirect = apache_https_canonical_redirect(plan);
     let (server_name, aliases) = apache_app_hosts(plan);
     let server_alias = apache_server_alias_line(&aliases);
+    let reverb_proxy = apache_reverb_proxy_block(plan);
 
     format!(
-        "<VirtualHost *:80>\n    ServerName {primary_host}\n    ServerAlias {http_hosts}\n    RewriteEngine On\n    RewriteRule ^ https://%{{HTTP_HOST}}%{{REQUEST_URI}} [R=301,L]\n</VirtualHost>\n\n{canonical_redirect}<VirtualHost *:443>\n    ServerName {server_name}\n{server_alias}    DocumentRoot {root}\n\n    ErrorLog ${{APACHE_LOG_DIR}}/g7-error.log\n    CustomLog ${{APACHE_LOG_DIR}}/g7-access.log combined\n\n    SSLEngine on\n    SSLCertificateFile /etc/letsencrypt/live/{cert_name}/fullchain.pem\n    SSLCertificateKeyFile /etc/letsencrypt/live/{cert_name}/privkey.pem\n    Protocols h2 http/1.1\n\n    Header always set X-Content-Type-Options \"nosniff\"\n    Header always set X-Frame-Options \"SAMEORIGIN\"\n    Header always set Referrer-Policy \"strict-origin-when-cross-origin\"\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n\n    <FilesMatch \\.php$>\n        SetHandler \"proxy:unix:{php_socket}|fcgi://localhost/\"\n    </FilesMatch>\n\n    <DirectoryMatch \"^/.*/\\.git/\">\n        Require all denied\n    </DirectoryMatch>\n</VirtualHost>\n",
+        "<VirtualHost *:80>\n    ServerName {primary_host}\n    ServerAlias {http_hosts}\n    RewriteEngine On\n    RewriteRule ^ https://%{{HTTP_HOST}}%{{REQUEST_URI}} [R=301,L]\n</VirtualHost>\n\n{canonical_redirect}<VirtualHost *:443>\n    ServerName {server_name}\n{server_alias}    DocumentRoot {root}\n\n    ErrorLog ${{APACHE_LOG_DIR}}/g7-error.log\n    CustomLog ${{APACHE_LOG_DIR}}/g7-access.log combined\n\n    SSLEngine on\n    SSLCertificateFile /etc/letsencrypt/live/{cert_name}/fullchain.pem\n    SSLCertificateKeyFile /etc/letsencrypt/live/{cert_name}/privkey.pem\n    Protocols h2 http/1.1\n\n    Header always set X-Content-Type-Options \"nosniff\"\n    Header always set X-Frame-Options \"SAMEORIGIN\"\n    Header always set Referrer-Policy \"strict-origin-when-cross-origin\"\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n{reverb_proxy}\n    <FilesMatch \\.php$>\n        SetHandler \"proxy:unix:{php_socket}|fcgi://localhost/\"\n    </FilesMatch>\n\n    <DirectoryMatch \"^/.*/\\.git/\">\n        Require all denied\n    </DirectoryMatch>\n</VirtualHost>\n",
         primary_host = primary_http_host(plan),
         root = plan.app_document_root,
     )
@@ -2981,6 +3447,16 @@ fn random_hex_secret() -> Result<String> {
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
+fn random_laravel_app_key() -> Result<String> {
+    use base64::Engine;
+
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).map_err(|source| Error::InstallVerificationFailed {
+        checks: format!("failed to generate Laravel APP_KEY: {source}"),
+    })?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
 fn config_content(plan: &plan::InstallPlan) -> String {
     let mut content = String::new();
     content.push_str(&format!("domain = \"{}\"\n", plan.domain));
@@ -3332,6 +3808,12 @@ fn setup_guide_content(
     if plan.redis_mode == "enable" {
         content.push_str("- Redis config: `/etc/redis/redis.conf`\n");
     }
+    for unit in app_runtime_unit_names(plan) {
+        content.push_str(&format!(
+            "- 앱 systemd unit: `{}`\n",
+            systemd_unit_path(unit)
+        ));
+    }
     content.push_str("\n## 계정과 DB\n\n");
     content.push_str(&format!("- Linux 사이트 계정: `{}`\n", plan.site_user));
     content.push_str(&format!("- DB 이름: `{}`\n", plan.database_name));
@@ -3368,6 +3850,24 @@ fn setup_guide_content(
     if plan.mail_mode == "local-postfix" {
         content.push_str("- Postfix 상태: `sudo systemctl status postfix`\n");
         content.push_str("- Postfix 재시작: `sudo systemctl restart postfix`\n");
+    }
+    for unit in app_runtime_unit_names(plan) {
+        if unit.ends_with(".timer") {
+            content.push_str(&format!(
+                "- 앱 타이머 상태: `sudo systemctl status {unit}`\n"
+            ));
+        } else if unit.ends_with("-scheduler.service") {
+            content.push_str(&format!(
+                "- 앱 스케줄러 수동 실행: `sudo systemctl start {unit}`\n"
+            ));
+        } else {
+            content.push_str(&format!(
+                "- 앱 서비스 상태: `sudo systemctl status {unit}`\n"
+            ));
+            content.push_str(&format!(
+                "- 앱 서비스 재시작: `sudo systemctl restart {unit}`\n"
+            ));
+        }
     }
     content.push_str("- SSL 자동갱신 타이머: `sudo systemctl status certbot.timer`\n");
     content.push_str("- SSL 갱신 테스트: `sudo certbot renew --dry-run`\n");
@@ -3483,6 +3983,9 @@ mod tests {
         );
         assert!(fs_root.join("etc/nginx/sites-available/g7.conf").exists());
         assert!(fs_root.join("etc/nginx/sites-enabled/g7.conf").exists());
+        let nginx_vhost = fs::read_to_string(fs_root.join("etc/nginx/sites-available/g7.conf"))?;
+        assert!(nginx_vhost.contains("proxy_pass http://127.0.0.1:8080;"));
+        assert!(nginx_vhost.contains("location /app"));
         assert!(
             fs_root
                 .join("etc/nginx/conf.d/g7-runtime-tuning.conf")
@@ -3497,6 +4000,27 @@ mod tests {
         assert!(fs_root.join("etc/mysql/conf.d/g7-installer.cnf").exists());
         assert!(fs_root.join("etc/g7-installer/secrets.toml").exists());
         assert!(fs_root.join("var/log/g7-installer/setup-guide.md").exists());
+        assert!(fs_root.join("home/g7/public_html/.env").exists());
+        assert!(fs_root.join("etc/systemd/system/g7-queue.service").exists());
+        assert!(
+            fs_root
+                .join("etc/systemd/system/g7-scheduler.service")
+                .exists()
+        );
+        assert!(
+            fs_root
+                .join("etc/systemd/system/g7-scheduler.timer")
+                .exists()
+        );
+        assert!(
+            fs_root
+                .join("etc/systemd/system/g7-reverb.service")
+                .exists()
+        );
+        let app_env = fs::read_to_string(fs_root.join("home/g7/public_html/.env"))?;
+        assert!(app_env.contains("BROADCAST_CONNECTION=reverb"));
+        assert!(app_env.contains("VITE_REVERB_HOST=example.com"));
+        assert!(app_env.contains("VITE_REVERB_PORT=443"));
         assert!(
             report
                 .owned_files
@@ -3575,6 +4099,27 @@ mod tests {
                 .vhost_checks
                 .iter()
                 .any(|check| { check.name == "http-smoke" && check.status == "pass" })
+        );
+        assert!(
+            report
+                .app_checks
+                .iter()
+                .any(|check| { check.name == "composer-install" && check.status == "pass" })
+        );
+        assert!(
+            report
+                .app_checks
+                .iter()
+                .any(|check| { check.name == "artisan-migrate" && check.status == "pass" })
+        );
+        assert!(report.app_checks.iter().any(|check| {
+            check.name == "app-service:g7-queue.service" && check.status == "pass"
+        }));
+        assert!(
+            report
+                .app_checks
+                .iter()
+                .any(|check| { check.name == "app-writable:storage" && check.status == "pass" })
         );
         assert!(report_json.contains("\"network_checks\""));
         assert!(report_json.contains("\"mail_checks\""));
@@ -3703,6 +4248,8 @@ mod tests {
         assert_eq!(report.app_url, "https://example.com/install");
         assert!(fs_root.join("etc/apache2/sites-available/g7.conf").exists());
         assert!(fs_root.join("etc/apache2/sites-enabled/g7.conf").exists());
+        let apache_vhost = fs::read_to_string(fs_root.join("etc/apache2/sites-available/g7.conf"))?;
+        assert!(apache_vhost.contains("ProxyPass /app ws://127.0.0.1:8080/app"));
         assert!(
             report
                 .service_checks
@@ -3765,6 +4312,60 @@ mod tests {
                 .iter()
                 .any(|check| { check.name == "smtp-relay" && check.status == "pass" })
         );
+
+        fs::remove_file(os_release_path)?;
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn install_laravel_runs_runtime_pipeline_and_services()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let os_release_path = write_temp_os_release()?;
+        let fs_root = create_temp_fs_root()?;
+        let options = super::plan::PlanOptions {
+            app_profile: "laravel".to_string(),
+            ..super::plan::PlanOptions::default()
+        };
+        let probe =
+            clean_root_probe_for_options(&os_release_path, &fs_root, "example.com", &options)?;
+        let paths = InstallPaths::with_root(&fs_root);
+
+        let report = run_with_probe_and_paths("example.com".to_string(), options, &probe, &paths)?;
+
+        assert_eq!(report.app_profile, "laravel");
+        assert_eq!(report.app_url, "https://example.com/");
+        assert!(fs_root.join("home/g7/public_html/.env").exists());
+        assert!(
+            fs_root
+                .join("etc/systemd/system/laravel-queue.service")
+                .exists()
+        );
+        assert!(
+            fs_root
+                .join("etc/systemd/system/laravel-scheduler.service")
+                .exists()
+        );
+        assert!(
+            fs_root
+                .join("etc/systemd/system/laravel-scheduler.timer")
+                .exists()
+        );
+        assert!(
+            report
+                .app_checks
+                .iter()
+                .any(|check| check.name == "composer-install" && check.status == "pass")
+        );
+        assert!(
+            report
+                .app_checks
+                .iter()
+                .any(|check| check.name == "artisan-migrate" && check.status == "pass")
+        );
+        assert!(report.app_checks.iter().any(|check| check.name
+            == "app-service:laravel-queue.service"
+            && check.status == "pass"));
 
         fs::remove_file(os_release_path)?;
         fs::remove_dir_all(fs_root)?;
@@ -4087,8 +4688,35 @@ mod tests {
             "gnuboard7" => {
                 runner.push_output(CommandOutput::success("cloned\n"));
                 runner.push_output(CommandOutput::success(""));
+                runner.push_output(CommandOutput::success("composer ok\n"));
+                runner.push_output(CommandOutput::success("npm install ok\n"));
+                runner.push_output(CommandOutput::success("npm build ok\n"));
+                runner.push_output(CommandOutput::success("key generated\n"));
+                runner.push_output(CommandOutput::success("storage linked\n"));
+                runner.push_output(CommandOutput::success("migrated\n"));
+                runner.push_output(CommandOutput::success("optimized\n"));
+                runner.push_output(CommandOutput::success("artisan about\n"));
+                runner.push_output(CommandOutput::success(""));
+                runner.push_output(CommandOutput::success(""));
+                runner.push_output(CommandOutput::success(""));
+                runner.push_output(CommandOutput::success(""));
             }
             "wordpress" => {
+                runner.push_output(CommandOutput::success(""));
+                runner.push_output(CommandOutput::success(""));
+                runner.push_output(CommandOutput::success(""));
+            }
+            "laravel" => {
+                runner.push_output(CommandOutput::success("cloned\n"));
+                runner.push_output(CommandOutput::success(""));
+                runner.push_output(CommandOutput::success("composer ok\n"));
+                runner.push_output(CommandOutput::success("npm install ok\n"));
+                runner.push_output(CommandOutput::success("npm build ok\n"));
+                runner.push_output(CommandOutput::success("key generated\n"));
+                runner.push_output(CommandOutput::success("storage linked\n"));
+                runner.push_output(CommandOutput::success("migrated\n"));
+                runner.push_output(CommandOutput::success("optimized\n"));
+                runner.push_output(CommandOutput::success("artisan about\n"));
                 runner.push_output(CommandOutput::success(""));
                 runner.push_output(CommandOutput::success(""));
                 runner.push_output(CommandOutput::success(""));
@@ -4097,6 +4725,9 @@ mod tests {
         }
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
+        for _writable_path in super::app_writable_paths(install_plan) {
+            runner.push_output(CommandOutput::success(""));
+        }
     }
 
     fn write_temp_os_release() -> std::result::Result<PathBuf, Box<dyn std::error::Error>> {

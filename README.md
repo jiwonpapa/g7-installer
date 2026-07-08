@@ -1,8 +1,8 @@
 # G7 Installer
 
-Ubuntu VPS에 `g7inst`를 설치하고 웹 마법사로 그누보드7/워드프레스용 서버 구성과 사이트 프로비저닝을 진행하는 도구입니다.
+Ubuntu VPS에 `g7inst`를 설치하고 웹 마법사로 그누보드7/워드프레스/라라벨용 서버 구성과 사이트 프로비저닝을 진행하는 도구입니다.
 
-> 현재 공개 릴리스는 `g7inst` 설치, 서버 점검, 웹 마법사, apt 패키지 설치, Nginx/Apache 도메인 연결 설정(vhost), PHP-FPM/DB 사양 튜닝, DB 앱 계정 생성, 웹서버별 Let's Encrypt 인증서 발급/갱신 검증, 그누보드7/WordPress 설치 링크, 상세 설정 안내서 저장까지 검증합니다.
+> 현재 공개 릴리스는 `g7inst` 설치, 서버 점검, 웹 마법사, apt 패키지 설치, Nginx/Apache 도메인 연결 설정(vhost), PHP-FPM/DB 사양 튜닝, DB 앱 계정 생성, 웹서버별 Let's Encrypt 인증서 발급/갱신 검증, 그누보드7/Laravel Composer·NPM·Artisan·queue·scheduler·Reverb 구성, WordPress 설치 링크, 상세 설정 안내서 저장까지 검증합니다.
 
 ## 무엇부터 보면 되나요?
 
@@ -127,7 +127,7 @@ http://127.0.0.1:7717/?token=...
 
 웹 UI에서 `사이트 계정`과 `사이트 계정 비밀번호`를 입력하면 설치기가 `/home/계정/public_html` 웹루트를 만들고 `계정:www-data` 소유권으로 맞춥니다. PHP-FPM pool은 이 사이트 계정으로 실행됩니다.
 
-설치가 끝나면 웹 UI 결과 리포트와 서버의 `/var/log/g7-installer/setup-guide.md`를 확인합니다. 이 Markdown 안내서에는 웹루트, PHP-FPM pool, DB 설정, 인증서, 주요 `systemctl` 명령, 비밀 파일 위치가 정리됩니다. PDF가 필요하면 브라우저 인쇄/PDF 저장으로 내보내는 방식을 권장합니다.
+설치가 끝나면 웹 UI 결과 리포트와 서버의 `/var/log/g7-installer/setup-guide.md`를 확인합니다. 이 Markdown 안내서에는 웹루트, PHP-FPM pool, DB 설정, 인증서, 앱 systemd unit, 주요 `systemctl` 명령, 비밀 파일 위치가 정리됩니다. PDF가 필요하면 브라우저 인쇄/PDF 저장으로 내보내는 방식을 권장합니다.
 
 ## 시작 스크립트
 

@@ -18,6 +18,7 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 axum = { version = "0.8", features = ["ws"] }
+base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
 getrandom = "0.3"
 miette = { version = "7", features = ["fancy"] }

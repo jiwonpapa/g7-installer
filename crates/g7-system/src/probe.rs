@@ -6,6 +6,7 @@ use crate::account::{
     chmod_recursive, chown_recursive, create_login_user, set_login_password, user_exists,
 };
 use crate::apache::{config_test as apache_config_test, enable_module as apache_enable_module};
+use crate::app::{artisan, composer_install, npm_install, npm_run_build};
 use crate::apt::{apt_add_repository, apt_candidate_available, apt_install, apt_purge, apt_update};
 use crate::archive::{copy_dir_contents, download_file, git_clone, unzip_archive};
 use crate::certbot::{certonly_webroot, renew_dry_run};
@@ -20,6 +21,7 @@ use crate::package::{PackageStatus, package_status};
 use crate::port::{PortStatus, tcp_port_status};
 use crate::privilege::{Privilege, current_privilege};
 use crate::service::{ServiceActivity, disable_now, enable_now, is_active, reload, restart};
+use crate::systemd::daemon_reload;
 use std::net::IpAddr;
 
 #[derive(Debug)]
@@ -152,6 +154,10 @@ impl<R: CommandRunner> SystemProbe<R> {
         enable_now(&self.runner, service).map_err(SystemProbeError::Command)
     }
 
+    pub fn systemd_daemon_reload(&self) -> Result<CommandOutput, SystemProbeError> {
+        daemon_reload(&self.runner).map_err(SystemProbeError::Command)
+    }
+
     pub fn disable_service_now(&self, service: &str) -> Result<CommandOutput, SystemProbeError> {
         disable_now(&self.runner, service).map_err(SystemProbeError::Command)
     }
@@ -208,6 +214,26 @@ impl<R: CommandRunner> SystemProbe<R> {
     ) -> Result<CommandOutput, SystemProbeError> {
         copy_dir_contents(&self.runner, source_dir, destination_dir)
             .map_err(SystemProbeError::Command)
+    }
+
+    pub fn composer_install(&self, cwd: &Path) -> Result<CommandOutput, SystemProbeError> {
+        composer_install(&self.runner, cwd).map_err(SystemProbeError::Command)
+    }
+
+    pub fn npm_install(&self, cwd: &Path) -> Result<CommandOutput, SystemProbeError> {
+        npm_install(&self.runner, cwd).map_err(SystemProbeError::Command)
+    }
+
+    pub fn npm_run_build(&self, cwd: &Path) -> Result<CommandOutput, SystemProbeError> {
+        npm_run_build(&self.runner, cwd).map_err(SystemProbeError::Command)
+    }
+
+    pub fn artisan<I, S>(&self, cwd: &Path, args: I) -> Result<CommandOutput, SystemProbeError>
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<std::ffi::OsString>,
+    {
+        artisan(&self.runner, cwd, args).map_err(SystemProbeError::Command)
     }
 
     pub fn user_exists(&self, user: &str) -> Result<bool, SystemProbeError> {
