@@ -34,6 +34,13 @@ pub fn unzip_archive<R: CommandRunner>(
     )
 }
 
+pub fn unzip_test<R: CommandRunner>(
+    runner: &R,
+    archive_path: &str,
+) -> Result<CommandOutput, CommandError> {
+    runner.run(&CommandSpec::new("unzip").arg("-tq").arg(archive_path))
+}
+
 pub fn git_clone<R: CommandRunner>(
     runner: &R,
     repo_url: &str,
@@ -52,6 +59,63 @@ pub fn git_clone<R: CommandRunner>(
     )
 }
 
+pub fn git_rev_parse_head<R: CommandRunner>(
+    runner: &R,
+    repo_dir: &str,
+) -> Result<CommandOutput, CommandError> {
+    runner.run(
+        &CommandSpec::new("git")
+            .arg("-C")
+            .arg(repo_dir)
+            .arg("rev-parse")
+            .arg("--verify")
+            .arg("HEAD"),
+    )
+}
+
+pub fn git_fsck_full<R: CommandRunner>(
+    runner: &R,
+    repo_dir: &str,
+) -> Result<CommandOutput, CommandError> {
+    runner.run(
+        &CommandSpec::new("git")
+            .arg("-C")
+            .arg(repo_dir)
+            .arg("fsck")
+            .arg("--full"),
+    )
+}
+
+pub fn git_diff_index_clean<R: CommandRunner>(
+    runner: &R,
+    repo_dir: &str,
+) -> Result<CommandOutput, CommandError> {
+    runner.run(
+        &CommandSpec::new("git")
+            .arg("-C")
+            .arg(repo_dir)
+            .arg("diff-index")
+            .arg("--quiet")
+            .arg("HEAD")
+            .arg("--"),
+    )
+}
+
+pub fn git_ls_files_error_unmatch<R: CommandRunner>(
+    runner: &R,
+    repo_dir: &str,
+    path: &str,
+) -> Result<CommandOutput, CommandError> {
+    runner.run(
+        &CommandSpec::new("git")
+            .arg("-C")
+            .arg(repo_dir)
+            .arg("ls-files")
+            .arg("--error-unmatch")
+            .arg(path),
+    )
+}
+
 pub fn copy_dir_contents<R: CommandRunner>(
     runner: &R,
     source_dir: &str,
@@ -65,9 +129,21 @@ pub fn copy_dir_contents<R: CommandRunner>(
     )
 }
 
+pub fn test_file<R: CommandRunner>(runner: &R, path: &str) -> Result<CommandOutput, CommandError> {
+    runner.run(&CommandSpec::new("test").arg("-f").arg(path))
+}
+
+pub fn test_dir<R: CommandRunner>(runner: &R, path: &str) -> Result<CommandOutput, CommandError> {
+    runner.run(&CommandSpec::new("test").arg("-d").arg(path))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{copy_dir_contents, download_file, git_clone, unzip_archive};
+    use super::{
+        copy_dir_contents, download_file, git_clone, git_diff_index_clean, git_fsck_full,
+        git_ls_files_error_unmatch, git_rev_parse_head, test_dir, test_file, unzip_archive,
+        unzip_test,
+    };
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
 
@@ -116,6 +192,22 @@ mod tests {
     }
 
     #[test]
+    fn unzip_test_is_shell_free() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success(""));
+
+        unzip_test(&runner, "/tmp/app.zip")?;
+        let recorded = runner.recorded();
+
+        assert_eq!(recorded[0].program, OsString::from("unzip"));
+        assert_eq!(
+            recorded[0].args,
+            vec![OsString::from("-tq"), OsString::from("/tmp/app.zip")]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn git_clone_is_shell_free() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let runner = FakeCommandRunner::default();
         runner.push_output(CommandOutput::success(""));
@@ -145,6 +237,64 @@ mod tests {
     }
 
     #[test]
+    fn git_validation_commands_are_shell_free()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        for _ in 0..4 {
+            runner.push_output(CommandOutput::success(""));
+        }
+
+        git_rev_parse_head(&runner, "/tmp/g7")?;
+        git_fsck_full(&runner, "/tmp/g7")?;
+        git_diff_index_clean(&runner, "/tmp/g7")?;
+        git_ls_files_error_unmatch(&runner, "/tmp/g7", "public/index.php")?;
+        let recorded = runner.recorded();
+
+        assert_eq!(recorded[0].program, OsString::from("git"));
+        assert_eq!(
+            recorded[0].args,
+            vec![
+                OsString::from("-C"),
+                OsString::from("/tmp/g7"),
+                OsString::from("rev-parse"),
+                OsString::from("--verify"),
+                OsString::from("HEAD"),
+            ]
+        );
+        assert_eq!(
+            recorded[1].args,
+            vec![
+                OsString::from("-C"),
+                OsString::from("/tmp/g7"),
+                OsString::from("fsck"),
+                OsString::from("--full"),
+            ]
+        );
+        assert_eq!(
+            recorded[2].args,
+            vec![
+                OsString::from("-C"),
+                OsString::from("/tmp/g7"),
+                OsString::from("diff-index"),
+                OsString::from("--quiet"),
+                OsString::from("HEAD"),
+                OsString::from("--"),
+            ]
+        );
+        assert_eq!(
+            recorded[3].args,
+            vec![
+                OsString::from("-C"),
+                OsString::from("/tmp/g7"),
+                OsString::from("ls-files"),
+                OsString::from("--error-unmatch"),
+                OsString::from("public/index.php"),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn copy_dir_contents_is_shell_free() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let runner = FakeCommandRunner::default();
         runner.push_output(CommandOutput::success(""));
@@ -160,6 +310,27 @@ mod tests {
                 OsString::from("/tmp/app/."),
                 OsString::from("/home/g7/public_html"),
             ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_path_commands_are_shell_free() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
+
+        test_file(&runner, "/srv/app/index.php")?;
+        test_dir(&runner, "/srv/app/wp-content")?;
+        let recorded = runner.recorded();
+
+        assert_eq!(
+            recorded[0].args,
+            vec![OsString::from("-f"), OsString::from("/srv/app/index.php")]
+        );
+        assert_eq!(
+            recorded[1].args,
+            vec![OsString::from("-d"), OsString::from("/srv/app/wp-content")]
         );
         Ok(())
     }

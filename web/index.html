@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>G7 설치 마법사</title>
     <link rel="icon" href="data:," />
+    <meta name="g7-promo-manifest" content="__G7INST_PROMO_MANIFEST_URL__" />
     <link rel="stylesheet" href="/app.css?v=__G7INST_ASSET_VERSION__" />
   </head>
   <body class="min-h-screen bg-base-200 text-base-content">
@@ -47,6 +48,7 @@
             <li class="step" data-progress="report"><span class="step-copy" data-ui-icon="file-check">결과</span></li>
             <li class="step" data-progress="provision"><span class="step-copy" data-ui-icon="scan-line">세부 설정</span></li>
           </ul>
+          <section id="promo-panel" class="promo-panel" aria-label="추천 도구" hidden></section>
         </nav>
 
         <section class="workspace-grid">
@@ -520,25 +522,46 @@
               <button id="install-button" class="btn btn-error icon-button" type="button" data-icon="package-plus">기본 구성 시작</button>
             </div>
             <div id="install-status" class="mt-5 hidden"></div>
-            <progress id="install-progress" class="progress progress-primary mt-5 w-full" value="0" max="100"></progress>
+            <section class="execution-board mt-5">
+              <div class="execution-main">
+                <div>
+                  <span class="execution-kicker">실시간 실행</span>
+                  <h3 id="activity-current-stage">대기 중</h3>
+                  <p id="activity-current-message">기본 구성을 시작하면 서버 작업 로그와 단계별 결과가 이곳에 표시됩니다.</p>
+                </div>
+                <div class="execution-progress-row">
+                  <progress id="install-progress" class="progress progress-primary w-full" value="0" max="100"></progress>
+                  <strong id="activity-progress-label">0%</strong>
+                </div>
+                <section class="live-log-card">
+                  <div>
+                    <h4>최근 로그</h4>
+                    <span id="activity-log-count">0줄</span>
+                  </div>
+                  <ol id="install-live-log" class="activity-log-list">
+                    <li>아직 실행 로그가 없습니다.</li>
+                  </ol>
+                </section>
+              </div>
+              <div class="execution-timeline" id="install-stages">
+                <div class="stage-row" data-stage="preflight"><span>서버 사전 점검</span><strong>대기</strong></div>
+                <div class="stage-row" data-stage="packages"><span>패키지 설치/검증</span><strong>대기</strong></div>
+                <div class="stage-row" data-stage="site"><span>사이트 계정/웹루트</span><strong>대기</strong></div>
+                <div class="stage-row" data-stage="vhost"><span>웹서버 vhost/HTTP 검증</span><strong>대기</strong></div>
+                <div class="stage-row" data-stage="runtime"><span>PHP-FPM/런타임 튜닝</span><strong>대기</strong></div>
+                <div class="stage-row" data-stage="database"><span>DB 튜닝/계정 생성</span><strong>대기</strong></div>
+                <div class="stage-row" data-stage="ssl"><span>SSL 인증서/HTTPS 검증</span><strong>대기</strong></div>
+                <div class="stage-row" data-stage="app"><span>웹앱 파일 배치</span><strong>대기</strong></div>
+                <div class="stage-row" data-stage="report"><span>리포트 생성</span><strong>대기</strong></div>
+              </div>
+            </section>
             <section class="mt-5">
               <h3 class="text-lg font-semibold">패키지 진행 상황</h3>
-              <p class="mt-1 text-sm text-base-content/60">설치 계획에서 확인한 apt 패키지를 하나씩 표시합니다.</p>
+              <p class="mt-1 text-sm text-base-content/60">설치 계획에서 확인한 apt 패키지를 데스크톱은 2열, 모바일은 1열로 표시합니다.</p>
               <div id="package-progress-list" class="package-progress-list mt-4">
                 <div class="empty-state">설치 사양 확정 후 패키지 목록이 표시됩니다.</div>
               </div>
             </section>
-            <div class="mt-5 space-y-3" id="install-stages">
-              <div class="stage-row" data-stage="preflight"><span>서버 사전 점검</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="packages"><span>패키지 설치/검증</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="site"><span>사이트 계정/웹루트</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="vhost"><span>웹서버 vhost/HTTP 검증</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="runtime"><span>PHP-FPM/런타임 튜닝</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="database"><span>DB 튜닝/계정 생성</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="ssl"><span>SSL 인증서/HTTPS 검증</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="app"><span>웹앱 파일 배치</span><strong>대기</strong></div>
-              <div class="stage-row" data-stage="report"><span>리포트 생성</span><strong>대기</strong></div>
-            </div>
             <section class="recovery-panel mt-5" data-recovery-panel hidden>
               <div>
                 <h3>

@@ -35,6 +35,8 @@ pub const DEFAULT_BIND: &str = "127.0.0.1:7717";
 const INDEX_HTML: &str = include_str!("../../../web/index.html");
 const APP_JS: &str = include_str!("../../../web/app.js");
 const APP_CSS: &str = include_str!("../../../web/dist/app.css");
+const PROMO_JSON: &str = include_str!("../../../web/promo.sample.json");
+const DEFAULT_PROMO_MANIFEST_URL: &str = "/promo.json";
 const ASSET_VERSION: &str = match option_env!("G7_ASSET_VERSION") {
     Some(version) => version,
     None => env!("CARGO_PKG_VERSION"),
@@ -315,6 +317,7 @@ struct InstallApiReport {
     phase: String,
     state_path: String,
     owned_files_path: String,
+    owned_files: Vec<String>,
     completed_steps: Vec<String>,
     safety_checks: Vec<InstallApiCheck>,
     preinstall_package_checks: Vec<InstallApiCheck>,
@@ -433,6 +436,7 @@ pub async fn run(config: WebSetupConfig) -> Result<()> {
         .route("/setup/provision", get(index))
         .route("/app.js", get(app_js))
         .route("/app.css", get(app_css))
+        .route("/promo.json", get(promo_json))
         .route("/api/bootstrap", get(bootstrap))
         .route("/api/auth/logout", post(api_logout))
         .route("/api/events", get(api_events))
@@ -581,7 +585,27 @@ async fn index(
 }
 
 fn index_html() -> String {
-    INDEX_HTML.replace("__G7INST_ASSET_VERSION__", ASSET_VERSION)
+    INDEX_HTML
+        .replace("__G7INST_ASSET_VERSION__", ASSET_VERSION)
+        .replace(
+            "__G7INST_PROMO_MANIFEST_URL__",
+            &html_attr_escape(&promo_manifest_url()),
+        )
+}
+
+fn promo_manifest_url() -> String {
+    std::env::var("G7_PROMO_MANIFEST_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_PROMO_MANIFEST_URL.to_string())
+}
+
+fn html_attr_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 async fn app_js(
@@ -614,6 +638,21 @@ async fn app_css(
             (header::CACHE_CONTROL, "no-store, no-cache, max-age=0"),
         ],
         APP_CSS,
+    ))
+}
+
+async fn promo_json(
+    axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+) -> std::result::Result<impl IntoResponse, ApiError> {
+    require_allowed_client_ip(&state, peer.ip())?;
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/json; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store, no-cache, max-age=0"),
+        ],
+        PROMO_JSON,
     ))
 }
 
@@ -1216,18 +1255,46 @@ fn provision_app(report: &serde_json::Value) -> Vec<InstallApiCheck> {
         let mut checks = vec![
             file_check("app-artisan", &format!("{web_root}/artisan")),
             dir_check("app-storage", &format!("{web_root}/storage")),
+            file_check(
+                "g7-core-template-engine",
+                &format!("{web_root}/public/build/core/template-engine.min.js"),
+            ),
         ];
         checks.extend(app_permission_checks(
             &web_root,
             &site_user,
             &["storage", "bootstrap/cache"],
         ));
+        let install_lock = format!("{web_root}/storage/app/g7_installed");
+        checks.push(InstallApiCheck {
+            name: "g7-install-lock".to_string(),
+            status: if path_is_file(&install_lock) {
+                "pass".to_string()
+            } else {
+                "manual".to_string()
+            },
+            message: if path_is_file(&install_lock) {
+                format!("{install_lock} 파일을 확인했습니다. 브라우저 설치가 완료된 상태입니다.")
+            } else {
+                format!("{install_lock} 파일이 없습니다. 브라우저 /install 완료 전이면 정상이고, 완료 후라면 설치 잠금을 확인하세요.")
+            },
+        });
+        if !site_user.is_empty() {
+            checks.push(run_command_check(
+                "g7-artisan-about",
+                "runuser",
+                &["-u", &site_user, "--", "php", "artisan", "about"],
+                Some(&web_root),
+            ));
+        }
+        checks.push(g7_ckeditor_upload_limit_check(&format!(
+            "{web_root}/storage/app/plugins/sirsoft-ckeditor5/settings/setting.json"
+        )));
         checks.push(InstallApiCheck {
             name: "app-browser-install".to_string(),
             status: "manual".to_string(),
-            message:
-                "그누보드7은 브라우저 /install 완료 후 artisan migrate/서비스 시작을 확인하세요."
-                    .to_string(),
+            message: "그누보드7은 브라우저 /install 완료 후 /, /login, /admin 접속을 확인하세요."
+                .to_string(),
         });
         return checks;
     }
@@ -1339,6 +1406,53 @@ fn app_permission_checks(
     }
 
     checks
+}
+
+fn g7_ckeditor_upload_limit_check(path: &str) -> InstallApiCheck {
+    let content = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(_) => {
+            return InstallApiCheck {
+                name: "g7-ckeditor-upload-limit".to_string(),
+                status: "manual".to_string(),
+                message: format!(
+                    "{path} 파일이 없습니다. CKEditor5 플러그인을 설치한 뒤 imageMaxSizeMb 값을 확인하세요."
+                ),
+            };
+        }
+    };
+
+    let limit = serde_json::from_str::<serde_json::Value>(&content)
+        .ok()
+        .and_then(|value| value.get("imageMaxSizeMb").cloned())
+        .and_then(|value| {
+            value
+                .as_u64()
+                .or_else(|| value.as_str().and_then(|text| text.parse::<u64>().ok()))
+        });
+
+    match limit {
+        Some(value) if value > 2 => InstallApiCheck {
+            name: "g7-ckeditor-upload-limit".to_string(),
+            status: "pass".to_string(),
+            message: format!(
+                "CKEditor5 imageMaxSizeMb={value}MB 입니다. PHP/Nginx 한도와 함께 확인하세요."
+            ),
+        },
+        Some(value) => InstallApiCheck {
+            name: "g7-ckeditor-upload-limit".to_string(),
+            status: "manual".to_string(),
+            message: format!(
+                "CKEditor5 imageMaxSizeMb={value}MB 입니다. 큰 이미지 업로드가 필요하면 플러그인 설정을 조정하세요."
+            ),
+        },
+        None => InstallApiCheck {
+            name: "g7-ckeditor-upload-limit".to_string(),
+            status: "manual".to_string(),
+            message: "CKEditor5 설정 파일은 있으나 imageMaxSizeMb 값을 읽지 못했습니다."
+                .to_string(),
+        },
+    }
 }
 
 fn file_check(name: &str, path: &str) -> InstallApiCheck {
@@ -1856,6 +1970,7 @@ fn install_to_api(report: install::InstallReport, database_version: String) -> I
         phase: report.phase,
         state_path: report.state_path.display().to_string(),
         owned_files_path: report.owned_files_path.display().to_string(),
+        owned_files: report.owned_files,
         completed_steps: report.completed_steps,
         safety_checks: install_checks_to_api(report.safety_checks),
         preinstall_package_checks: install_checks_to_api(report.preinstall_package_checks),
@@ -2216,7 +2331,7 @@ mod tests {
         api_rollback, api_status, app_css, app_js, bootstrap, browser_addr_for, create_session,
         doctor_status_label, doctor_to_api, ensure_remote_binding_is_explicit,
         failed_doctor_details, index, install_checks_to_api, install_to_api, lock_client_ip,
-        options_from_request, parse_bind, remove_session, require_allowed_client_ip,
+        options_from_request, parse_bind, promo_json, remove_session, require_allowed_client_ip,
         require_authenticated_session, require_csrf, require_session, require_session_id,
         rollback_to_api, secure_eq, secure_token, session_cookie,
     };
@@ -2641,6 +2756,10 @@ mod tests {
         );
         assert_eq!(install_api.package_checks[0].name, "nginx");
         assert_eq!(install_api.state_path, "/var/lib/g7-installer/state.json");
+        assert_eq!(
+            install_api.owned_files,
+            vec!["/etc/g7-installer/config.toml".to_string()]
+        );
 
         let checks = install_checks_to_api(vec![install::InstallCheck {
             name: "80".to_string(),
@@ -2723,7 +2842,7 @@ mod tests {
             Some(&HeaderValue::from_static("no-store, no-cache, max-age=0"))
         );
 
-        let css = app_css(axum::extract::State(state), peer())
+        let css = app_css(axum::extract::State(state.clone()), peer())
             .await
             .expect("css should be served")
             .into_response();
@@ -2734,6 +2853,20 @@ mod tests {
         );
         assert_eq!(
             css.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("no-store, no-cache, max-age=0"))
+        );
+
+        let promo = promo_json(axum::extract::State(state), peer())
+            .await
+            .expect("promo json should be served")
+            .into_response();
+        assert_eq!(promo.status(), StatusCode::OK);
+        assert_eq!(
+            promo.headers().get(header::CONTENT_TYPE),
+            Some(&HeaderValue::from_static("application/json; charset=utf-8"))
+        );
+        assert_eq!(
+            promo.headers().get(header::CACHE_CONTROL),
             Some(&HeaderValue::from_static("no-store, no-cache, max-age=0"))
         );
         Ok(())

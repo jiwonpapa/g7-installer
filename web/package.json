@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tailwindcss -i ./input.css -o ./dist/app.css --minify"
+    "build": "node --max-old-space-size=256 ./node_modules/.bin/tailwindcss -i ./input.css -o ./dist/app.css --minify"
   },
   "devDependencies": {
     "daisyui": "^4.12.24",

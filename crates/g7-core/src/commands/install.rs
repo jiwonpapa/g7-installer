@@ -28,7 +28,7 @@ use crate::{Error, Result};
 use g7_state::owned_files::{OWNED_FILES_PATH, OwnedFiles, write_owned_files};
 use g7_state::state::{InstallerPhase, InstallerState, STATE_PATH, write_state_file};
 use g7_system::SystemProbe;
-use g7_system::command::CommandRunner;
+use g7_system::command::{CommandRunner, CommandSpec};
 use g7_system::database::DatabaseEngine;
 use g7_system::package::PackageStatus;
 use g7_system::port::PortStatus;
@@ -47,7 +47,7 @@ const PHP_READY_FILENAME: &str = "g7inst-ready.php";
 const SECRETS_PATH: &str = "/etc/g7-installer/secrets.toml";
 const SETUP_GUIDE_PATH: &str = "/var/log/g7-installer/setup-guide.md";
 const GNUBOARD7_REPO_URL: &str = "https://github.com/gnuboard/g7.git";
-const GNUBOARD7_RELEASE_REF: &str = "7.0.0";
+const GNUBOARD7_RELEASE_REF: &str = "7.0.1";
 const LARAVEL_REPO_URL: &str = "https://github.com/laravel/laravel.git";
 const LARAVEL_RELEASE_REF: &str = "12.x";
 const APP_SOURCE_DIR: &str = "/var/lib/g7-installer/app-source";
@@ -60,6 +60,15 @@ const WORDPRESS_SOURCE_DIR: &str = "/var/lib/g7-installer/app-source/wordpress-e
 const CERTBOT_HTTP01_CHALLENGE_DIR: &str = ".well-known/acme-challenge";
 const CERTBOT_HTTP01_SMOKE_FILENAME: &str = "g7inst-certbot-http01-smoke.txt";
 const CERTBOT_HTTP01_SMOKE_CONTENT: &str = "g7-installer-certbot-http01-ok\n";
+const GNUBOARD7_REQUIRED_FILES: &[&str] = &[
+    "artisan",
+    "composer.json",
+    "public/index.php",
+    "public/build/core/template-engine.min.js",
+];
+const LARAVEL_REQUIRED_FILES: &[&str] = &["artisan", "composer.json", "public/index.php"];
+const WORDPRESS_REQUIRED_FILES: &[&str] = &["wp-settings.php", "wp-admin/install.php"];
+const WORDPRESS_REQUIRED_DIRS: &[&str] = &["wp-content"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallReport {
@@ -503,8 +512,22 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     match apply_runtime_phase(probe, paths, &install_plan, &mut owned_file_list) {
         Ok(runtime_checks) => {
             apply_summary.runtime_checks = runtime_checks;
+            if let Some(message) = blocking_runtime_failure(&apply_summary.runtime_checks) {
+                state.completed_steps = completed_steps.clone();
+                persist_progress(
+                    &progress,
+                    &mut owned_files,
+                    &owned_file_list,
+                    &state,
+                    &install_plan,
+                    &apply_summary,
+                    Some(&message),
+                )?;
+                return Err(Error::InstallVerificationFailed { checks: message });
+            }
             completed_steps.push("php-fpm-config-written".to_string());
             completed_steps.push("php-runtime-config-written".to_string());
+            completed_steps.push("php-runtime-diagnostics-passed".to_string());
             completed_steps.push(format!(
                 "{}-runtime-config-written",
                 web_service_name(&install_plan)
@@ -1452,7 +1475,307 @@ fn apply_runtime_phase<R: CommandRunner>(
         ));
     }
 
+    checks.extend(php_runtime_diagnostic_checks(probe, paths, plan, &sizing));
+
     Ok(checks)
+}
+
+fn php_runtime_diagnostic_checks<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+    sizing: &plan::ResolvedMemorySizing,
+) -> Vec<InstallCheck> {
+    let mut checks = Vec::new();
+    let output = match probe.runner().run(&php_runtime_probe_command(plan)) {
+        Ok(output) => output,
+        Err(error) => {
+            checks.push(InstallCheck::fail(
+                "php-runtime-probe",
+                format!("PHP 런타임 정보를 실행하지 못했습니다: {error}"),
+            ));
+            return checks;
+        }
+    };
+
+    if output.status != 0 {
+        checks.push(InstallCheck::fail(
+            "php-runtime-probe",
+            format!(
+                "PHP 런타임 정보 수집 실패: status={} stdout={} stderr={}",
+                output.status,
+                short_text(&output.stdout),
+                short_text(&output.stderr)
+            ),
+        ));
+        return checks;
+    }
+
+    let facts = parse_key_value_lines(&output.stdout);
+    checks.push(InstallCheck::pass(
+        "phpinfo-summary",
+        format!(
+            "FPM ini 기준 PHP 정보를 파싱했습니다: PHP {}, SAPI={}, ini={}, scan_dir={}.",
+            fact(&facts, "php_version"),
+            fact(&facts, "sapi"),
+            fact(&facts, "loaded_ini"),
+            fact(&facts, "scan_dir")
+        ),
+    ));
+
+    let limits = [
+        ("memory_limit", sizing.php_memory_limit.as_str()),
+        ("upload_max_filesize", sizing.php_upload_limit.as_str()),
+        ("post_max_size", sizing.php_upload_limit.as_str()),
+        (
+            "opcache.memory_consumption",
+            sizing.opcache_memory.trim_end_matches('M'),
+        ),
+    ];
+    let mismatches = limits
+        .iter()
+        .filter_map(|(key, expected)| {
+            let actual = fact(&facts, key);
+            if normalize_php_value(&actual) == normalize_php_value(expected) {
+                None
+            } else {
+                Some(format!("{key}: expected {expected}, actual {actual}"))
+            }
+        })
+        .collect::<Vec<_>>();
+    checks.push(if mismatches.is_empty() {
+        InstallCheck::pass(
+            "php-runtime-limits",
+            format!(
+                "PHP 한도 적용 확인: memory_limit={}, upload_max_filesize={}, post_max_size={}, max_execution_time={}, max_input_vars={}, opcache.memory_consumption={}.",
+                fact(&facts, "memory_limit"),
+                fact(&facts, "upload_max_filesize"),
+                fact(&facts, "post_max_size"),
+                fact(&facts, "max_execution_time"),
+                fact(&facts, "max_input_vars"),
+                fact(&facts, "opcache.memory_consumption")
+            ),
+        )
+    } else {
+        InstallCheck::fail(
+            "php-runtime-limits",
+            format!("PHP 설정값이 설치 계획과 다릅니다: {}.", mismatches.join("; ")),
+        )
+    });
+
+    let loaded_extensions = fact(&facts, "extensions")
+        .split(',')
+        .map(|extension| extension.trim().to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    for extension in required_php_extensions(plan) {
+        let present = loaded_extensions.iter().any(|loaded| loaded == extension);
+        checks.push(if present {
+            InstallCheck::pass(
+                format!("php-extension:{extension}"),
+                format!("PHP 확장 {extension} 로드 확인."),
+            )
+        } else {
+            InstallCheck::fail(
+                format!("php-extension:{extension}"),
+                format!("PHP 확장 {extension} 이 로드되지 않았습니다. 앱 설치 전에 패키지/ini 설정을 확인하세요."),
+            )
+        });
+    }
+
+    checks.push(php_fpm_pool_value_check(paths, plan, sizing));
+    checks
+}
+
+fn php_runtime_probe_command(plan: &plan::InstallPlan) -> CommandSpec {
+    CommandSpec::new("env")
+        .arg(format!(
+            "PHP_INI_SCAN_DIR=/etc/php/{}/fpm/conf.d",
+            plan.php_version
+        ))
+        .arg(format!("php{}", plan.php_version))
+        .arg("-c")
+        .arg(format!("/etc/php/{}/fpm/php.ini", plan.php_version))
+        .arg("-r")
+        .arg(php_runtime_probe_script())
+}
+
+fn php_runtime_probe_script() -> &'static str {
+    r#"
+echo "php_version=".PHP_VERSION."\n";
+echo "sapi=".PHP_SAPI."\n";
+echo "loaded_ini=".(php_ini_loaded_file() ?: "-")."\n";
+echo "scan_dir=".(getenv("PHP_INI_SCAN_DIR") ?: "-")."\n";
+foreach (["memory_limit","upload_max_filesize","post_max_size","max_execution_time","max_input_vars","date.timezone","opcache.enable","opcache.memory_consumption"] as $key) {
+    $value = ini_get($key);
+    echo $key."=".($value === false ? "-" : $value)."\n";
+}
+echo "extensions=".implode(",", array_map("strtolower", get_loaded_extensions()))."\n";
+"#
+}
+
+fn php_fpm_pool_value_check(
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+    sizing: &plan::ResolvedMemorySizing,
+) -> InstallCheck {
+    let path = php_pool_path(plan);
+    let content = match fs::read_to_string(paths.resolve(&path)) {
+        Ok(content) => content,
+        Err(error) => {
+            return InstallCheck::fail(
+                "php-fpm-pool-values",
+                format!("{path} 파일을 읽지 못했습니다: {error}"),
+            );
+        }
+    };
+
+    let expected = [
+        ("user", plan.site_user.clone()),
+        ("group", "www-data".to_string()),
+        ("pm", "dynamic".to_string()),
+        ("pm.max_children", sizing.php_max_children.to_string()),
+        ("pm.max_requests", "500".to_string()),
+    ];
+    let mismatches = expected
+        .iter()
+        .filter_map(|(key, expected)| {
+            let actual = pool_value(&content, key).unwrap_or_else(|| "-".to_string());
+            if actual == *expected {
+                None
+            } else {
+                Some(format!("{key}: expected {expected}, actual {actual}"))
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if mismatches.is_empty() {
+        InstallCheck::pass(
+            "php-fpm-pool-values",
+            format!(
+                "PHP-FPM pool 확인: user={}, group=www-data, pm=dynamic, max_children={}, max_requests=500.",
+                plan.site_user, sizing.php_max_children
+            ),
+        )
+    } else {
+        InstallCheck::fail(
+            "php-fpm-pool-values",
+            format!(
+                "PHP-FPM pool 설정값이 설치 계획과 다릅니다: {}.",
+                mismatches.join("; ")
+            ),
+        )
+    }
+}
+
+fn required_php_extensions(plan: &plan::InstallPlan) -> Vec<&'static str> {
+    let mut extensions = match plan.app_profile.as_str() {
+        "wordpress" => vec![
+            "curl", "fileinfo", "gd", "intl", "json", "mbstring", "mysqli", "openssl", "xml", "zip",
+        ],
+        "laravel" => vec![
+            "bcmath",
+            "curl",
+            "ctype",
+            "fileinfo",
+            "json",
+            "mbstring",
+            "openssl",
+            "pdo_mysql",
+            "tokenizer",
+            "xml",
+            "zip",
+        ],
+        _ => vec![
+            "bcmath",
+            "curl",
+            "fileinfo",
+            "gd",
+            "intl",
+            "json",
+            "mbstring",
+            "mysqli",
+            "openssl",
+            "pdo_mysql",
+            "xml",
+            "zip",
+        ],
+    };
+    if plan.redis_mode == "enable" {
+        extensions.push("redis");
+    }
+    extensions.sort_unstable();
+    extensions.dedup();
+    extensions
+}
+
+fn parse_key_value_lines(output: &str) -> Vec<(String, String)> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            Some((key.trim().to_string(), value.trim().to_string()))
+        })
+        .collect()
+}
+
+fn fact(facts: &[(String, String)], key: &str) -> String {
+    facts
+        .iter()
+        .find(|(name, _value)| name == key)
+        .map(|(_name, value)| value.clone())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn normalize_php_value(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn short_text(value: &str) -> String {
+    let text = value.trim().replace('\n', " ");
+    if text.chars().count() > 240 {
+        format!("{}...", text.chars().take(240).collect::<String>())
+    } else {
+        text
+    }
+}
+
+fn pool_value(content: &str, key: &str) -> Option<String> {
+    content.lines().find_map(|line| {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with(';') || line.starts_with('[') {
+            return None;
+        }
+        let (name, value) = line.split_once('=')?;
+        if name.trim() == key {
+            Some(value.trim().to_string())
+        } else {
+            None
+        }
+    })
+}
+
+fn blocking_runtime_failure(checks: &[InstallCheck]) -> Option<String> {
+    let failures = checks
+        .iter()
+        .filter(|check| {
+            check.status == "fail"
+                && (check.name == "php-runtime-probe"
+                    || check.name == "php-runtime-limits"
+                    || check.name == "php-fpm-pool-values"
+                    || check.name.starts_with("php-extension:"))
+        })
+        .map(|check| format!("{} - {}", check.name, check.message))
+        .collect::<Vec<_>>();
+
+    if failures.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "PHP 런타임 진단 실패. 웹앱 설치를 시작하지 않습니다: {}",
+            failures.join("; ")
+        ))
+    }
 }
 
 fn apply_database_phase<R: CommandRunner>(
@@ -1901,6 +2224,187 @@ fn apply_app_env_permissions<R: CommandRunner>(
     )))
 }
 
+fn verify_git_checkout<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    app_key: &str,
+    source_dir: &str,
+    required_files: &[&str],
+) -> Result<Vec<InstallCheck>> {
+    let mut checks = Vec::new();
+    let error_step = git_verify_error_step(app_key);
+    let head_output = probe.git_rev_parse_head(source_dir).map_err(|err| {
+        command_error(
+            error_step,
+            format!("git -C {source_dir} rev-parse --verify HEAD"),
+            err,
+        )
+    })?;
+    let commit = head_output.stdout.trim().to_string();
+    require_success(
+        error_step,
+        format!("git -C {source_dir} rev-parse --verify HEAD"),
+        head_output,
+    )?;
+    checks.push(InstallCheck::pass(
+        format!("{app_key}-git-head"),
+        if commit.is_empty() {
+            format!("{app_key} Git HEAD를 확인했습니다.")
+        } else {
+            format!("{app_key} Git HEAD `{commit}`를 확인했습니다.")
+        },
+    ));
+
+    let output = probe.git_fsck_full(source_dir).map_err(|err| {
+        command_error(error_step, format!("git -C {source_dir} fsck --full"), err)
+    })?;
+    require_success(
+        error_step,
+        format!("git -C {source_dir} fsck --full"),
+        output,
+    )?;
+    checks.push(InstallCheck::pass(
+        format!("{app_key}-git-fsck"),
+        format!("{app_key} Git object 무결성을 확인했습니다."),
+    ));
+
+    let output = probe.git_diff_index_clean(source_dir).map_err(|err| {
+        command_error(
+            error_step,
+            format!("git -C {source_dir} diff-index --quiet HEAD --"),
+            err,
+        )
+    })?;
+    require_success(
+        error_step,
+        format!("git -C {source_dir} diff-index --quiet HEAD --"),
+        output,
+    )?;
+    checks.push(InstallCheck::pass(
+        format!("{app_key}-git-clean"),
+        format!("{app_key} checkout 작업트리가 HEAD와 일치합니다."),
+    ));
+
+    for required_file in required_files {
+        let output = probe
+            .git_ls_files_error_unmatch(source_dir, required_file)
+            .map_err(|err| {
+                command_error(
+                    error_step,
+                    format!("git -C {source_dir} ls-files --error-unmatch {required_file}"),
+                    err,
+                )
+            })?;
+        require_success(
+            error_step,
+            format!("git -C {source_dir} ls-files --error-unmatch {required_file}"),
+            output,
+        )?;
+        checks.push(InstallCheck::pass(
+            format!("{app_key}-git-tracked-{}", check_key(required_file)),
+            format!("{app_key} Git index에서 `{required_file}` 파일을 확인했습니다."),
+        ));
+    }
+
+    Ok(checks)
+}
+
+fn verify_zip_archive<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    app_key: &str,
+    archive_path: &str,
+) -> Result<InstallCheck> {
+    let error_step = archive_verify_error_step(app_key);
+    let output = probe
+        .unzip_test(archive_path)
+        .map_err(|err| command_error(error_step, format!("unzip -tq {archive_path}"), err))?;
+    require_success(error_step, format!("unzip -tq {archive_path}"), output)?;
+    Ok(InstallCheck::pass(
+        format!("{app_key}-archive-test"),
+        format!("{app_key} zip archive 무결성을 확인했습니다."),
+    ))
+}
+
+fn verify_required_app_paths<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    check_prefix: &str,
+    base_dir: &str,
+    files: &[&str],
+    dirs: &[&str],
+) -> Result<Vec<InstallCheck>> {
+    let mut checks = Vec::new();
+    let error_step = app_path_verify_error_step(check_prefix);
+    for file in files {
+        let target = join_unix_path(base_dir, file);
+        let output = probe
+            .test_file(&target)
+            .map_err(|err| command_error(error_step, format!("test -f {target}"), err))?;
+        require_success(error_step, format!("test -f {target}"), output)?;
+        checks.push(InstallCheck::pass(
+            format!("{check_prefix}-file-{}", check_key(file)),
+            format!("`{target}` 파일을 확인했습니다."),
+        ));
+    }
+    for dir in dirs {
+        let target = join_unix_path(base_dir, dir);
+        let output = probe
+            .test_dir(&target)
+            .map_err(|err| command_error(error_step, format!("test -d {target}"), err))?;
+        require_success(error_step, format!("test -d {target}"), output)?;
+        checks.push(InstallCheck::pass(
+            format!("{check_prefix}-dir-{}", check_key(dir)),
+            format!("`{target}` 디렉터리를 확인했습니다."),
+        ));
+    }
+    Ok(checks)
+}
+
+fn join_unix_path(base_dir: &str, relative: &str) -> String {
+    format!(
+        "{}/{}",
+        base_dir.trim_end_matches('/'),
+        relative.trim_start_matches('/')
+    )
+}
+
+fn check_key(path: &str) -> String {
+    path.chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+fn git_verify_error_step(app_key: &str) -> &'static str {
+    match app_key {
+        "gnuboard7" => "gnuboard7-source-verify",
+        "laravel" => "laravel-source-verify",
+        _ => "app-source-verify",
+    }
+}
+
+fn archive_verify_error_step(app_key: &str) -> &'static str {
+    match app_key {
+        "wordpress" => "wordpress-archive-verify",
+        _ => "app-archive-verify",
+    }
+}
+
+fn app_path_verify_error_step(check_prefix: &str) -> &'static str {
+    if check_prefix.starts_with("gnuboard7") {
+        "gnuboard7-path-verify"
+    } else if check_prefix.starts_with("laravel") {
+        "laravel-path-verify"
+    } else if check_prefix.starts_with("wordpress") {
+        "wordpress-path-verify"
+    } else {
+        "app-path-verify"
+    }
+}
+
 fn install_gnuboard7_app<R: CommandRunner>(
     probe: &SystemProbe<R>,
     paths: &InstallPaths,
@@ -1927,6 +2431,12 @@ fn install_gnuboard7_app<R: CommandRunner>(
         ),
         output,
     )?;
+    let source_checks = verify_git_checkout(
+        probe,
+        "gnuboard7",
+        GNUBOARD7_SOURCE_DIR,
+        GNUBOARD7_REQUIRED_FILES,
+    )?;
 
     let output = probe
         .copy_dir_contents(GNUBOARD7_SOURCE_DIR, &plan.web_root)
@@ -1941,6 +2451,13 @@ fn install_gnuboard7_app<R: CommandRunner>(
         "gnuboard7-copy",
         format!("cp -a {GNUBOARD7_SOURCE_DIR}/. {}", plan.web_root),
         output,
+    )?;
+    let deployed_checks = verify_required_app_paths(
+        probe,
+        "gnuboard7-deployed",
+        &plan.web_root,
+        GNUBOARD7_REQUIRED_FILES,
+        &[],
     )?;
 
     let db_password =
@@ -1969,6 +2486,8 @@ fn install_gnuboard7_app<R: CommandRunner>(
             ),
         ),
     ];
+    checks.extend(source_checks);
+    checks.extend(deployed_checks);
     checks.extend(apply_app_permissions(probe, paths, plan, owned)?);
     checks.extend(configure_laravel_runtime(
         probe,
@@ -2016,6 +2535,8 @@ fn install_laravel_app<R: CommandRunner>(
         ),
         output,
     )?;
+    let source_checks =
+        verify_git_checkout(probe, "laravel", LARAVEL_SOURCE_DIR, LARAVEL_REQUIRED_FILES)?;
 
     let output = probe
         .copy_dir_contents(LARAVEL_SOURCE_DIR, &plan.web_root)
@@ -2030,6 +2551,13 @@ fn install_laravel_app<R: CommandRunner>(
         "laravel-copy",
         format!("cp -a {LARAVEL_SOURCE_DIR}/. {}", plan.web_root),
         output,
+    )?;
+    let deployed_checks = verify_required_app_paths(
+        probe,
+        "laravel-deployed",
+        &plan.web_root,
+        LARAVEL_REQUIRED_FILES,
+        &[],
     )?;
 
     let db_password =
@@ -2058,6 +2586,8 @@ fn install_laravel_app<R: CommandRunner>(
             ),
         ),
     ];
+    checks.extend(source_checks);
+    checks.extend(deployed_checks);
     checks.extend(apply_app_permissions(probe, paths, plan, owned)?);
     checks.extend(configure_laravel_runtime(
         probe,
@@ -2096,6 +2626,7 @@ fn install_wordpress_app<R: CommandRunner>(
         format!("curl -fsSL -o {WORDPRESS_ARCHIVE_PATH} {WORDPRESS_DOWNLOAD_URL}"),
         output,
     )?;
+    let archive_check = verify_zip_archive(probe, "wordpress", WORDPRESS_ARCHIVE_PATH)?;
 
     let output = probe
         .unzip_archive(WORDPRESS_ARCHIVE_PATH, WORDPRESS_EXTRACT_DIR)
@@ -2110,6 +2641,13 @@ fn install_wordpress_app<R: CommandRunner>(
         "wordpress-unzip",
         format!("unzip -q {WORDPRESS_ARCHIVE_PATH} -d {WORDPRESS_EXTRACT_DIR}"),
         output,
+    )?;
+    let source_checks = verify_required_app_paths(
+        probe,
+        "wordpress-source",
+        WORDPRESS_SOURCE_DIR,
+        WORDPRESS_REQUIRED_FILES,
+        WORDPRESS_REQUIRED_DIRS,
     )?;
 
     let output = probe
@@ -2126,6 +2664,13 @@ fn install_wordpress_app<R: CommandRunner>(
         format!("cp -a {WORDPRESS_SOURCE_DIR}/. {}", plan.web_root),
         output,
     )?;
+    let deployed_checks = verify_required_app_paths(
+        probe,
+        "wordpress-deployed",
+        &plan.web_root,
+        WORDPRESS_REQUIRED_FILES,
+        WORDPRESS_REQUIRED_DIRS,
+    )?;
 
     let mut checks = vec![InstallCheck::pass(
         "app-source",
@@ -2134,6 +2679,9 @@ fn install_wordpress_app<R: CommandRunner>(
             plan.web_root
         ),
     )];
+    checks.push(archive_check);
+    checks.extend(source_checks);
+    checks.extend(deployed_checks);
     checks.extend(apply_app_permissions(probe, paths, plan, owned)?);
     checks.extend([
         InstallCheck::pass(
@@ -4411,6 +4959,27 @@ mod tests {
                 .iter()
                 .any(|check| { check.name == "php-fpm-pool" && check.status == "pass" })
         );
+        assert!(report.runtime_checks.iter().any(|check| {
+            check.name == "phpinfo-summary" && check.message.contains("FPM ini 기준")
+        }));
+        assert!(
+            report
+                .runtime_checks
+                .iter()
+                .any(|check| { check.name == "php-runtime-limits" && check.status == "pass" })
+        );
+        assert!(
+            report
+                .runtime_checks
+                .iter()
+                .any(|check| { check.name == "php-extension:pdo_mysql" && check.status == "pass" })
+        );
+        assert!(
+            report
+                .runtime_checks
+                .iter()
+                .any(|check| { check.name == "php-fpm-pool-values" && check.status == "pass" })
+        );
         assert!(
             report
                 .database_checks
@@ -4619,6 +5188,18 @@ mod tests {
         fs::remove_file(os_release_path)?;
         fs::remove_dir_all(fs_root)?;
         Ok(())
+    }
+
+    #[test]
+    fn php_runtime_failures_block_app_phase() {
+        let message = super::blocking_runtime_failure(&[
+            super::InstallCheck::pass("phpinfo-summary", "parsed"),
+            super::InstallCheck::fail("php-extension:redis", "redis missing"),
+        ])
+        .expect("php extension failure should block");
+
+        assert!(message.contains("PHP 런타임 진단 실패"));
+        assert!(message.contains("php-extension:redis"));
     }
 
     #[test]
@@ -4996,6 +5577,9 @@ mod tests {
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success(""));
         }
+        runner.push_output(CommandOutput::success(successful_php_runtime_probe_output(
+            install_plan,
+        )));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
 
@@ -5026,6 +5610,34 @@ mod tests {
         push_successful_app_outputs(runner, install_plan);
     }
 
+    fn successful_php_runtime_probe_output(install_plan: &super::plan::InstallPlan) -> String {
+        let sizing = super::plan::resolve_memory_sizing(1024 * 1024, 1);
+        let extensions = super::required_php_extensions(install_plan).join(",");
+        format!(
+            "php_version={}\n\
+             sapi=cli\n\
+             loaded_ini=/etc/php/{}/fpm/php.ini\n\
+             scan_dir=/etc/php/{}/fpm/conf.d\n\
+             memory_limit={}\n\
+             upload_max_filesize={}\n\
+             post_max_size={}\n\
+             max_execution_time=120\n\
+             max_input_vars=1000\n\
+             date.timezone=UTC\n\
+             opcache.enable=1\n\
+             opcache.memory_consumption={}\n\
+             extensions={}\n",
+            install_plan.php_version,
+            install_plan.php_version,
+            install_plan.php_version,
+            sizing.php_memory_limit,
+            sizing.php_upload_limit,
+            sizing.php_upload_limit,
+            sizing.opcache_memory.trim_end_matches('M'),
+            extensions
+        )
+    }
+
     fn push_successful_app_outputs(
         runner: &FakeCommandRunner,
         install_plan: &super::plan::InstallPlan,
@@ -5033,7 +5645,9 @@ mod tests {
         match install_plan.app_profile.as_str() {
             "gnuboard7" => {
                 runner.push_output(CommandOutput::success("cloned\n"));
+                push_successful_git_validation_outputs(runner, super::GNUBOARD7_REQUIRED_FILES);
                 runner.push_output(CommandOutput::success(""));
+                push_successful_required_path_outputs(runner, super::GNUBOARD7_REQUIRED_FILES, &[]);
                 push_successful_app_permission_outputs(runner, install_plan);
                 runner.push_output(CommandOutput::success("composer ok\n"));
                 runner.push_output(CommandOutput::success("npm install ok\n"));
@@ -5046,11 +5660,24 @@ mod tests {
                 runner.push_output(CommandOutput::success(""));
                 runner.push_output(CommandOutput::success(""));
                 runner.push_output(CommandOutput::success(""));
+                push_successful_required_path_outputs(
+                    runner,
+                    super::WORDPRESS_REQUIRED_FILES,
+                    super::WORDPRESS_REQUIRED_DIRS,
+                );
+                runner.push_output(CommandOutput::success(""));
+                push_successful_required_path_outputs(
+                    runner,
+                    super::WORDPRESS_REQUIRED_FILES,
+                    super::WORDPRESS_REQUIRED_DIRS,
+                );
                 push_successful_app_permission_outputs(runner, install_plan);
             }
             "laravel" => {
                 runner.push_output(CommandOutput::success("cloned\n"));
+                push_successful_git_validation_outputs(runner, super::LARAVEL_REQUIRED_FILES);
                 runner.push_output(CommandOutput::success(""));
+                push_successful_required_path_outputs(runner, super::LARAVEL_REQUIRED_FILES, &[]);
                 push_successful_app_permission_outputs(runner, install_plan);
                 runner.push_output(CommandOutput::success("composer ok\n"));
                 runner.push_output(CommandOutput::success("npm install ok\n"));
@@ -5067,6 +5694,26 @@ mod tests {
             _ => {
                 push_successful_app_permission_outputs(runner, install_plan);
             }
+        }
+    }
+
+    fn push_successful_git_validation_outputs(runner: &FakeCommandRunner, required_files: &[&str]) {
+        runner.push_output(CommandOutput::success("deadbeef\n"));
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
+        push_successful_required_path_outputs(runner, required_files, &[]);
+    }
+
+    fn push_successful_required_path_outputs(
+        runner: &FakeCommandRunner,
+        files: &[&str],
+        dirs: &[&str],
+    ) {
+        for _file in files {
+            runner.push_output(CommandOutput::success(""));
+        }
+        for _dir in dirs {
+            runner.push_output(CommandOutput::success(""));
         }
     }
 

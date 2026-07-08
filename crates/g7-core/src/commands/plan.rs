@@ -931,8 +931,8 @@ fn packages(input: PackageInput<'_>) -> Vec<PlanPackage> {
             description: "도메인 요청을 PHP 앱으로 전달하는 웹서버입니다.",
         },
         PlanPackage {
-            name: format!("php{}-fpm", input.php_version),
-            description: "선택한 앱을 실행하는 PHP-FPM 런타임입니다.",
+            name: format!("php{}-fpm php{}-cli", input.php_version, input.php_version),
+            description: "선택한 앱을 실행하고 PHP 설정을 진단하는 런타임입니다.",
         },
         PlanPackage {
             name: format!(
@@ -2588,7 +2588,12 @@ mod tests {
         assert!(
             plan.packages
                 .iter()
-                .any(|package| package.name == "php8.5-fpm")
+                .any(|package| package.name.contains("php8.5-fpm"))
+        );
+        assert!(
+            plan.packages
+                .iter()
+                .any(|package| package.name.contains("php8.5-cli"))
         );
         assert!(
             plan.packages

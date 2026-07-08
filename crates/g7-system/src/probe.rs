@@ -9,7 +9,10 @@ use crate::account::{
 use crate::apache::{config_test as apache_config_test, enable_module as apache_enable_module};
 use crate::app::{artisan, composer_install, npm_install, npm_run_build};
 use crate::apt::{apt_add_repository, apt_candidate_available, apt_install, apt_purge, apt_update};
-use crate::archive::{copy_dir_contents, download_file, git_clone, unzip_archive};
+use crate::archive::{
+    copy_dir_contents, download_file, git_clone, git_diff_index_clean, git_fsck_full,
+    git_ls_files_error_unmatch, git_rev_parse_head, test_dir, test_file, unzip_archive, unzip_test,
+};
 use crate::certbot::{certonly_webroot, delete_cert, renew_dry_run};
 use crate::command::{CommandError, CommandOutput, CommandRunner, RealCommandRunner};
 use crate::database::{DatabaseEngine, apply_sql};
@@ -212,6 +215,10 @@ impl<R: CommandRunner> SystemProbe<R> {
         unzip_archive(&self.runner, archive_path, destination).map_err(SystemProbeError::Command)
     }
 
+    pub fn unzip_test(&self, archive_path: &str) -> Result<CommandOutput, SystemProbeError> {
+        unzip_test(&self.runner, archive_path).map_err(SystemProbeError::Command)
+    }
+
     pub fn git_clone(
         &self,
         repo_url: &str,
@@ -221,6 +228,26 @@ impl<R: CommandRunner> SystemProbe<R> {
         git_clone(&self.runner, repo_url, reference, destination).map_err(SystemProbeError::Command)
     }
 
+    pub fn git_rev_parse_head(&self, repo_dir: &str) -> Result<CommandOutput, SystemProbeError> {
+        git_rev_parse_head(&self.runner, repo_dir).map_err(SystemProbeError::Command)
+    }
+
+    pub fn git_fsck_full(&self, repo_dir: &str) -> Result<CommandOutput, SystemProbeError> {
+        git_fsck_full(&self.runner, repo_dir).map_err(SystemProbeError::Command)
+    }
+
+    pub fn git_diff_index_clean(&self, repo_dir: &str) -> Result<CommandOutput, SystemProbeError> {
+        git_diff_index_clean(&self.runner, repo_dir).map_err(SystemProbeError::Command)
+    }
+
+    pub fn git_ls_files_error_unmatch(
+        &self,
+        repo_dir: &str,
+        path: &str,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        git_ls_files_error_unmatch(&self.runner, repo_dir, path).map_err(SystemProbeError::Command)
+    }
+
     pub fn copy_dir_contents(
         &self,
         source_dir: &str,
@@ -228,6 +255,14 @@ impl<R: CommandRunner> SystemProbe<R> {
     ) -> Result<CommandOutput, SystemProbeError> {
         copy_dir_contents(&self.runner, source_dir, destination_dir)
             .map_err(SystemProbeError::Command)
+    }
+
+    pub fn test_file(&self, path: &str) -> Result<CommandOutput, SystemProbeError> {
+        test_file(&self.runner, path).map_err(SystemProbeError::Command)
+    }
+
+    pub fn test_dir(&self, path: &str) -> Result<CommandOutput, SystemProbeError> {
+        test_dir(&self.runner, path).map_err(SystemProbeError::Command)
     }
 
     pub fn composer_install(&self, cwd: &Path) -> Result<CommandOutput, SystemProbeError> {

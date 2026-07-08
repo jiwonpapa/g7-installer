@@ -16,4 +16,4 @@ cargo clippy --all-targets -- -D warnings
 cargo doc --no-deps
 cargo llvm-cov --workspace --all-targets --summary-only --fail-under-lines "${COVERAGE_FLOOR}"
 
-(cd web && bun install --frozen-lockfile && bun run build)
+(cd web && bun install --frozen-lockfile && (bun run build || npm run build))

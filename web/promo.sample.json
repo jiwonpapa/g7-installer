@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "updated_at": "2026-07-08",
+  "slots": [
+    {
+      "id": "g7-installer-github",
+      "title": "G7 Installer",
+      "body": "그누보드7, WordPress, Laravel 서버 설치 자동화 CLI",
+      "badge": "GitHub",
+      "href": "https://github.com/jiwonpapa/g7-installer",
+      "cta": "저장소 보기",
+      "theme": "github"
+    },
+    {
+      "id": "server-care-pro",
+      "title": "Server Care Pro",
+      "body": "백업, 점검, 장애 알림을 한 화면에서 관리하는 운영 도구",
+      "badge": "유료 예정",
+      "href": "https://g7devops.com",
+      "cta": "계획 보기",
+      "theme": "pro"
+    },
+    {
+      "id": "telegram-devops",
+      "title": "Telegram DevOps",
+      "body": "서버 상태, 배포 결과, 인증서 만료를 텔레그램으로 알림",
+      "badge": "아이디어",
+      "href": "https://g7devops.com",
+      "cta": "알아보기",
+      "theme": "default"
+    }
+  ]
+}

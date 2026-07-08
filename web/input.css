@@ -90,6 +90,68 @@
     @apply overflow-x-auto border-b border-base-300 bg-base-200/70 px-3 py-3 lg:overflow-visible lg:border-b-0 lg:border-r lg:px-4 lg:py-5;
   }
 
+  .promo-panel {
+    @apply hidden;
+  }
+
+  .promo-panel[hidden] {
+    @apply hidden;
+  }
+
+  .promo-panel-heading {
+    @apply flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-normal text-base-content/50;
+  }
+
+  .promo-panel-heading button {
+    @apply inline-flex h-7 w-7 items-center justify-center rounded-md text-base-content/40 transition hover:bg-base-300 hover:text-base-content;
+  }
+
+  .promo-panel-heading .icon {
+    @apply h-3.5 w-3.5;
+  }
+
+  .promo-list {
+    @apply grid gap-2;
+  }
+
+  .promo-card {
+    @apply block rounded-md border border-base-300 bg-base-100 p-3 text-sm transition hover:border-primary hover:bg-primary/5;
+  }
+
+  .promo-card strong {
+    @apply mt-2 block text-sm font-semibold leading-5 text-base-content;
+  }
+
+  .promo-card p {
+    @apply mt-1 text-xs leading-5 text-base-content/60;
+  }
+
+  .promo-badge {
+    @apply inline-flex rounded bg-base-200 px-2 py-0.5 text-[0.68rem] font-semibold text-base-content/60;
+  }
+
+  .promo-card-github .promo-badge {
+    @apply bg-neutral text-neutral-content;
+  }
+
+  .promo-card-pro .promo-badge {
+    @apply bg-primary/10 text-primary;
+  }
+
+  .promo-cta {
+    @apply mt-3 inline-flex text-xs font-semibold text-primary;
+  }
+
+  @screen lg {
+    .promo-panel:not([hidden]) {
+      @apply mt-5 grid gap-3 border-t border-base-300 pt-4;
+    }
+  }
+
+  .wizard-progress .steps-horizontal .step {
+    min-width: 0;
+  }
+
   .step-copy {
     @apply inline-flex items-center justify-center gap-2 text-xs font-semibold lg:flex-row;
   }
@@ -366,6 +428,10 @@
 
   .provision-modal-box {
     @apply max-w-4xl;
+    width: min(56rem, calc(100vw - 2rem));
+    max-height: calc(100dvh - 2rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .provision-modal-heading {
@@ -401,6 +467,10 @@
     @apply text-sm font-semibold;
   }
 
+  .provision-muted {
+    @apply mt-2 text-xs leading-5 text-base-content/60;
+  }
+
   .provision-detail-grid dl {
     @apply mt-3 grid gap-2;
   }
@@ -415,6 +485,39 @@
 
   .provision-detail-grid code {
     @apply mt-3 block overflow-x-auto rounded-md bg-base-200 px-3 py-2 font-mono text-xs leading-5;
+  }
+
+  .config-file-list {
+    @apply mt-3 grid gap-2 md:grid-cols-2;
+  }
+
+  .config-file-card {
+    @apply grid min-w-0 gap-2 rounded-md border border-base-300 bg-base-200/60 p-3;
+  }
+
+  .config-file-card > div {
+    @apply flex min-w-0 items-start justify-between gap-3;
+  }
+
+  .config-file-card strong {
+    @apply block break-words text-sm font-semibold;
+  }
+
+  .config-file-card span {
+    @apply shrink-0 rounded-full bg-base-300 px-2 py-1 text-xs font-semibold text-base-content/60;
+  }
+
+  .config-file-card[data-sensitive="true"] span {
+    @apply bg-warning text-warning-content;
+  }
+
+  .config-file-card code {
+    @apply mt-0;
+  }
+
+  .config-preview {
+    @apply mt-3 max-h-64 overflow-auto rounded-md bg-base-200 px-3 py-2 font-mono text-xs leading-5 text-base-content;
+    overflow-wrap: anywhere;
   }
 
   .provisioning-actions-heading > strong[data-status="pass"],
@@ -464,6 +567,67 @@
 
   .package-progress-list {
     @apply grid gap-3 lg:grid-cols-2;
+  }
+
+  .execution-board {
+    @apply grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem];
+  }
+
+  .execution-main {
+    @apply grid min-w-0 gap-4 rounded-md border border-base-300 bg-base-100 p-4 shadow-sm;
+  }
+
+  .execution-kicker {
+    @apply text-xs font-semibold text-primary;
+  }
+
+  .execution-main h3 {
+    @apply mt-1 text-xl font-semibold;
+  }
+
+  .execution-main p {
+    @apply mt-2 text-sm leading-6 text-base-content/60;
+  }
+
+  .execution-progress-row {
+    @apply grid gap-2 sm:grid-cols-[minmax(0,1fr)_3rem] sm:items-center;
+  }
+
+  .execution-progress-row strong {
+    @apply text-sm font-semibold text-base-content/70 sm:text-right;
+  }
+
+  .live-log-card {
+    @apply min-w-0 rounded-md border border-base-300 bg-base-200/60 p-4;
+  }
+
+  .live-log-card > div {
+    @apply flex items-center justify-between gap-3;
+  }
+
+  .live-log-card h4 {
+    @apply text-sm font-semibold;
+  }
+
+  .live-log-card span {
+    @apply shrink-0 text-xs font-semibold text-base-content/50;
+  }
+
+  .activity-log-list {
+    @apply mt-3 grid max-h-56 gap-2 overflow-auto font-mono text-xs leading-5;
+  }
+
+  .activity-log-list li {
+    @apply break-words rounded-md bg-base-100 px-3 py-2 text-base-content/70;
+    overflow-wrap: anywhere;
+  }
+
+  .activity-log-list time {
+    @apply mr-2 font-semibold text-base-content/50;
+  }
+
+  .execution-timeline {
+    @apply grid gap-2;
   }
 
   .package-progress-row {
