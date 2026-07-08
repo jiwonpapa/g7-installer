@@ -1956,10 +1956,10 @@ function packagePlanCard(packages) {
   return `
     <section class="report-card">
       <h3>설치할 패키지</h3>
-      <div class="result-list mt-3">
+      <div class="package-plan-list">
         ${rows.length ? rows.map((item) => `
-          <div class="result-row" data-status="info">
-            <div class="result-copy">
+          <div class="package-plan-item">
+            <div>
               <span>${escapeHtml(item.name)}</span>
               <p>${escapeHtml(item.description)}</p>
             </div>
