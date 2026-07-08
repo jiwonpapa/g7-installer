@@ -1,5 +1,7 @@
 pub mod account;
+pub mod apache;
 pub mod apt;
+pub mod archive;
 pub mod certbot;
 pub mod command;
 pub mod database;

@@ -697,15 +697,16 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         "public"
     }
     .to_string();
-    let packages = packages(
-        &web_server,
-        &php_version,
-        &php_source,
-        &database_engine,
-        &redis_mode,
-        &mail_mode,
-        options.local_test,
-    );
+    let packages = packages(PackageInput {
+        web_server: &web_server,
+        php_version: &php_version,
+        php_source: &php_source,
+        database_engine: &database_engine,
+        redis_mode: &redis_mode,
+        mail_mode: &mail_mode,
+        local_test: options.local_test,
+        app_profile,
+    });
     let files = files(
         app_profile,
         &web_server,
@@ -883,42 +884,54 @@ fn preflight_gates(local_test: bool) -> Vec<PlanGate> {
     gates
 }
 
-fn packages(
-    web_server: &str,
-    php_version: &str,
-    php_source: &str,
-    database_engine: &str,
-    redis_mode: &str,
-    mail_mode: &str,
+struct PackageInput<'a> {
+    web_server: &'a str,
+    php_version: &'a str,
+    php_source: &'a str,
+    database_engine: &'a str,
+    redis_mode: &'a str,
+    mail_mode: &'a str,
     local_test: bool,
-) -> Vec<PlanPackage> {
+    app_profile: &'a crate::app_profile::AppProfile,
+}
+
+fn packages(input: PackageInput<'_>) -> Vec<PlanPackage> {
     let mut packages = vec![
         PlanPackage {
-            name: web_server_package(web_server).to_string(),
+            name: web_server_package(input.web_server).to_string(),
             description: "Web server and reverse proxy.",
         },
         PlanPackage {
-            name: format!("php{php_version}-fpm"),
+            name: format!("php{}-fpm", input.php_version),
             description: "PHP-FPM runtime for the selected app.",
         },
         PlanPackage {
-            name: format!("php{php_version}-mysql php{php_version}-mbstring php{php_version}-xml"),
+            name: format!(
+                "php{}-mysql php{}-mbstring php{}-xml",
+                input.php_version, input.php_version, input.php_version
+            ),
             description: "Core PHP extensions for database, strings, and XML.",
         },
         PlanPackage {
-            name: format!("php{php_version}-curl php{php_version}-gd php{php_version}-zip"),
+            name: format!(
+                "php{}-curl php{}-gd php{}-zip",
+                input.php_version, input.php_version, input.php_version
+            ),
             description: "PHP extensions for HTTP, images, and archives.",
         },
         PlanPackage {
-            name: format!("php{php_version}-intl php{php_version}-bcmath"),
+            name: format!(
+                "php{}-intl php{}-bcmath",
+                input.php_version, input.php_version
+            ),
             description: "PHP extensions for locale and decimal math.",
         },
         PlanPackage {
-            name: format!("php{php_version}-imagick"),
+            name: format!("php{}-imagick", input.php_version),
             description: "Image processing extension for app media support.",
         },
         PlanPackage {
-            name: database_package(database_engine).to_string(),
+            name: database_package(input.database_engine).to_string(),
             description: "Selected SQL database server.",
         },
         PlanPackage {
@@ -927,36 +940,43 @@ fn packages(
         },
     ];
 
-    if php_source == PHP_SOURCE_ONDREJ {
+    if matches!(input.app_profile.id, "gnuboard7" | "laravel") {
+        packages.push(PlanPackage {
+            name: "git composer nodejs npm".to_string(),
+            description: "Application source checkout and PHP/asset build utilities.",
+        });
+    }
+
+    if input.php_source == PHP_SOURCE_ONDREJ {
         packages.push(PlanPackage {
             name: "software-properties-common lsb-release".to_string(),
             description: "Required to add the Ondrej PHP PPA for non-default PHP versions.",
         });
     }
 
-    if !local_test {
+    if !input.local_test {
         packages.push(PlanPackage {
             name: "certbot".to_string(),
             description: "Let's Encrypt certificate issuance.",
         });
         packages.push(PlanPackage {
-            name: certbot_web_plugin_package(web_server).to_string(),
+            name: certbot_web_plugin_package(input.web_server).to_string(),
             description: "Certbot web server integration.",
         });
     }
 
-    if redis_mode == "enable" {
+    if input.redis_mode == "enable" {
         packages.push(PlanPackage {
             name: "redis-server".to_string(),
             description: "Local Redis cache/session/queue backend.",
         });
         packages.push(PlanPackage {
-            name: format!("php{php_version}-redis"),
+            name: format!("php{}-redis", input.php_version),
             description: "PHP Redis extension.",
         });
     }
 
-    if mail_mode == "local-postfix" {
+    if input.mail_mode == "local-postfix" {
         packages.push(PlanPackage {
             name: "postfix mailutils".to_string(),
             description: "Optional local outbound mail transport.",

@@ -4,10 +4,11 @@
 //! performing server changes. Every applied package/service step must be
 //! represented in `plan.rs`, `state.json`, `owned-files.json`, and the report.
 //!
-//! Current phase rule: package installation, basic service/port verification,
-//! and the Nginx HTTP vhost are implemented. Database user creation, app file
-//! deployment, Redis hardening, TLS issuance, and SSH changes belong to later
-//! phases.
+//! Current phase rule: package installation, site account/web root creation,
+//! Nginx/Apache vhost setup, PHP-FPM/DB tuning, DB user creation, TLS vhost
+//! mutation, app source handoff, and setup reporting are implemented. Riskier
+//! shared-server mutations such as firewall changes remain deferred until their
+//! rollback surface is explicit.
 
 use std::fs;
 use std::fs::OpenOptions;
@@ -45,6 +46,14 @@ const LOCAL_HOSTS_PATH: &str = "/etc/g7-installer/local-hosts.txt";
 const PHP_READY_FILENAME: &str = "g7inst-ready.php";
 const SECRETS_PATH: &str = "/etc/g7-installer/secrets.toml";
 const SETUP_GUIDE_PATH: &str = "/var/log/g7-installer/setup-guide.md";
+const GNUBOARD7_REPO_URL: &str = "https://github.com/gnuboard/g7.git";
+const GNUBOARD7_RELEASE_REF: &str = "7.0.0";
+const APP_SOURCE_DIR: &str = "/var/lib/g7-installer/app-source";
+const GNUBOARD7_SOURCE_DIR: &str = "/var/lib/g7-installer/app-source/gnuboard7";
+const WORDPRESS_DOWNLOAD_URL: &str = "https://wordpress.org/latest.zip";
+const WORDPRESS_ARCHIVE_PATH: &str = "/var/lib/g7-installer/app-source/wordpress.zip";
+const WORDPRESS_EXTRACT_DIR: &str = "/var/lib/g7-installer/app-source/wordpress-extract";
+const WORDPRESS_SOURCE_DIR: &str = "/var/lib/g7-installer/app-source/wordpress-extract/wordpress";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallReport {
@@ -60,6 +69,7 @@ pub struct InstallReport {
     pub site_user: String,
     pub web_root_mode: String,
     pub web_root: String,
+    pub app_url: String,
     pub www_mode: String,
     pub redis_mode: String,
     pub mail_mode: String,
@@ -403,8 +413,8 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
                 apply_summary.vhost_checks.extend(vhost_checks);
                 completed_steps.push("vhost-written".to_string());
                 completed_steps.push("vhost-enabled".to_string());
-                completed_steps.push("nginx-config-tested".to_string());
-                completed_steps.push("nginx-reloaded".to_string());
+                completed_steps.push(format!("{}-config-tested", web_service_name(&install_plan)));
+                completed_steps.push(format!("{}-reloaded", web_service_name(&install_plan)));
                 completed_steps.push("http-smoke-passed".to_string());
                 apply_summary.safety_checks = safety_checks(&install_plan, "vhost-enabled");
                 state.set_phase(InstallerPhase::VhostEnabled);
@@ -441,8 +451,8 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         Err(err) => {
             apply_summary.safety_checks = safety_checks(&install_plan, "vhost-failed");
             apply_summary.vhost_checks = vec![InstallCheck::fail(
-                "nginx-vhost",
-                format!("Nginx vhost setup failed: {err}"),
+                "webserver-vhost",
+                format!("Web server vhost setup failed: {err}"),
             )];
             state.set_phase(InstallerPhase::VhostFailed);
             state.completed_steps = completed_steps.clone();
@@ -477,10 +487,14 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             apply_summary.runtime_checks = runtime_checks;
             completed_steps.push("php-fpm-config-written".to_string());
             completed_steps.push("php-runtime-config-written".to_string());
-            if install_plan.web_server == "nginx" {
-                completed_steps.push("nginx-runtime-config-written".to_string());
-                completed_steps.push("nginx-runtime-reloaded".to_string());
-            }
+            completed_steps.push(format!(
+                "{}-runtime-config-written",
+                web_service_name(&install_plan)
+            ));
+            completed_steps.push(format!(
+                "{}-runtime-reloaded",
+                web_service_name(&install_plan)
+            ));
             apply_summary.safety_checks = safety_checks(&install_plan, "runtime-configured");
             state.set_phase(InstallerPhase::RuntimeConfigured);
             state.completed_steps = completed_steps.clone();
@@ -612,6 +626,48 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         }
     }
 
+    match apply_app_phase(probe, paths, &install_plan, &mut owned_file_list) {
+        Ok(app_checks) => {
+            let app_source_ready = app_checks
+                .iter()
+                .any(|check| check.name == "app-source" && check.status == "pass");
+            apply_summary.app_checks = app_checks;
+            completed_steps.push(if app_source_ready {
+                "app-source-prepared".to_string()
+            } else {
+                "app-source-deferred".to_string()
+            });
+            completed_steps.push("app-link-ready".to_string());
+            state.completed_steps = completed_steps.clone();
+            persist_progress(
+                &progress,
+                &mut owned_files,
+                &owned_file_list,
+                &state,
+                &install_plan,
+                &apply_summary,
+                None,
+            )?;
+        }
+        Err(err) => {
+            apply_summary.app_checks = vec![InstallCheck::fail(
+                "app-source",
+                format!("Application source setup failed: {err}"),
+            )];
+            state.completed_steps = completed_steps.clone();
+            persist_progress(
+                &progress,
+                &mut owned_files,
+                &owned_file_list,
+                &state,
+                &install_plan,
+                &apply_summary,
+                Some(&err.to_string()),
+            )?;
+            return Err(err);
+        }
+    }
+
     completed_steps.push("setup-guide-written".to_string());
     if state.phase == InstallerPhase::TlsEnabled.as_str()
         || completed_steps.iter().any(|step| step == "tls-skipped")
@@ -640,6 +696,8 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         None,
     )?;
 
+    let app_url = app_access_url(&install_plan, &apply_summary);
+
     Ok(InstallReport {
         domain: state.domain,
         deployment_mode: install_plan.deployment_mode,
@@ -652,7 +710,8 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         database_engine: install_plan.database_engine,
         site_user: install_plan.site_user,
         web_root_mode: install_plan.web_root_mode,
-        web_root: install_plan.web_root,
+        web_root: install_plan.web_root.clone(),
+        app_url,
         www_mode: install_plan.www_mode,
         redis_mode: install_plan.redis_mode,
         mail_mode: install_plan.mail_mode,
@@ -1014,49 +1073,92 @@ fn apply_vhost_phase<R: CommandRunner>(
     plan: &plan::InstallPlan,
     owned: &mut Vec<String>,
 ) -> Result<Vec<InstallCheck>> {
-    if plan.web_server != "nginx" {
-        return Ok(Vec::new());
-    }
-
     let mut checks = Vec::new();
-    write_new_file(
-        paths,
-        g7_system::nginx::G7_SITE_AVAILABLE,
-        &nginx_vhost_content(plan),
-        owned,
-    )?;
-    create_owned_symlink(
-        paths,
-        g7_system::nginx::G7_SITE_AVAILABLE,
-        g7_system::nginx::G7_SITE_ENABLED,
-        owned,
-    )?;
-    checks.push(InstallCheck::pass(
-        "nginx-vhost",
-        format!(
-            "Wrote {} and enabled it at {}.",
-            g7_system::nginx::G7_SITE_AVAILABLE,
-            g7_system::nginx::G7_SITE_ENABLED
-        ),
-    ));
 
-    let output = probe
-        .nginx_config_test()
-        .map_err(|err| command_error("nginx-configtest", "nginx -t", err))?;
-    require_success("nginx-configtest", "nginx -t", output)?;
-    checks.push(InstallCheck::pass(
-        "nginx-configtest",
-        "nginx -t completed successfully.",
-    ));
+    match plan.web_server.as_str() {
+        "nginx" => {
+            write_new_file(
+                paths,
+                g7_system::nginx::G7_SITE_AVAILABLE,
+                &nginx_vhost_content(plan),
+                owned,
+            )?;
+            create_owned_symlink(
+                paths,
+                g7_system::nginx::G7_SITE_AVAILABLE,
+                g7_system::nginx::G7_SITE_ENABLED,
+                owned,
+            )?;
+            checks.push(InstallCheck::pass(
+                "nginx-vhost",
+                format!(
+                    "Wrote {} and enabled it at {}.",
+                    g7_system::nginx::G7_SITE_AVAILABLE,
+                    g7_system::nginx::G7_SITE_ENABLED
+                ),
+            ));
 
-    let output = probe
-        .reload_service(g7_system::nginx::SERVICE_NAME)
-        .map_err(|err| command_error("nginx-reload", "systemctl reload nginx", err))?;
-    require_success("nginx-reload", "systemctl reload nginx", output)?;
-    checks.push(InstallCheck::pass(
-        "nginx-reload",
-        "Nginx was reloaded after vhost enable.",
-    ));
+            let output = probe
+                .nginx_config_test()
+                .map_err(|err| command_error("nginx-configtest", "nginx -t", err))?;
+            require_success("nginx-configtest", "nginx -t", output)?;
+            checks.push(InstallCheck::pass(
+                "nginx-configtest",
+                "nginx -t completed successfully.",
+            ));
+
+            let output = probe
+                .reload_service(g7_system::nginx::SERVICE_NAME)
+                .map_err(|err| command_error("nginx-reload", "systemctl reload nginx", err))?;
+            require_success("nginx-reload", "systemctl reload nginx", output)?;
+            checks.push(InstallCheck::pass(
+                "nginx-reload",
+                "Nginx was reloaded after vhost enable.",
+            ));
+        }
+        "apache" => {
+            enable_apache_modules(probe, apache_http_modules())?;
+            write_new_file(
+                paths,
+                g7_system::apache::G7_SITE_AVAILABLE,
+                &apache_vhost_content(plan),
+                owned,
+            )?;
+            create_owned_symlink(
+                paths,
+                g7_system::apache::G7_SITE_AVAILABLE,
+                g7_system::apache::G7_SITE_ENABLED,
+                owned,
+            )?;
+            checks.push(InstallCheck::pass(
+                "apache-vhost",
+                format!(
+                    "Wrote {} and enabled it at {}.",
+                    g7_system::apache::G7_SITE_AVAILABLE,
+                    g7_system::apache::G7_SITE_ENABLED
+                ),
+            ));
+
+            let output = probe
+                .apache_config_test()
+                .map_err(|err| command_error("apache-configtest", "apache2ctl configtest", err))?;
+            require_success("apache-configtest", "apache2ctl configtest", output)?;
+            checks.push(InstallCheck::pass(
+                "apache-configtest",
+                "apache2ctl configtest completed successfully.",
+            ));
+
+            let output = probe
+                .reload_service(g7_system::apache::SERVICE_NAME)
+                .map_err(|err| command_error("apache-reload", "systemctl reload apache2", err))?;
+            require_success("apache-reload", "systemctl reload apache2", output)?;
+            checks.push(InstallCheck::pass(
+                "apache-reload",
+                "Apache was reloaded after vhost enable.",
+            ));
+        }
+        _ => return Ok(Vec::new()),
+    }
 
     let smoke_host = primary_http_host(plan);
     match probe.http_host_smoke(&smoke_host) {
@@ -1123,6 +1225,32 @@ fn deferred_vhost_checks(plan: &plan::InstallPlan) -> Vec<InstallCheck> {
             plan.web_server
         ),
     }]
+}
+
+fn apache_http_modules() -> &'static [&'static str] {
+    &["proxy_fcgi", "setenvif", "rewrite", "headers"]
+}
+
+fn apache_tls_modules() -> &'static [&'static str] {
+    &[
+        "ssl",
+        "http2",
+        "proxy_fcgi",
+        "setenvif",
+        "rewrite",
+        "headers",
+    ]
+}
+
+fn enable_apache_modules<R: CommandRunner>(probe: &SystemProbe<R>, modules: &[&str]) -> Result<()> {
+    for module in modules {
+        let command = format!("a2enmod {module}");
+        let output = probe
+            .apache_enable_module(module)
+            .map_err(|err| command_error("apache-enable-module", &command, err))?;
+        require_success("apache-enable-module", command, output)?;
+    }
+    Ok(())
 }
 
 fn apply_runtime_phase<R: CommandRunner>(
@@ -1192,11 +1320,23 @@ fn apply_runtime_phase<R: CommandRunner>(
             ),
         });
     } else {
+        write_existing_file(
+            paths,
+            g7_system::apache::G7_SITE_AVAILABLE,
+            &apache_vhost_content_with_socket(plan, &php_fpm_site_socket(plan)),
+        )?;
+        checks.push(InstallCheck::pass(
+            "apache-proxy-fcgi-runtime",
+            format!(
+                "Updated Apache vhost to use site PHP-FPM socket {}.",
+                php_fpm_site_socket(plan)
+            ),
+        ));
         checks.push(InstallCheck {
             name: "apache-worker-mode".to_string(),
             status: "info".to_string(),
             message: format!(
-                "Apache mpm_event target: MaxRequestWorkers={} with PHP-FPM pool max_children={}. Apache vhost mutation is separate from the current Nginx path.",
+                "Apache mpm_event target: MaxRequestWorkers={} with PHP-FPM pool max_children={}. Keep MPM tuning in apache2.conf/mpm_event.conf after manual backup ownership is implemented.",
                 sizing.apache_max_request_workers, sizing.php_max_children
             ),
         });
@@ -1232,6 +1372,19 @@ fn apply_runtime_phase<R: CommandRunner>(
         checks.push(InstallCheck::pass(
             "nginx-runtime-reload",
             "Validated and reloaded Nginx after runtime tuning.",
+        ));
+    } else {
+        let output = probe
+            .apache_config_test()
+            .map_err(|err| command_error("apache-configtest", "apache2ctl configtest", err))?;
+        require_success("apache-configtest", "apache2ctl configtest", output)?;
+        let output = probe
+            .reload_service(g7_system::apache::SERVICE_NAME)
+            .map_err(|err| command_error("apache-reload", "systemctl reload apache2", err))?;
+        require_success("apache-reload", "systemctl reload apache2", output)?;
+        checks.push(InstallCheck::pass(
+            "apache-runtime-reload",
+            "Validated and reloaded Apache after runtime tuning.",
         ));
     }
 
@@ -1381,17 +1534,6 @@ fn apply_tls_phase<R: CommandRunner>(
         ]);
     }
 
-    if plan.web_server != "nginx" {
-        return Ok(vec![InstallCheck {
-            name: "tls-webserver".to_string(),
-            status: "deferred".to_string(),
-            message: format!(
-                "{} TLS mutation is not applied by the Nginx Certbot webroot path.",
-                plan.web_server
-            ),
-        }]);
-    }
-
     let failed_dns = network_checks
         .iter()
         .filter(|check| check.status == "fail")
@@ -1439,21 +1581,58 @@ fn apply_tls_phase<R: CommandRunner>(
         output,
     )?;
 
-    write_existing_file(
-        paths,
-        g7_system::nginx::G7_SITE_AVAILABLE,
-        &nginx_tls_vhost_content(plan, &php_fpm_site_socket(plan)),
-    )?;
+    let vhost_check = if plan.web_server == "nginx" {
+        write_existing_file(
+            paths,
+            g7_system::nginx::G7_SITE_AVAILABLE,
+            &nginx_tls_vhost_content(plan, &php_fpm_site_socket(plan)),
+        )?;
 
-    let output = probe
-        .nginx_config_test()
-        .map_err(|err| command_error("nginx-configtest", "nginx -t", err))?;
-    require_success("nginx-configtest", "nginx -t", output)?;
+        let output = probe
+            .nginx_config_test()
+            .map_err(|err| command_error("nginx-configtest", "nginx -t", err))?;
+        require_success("nginx-configtest", "nginx -t", output)?;
 
-    let output = probe
-        .reload_service(g7_system::nginx::SERVICE_NAME)
-        .map_err(|err| command_error("nginx-reload", "systemctl reload nginx", err))?;
-    require_success("nginx-reload", "systemctl reload nginx", output)?;
+        let output = probe
+            .reload_service(g7_system::nginx::SERVICE_NAME)
+            .map_err(|err| command_error("nginx-reload", "systemctl reload nginx", err))?;
+        require_success("nginx-reload", "systemctl reload nginx", output)?;
+
+        InstallCheck::pass(
+            "nginx-https-vhost",
+            format!(
+                "Rewrote {} with HTTPS server blocks for {}.",
+                g7_system::nginx::G7_SITE_AVAILABLE,
+                domains.join(", ")
+            ),
+        )
+    } else {
+        enable_apache_modules(probe, apache_tls_modules())?;
+        write_existing_file(
+            paths,
+            g7_system::apache::G7_SITE_AVAILABLE,
+            &apache_tls_vhost_content(plan, &php_fpm_site_socket(plan)),
+        )?;
+
+        let output = probe
+            .apache_config_test()
+            .map_err(|err| command_error("apache-configtest", "apache2ctl configtest", err))?;
+        require_success("apache-configtest", "apache2ctl configtest", output)?;
+
+        let output = probe
+            .reload_service(g7_system::apache::SERVICE_NAME)
+            .map_err(|err| command_error("apache-reload", "systemctl reload apache2", err))?;
+        require_success("apache-reload", "systemctl reload apache2", output)?;
+
+        InstallCheck::pass(
+            "apache-https-vhost",
+            format!(
+                "Rewrote {} with HTTPS VirtualHost blocks for {}.",
+                g7_system::apache::G7_SITE_AVAILABLE,
+                domains.join(", ")
+            ),
+        )
+    };
 
     let output = probe
         .certbot_renew_dry_run(&cert_name)
@@ -1469,17 +1648,234 @@ fn apply_tls_phase<R: CommandRunner>(
                 domains.join(", ")
             ),
         ),
-        InstallCheck::pass(
-            "nginx-https-vhost",
-            format!(
-                "Rewrote {} with HTTPS server blocks for {}.",
-                g7_system::nginx::G7_SITE_AVAILABLE,
-                domains.join(", ")
-            ),
-        ),
+        vhost_check,
         InstallCheck::pass(
             "certbot-renew-dry-run",
             "certbot renew --dry-run completed successfully.",
+        ),
+    ])
+}
+
+fn apply_app_phase<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+    owned: &mut Vec<String>,
+) -> Result<Vec<InstallCheck>> {
+    fs::create_dir_all(paths.resolve(APP_SOURCE_DIR)).map_err(|source| Error::FileWriteFailed {
+        path: APP_SOURCE_DIR.to_string(),
+        source,
+    })?;
+
+    let mut checks = match plan.app_profile.as_str() {
+        "gnuboard7" => install_gnuboard7_app(probe, paths, plan)?,
+        "wordpress" => install_wordpress_app(probe, paths, plan)?,
+        _ => install_placeholder_app(paths, plan, owned)?,
+    };
+
+    let owner_group = format!("{}:www-data", plan.site_user);
+    let command = format!("chown -R {owner_group} {}", plan.web_root);
+    let output = probe
+        .chown_recursive(&owner_group, &plan.web_root)
+        .map_err(|err| command_error("app-web-root-owner", &command, err))?;
+    require_success("app-web-root-owner", command, output)?;
+    let command = format!("chmod -R 0755 {}", plan.web_root);
+    let output = probe
+        .chmod_recursive("0755", &plan.web_root)
+        .map_err(|err| command_error("app-web-root-permissions", &command, err))?;
+    require_success("app-web-root-permissions", command, output)?;
+    checks.push(InstallCheck::pass(
+        "app-file-permissions",
+        format!(
+            "Applied {} ownership and 0755 mode to {} after app placement.",
+            owner_group, plan.web_root
+        ),
+    ));
+
+    checks.push(InstallCheck::pass(
+        "app-url",
+        format!(
+            "Open {} to continue the selected app install.",
+            app_entry_url(plan)
+        ),
+    ));
+    Ok(checks)
+}
+
+fn install_gnuboard7_app<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+) -> Result<Vec<InstallCheck>> {
+    remove_existing_path(paths, GNUBOARD7_SOURCE_DIR)?;
+    let output = probe
+        .git_clone(GNUBOARD7_REPO_URL, GNUBOARD7_RELEASE_REF, GNUBOARD7_SOURCE_DIR)
+        .map_err(|err| {
+            command_error(
+                "gnuboard7-source",
+                format!(
+                    "git clone --depth 1 --branch {GNUBOARD7_RELEASE_REF} {GNUBOARD7_REPO_URL} {GNUBOARD7_SOURCE_DIR}"
+                ),
+                err,
+            )
+        })?;
+    require_success(
+        "gnuboard7-source",
+        format!(
+            "git clone --depth 1 --branch {GNUBOARD7_RELEASE_REF} {GNUBOARD7_REPO_URL} {GNUBOARD7_SOURCE_DIR}"
+        ),
+        output,
+    )?;
+
+    let output = probe
+        .copy_dir_contents(GNUBOARD7_SOURCE_DIR, &plan.web_root)
+        .map_err(|err| {
+            command_error(
+                "gnuboard7-copy",
+                format!("cp -a {GNUBOARD7_SOURCE_DIR}/. {}", plan.web_root),
+                err,
+            )
+        })?;
+    require_success(
+        "gnuboard7-copy",
+        format!("cp -a {GNUBOARD7_SOURCE_DIR}/. {}", plan.web_root),
+        output,
+    )?;
+
+    let db_password =
+        read_database_password(paths)?.ok_or_else(|| Error::InstallVerificationFailed {
+            checks: format!("database password was not found at {SECRETS_PATH}"),
+        })?;
+    write_existing_file(
+        paths,
+        &format!("{}/.env", plan.web_root),
+        &laravel_env_content(plan, &db_password),
+    )?;
+
+    Ok(vec![
+        InstallCheck::pass(
+            "app-source",
+            format!(
+                "Checked out Gnuboard7 {GNUBOARD7_RELEASE_REF} from GitHub into {}.",
+                plan.web_root
+            ),
+        ),
+        InstallCheck::pass(
+            "app-env",
+            format!(
+                "Wrote application .env with DB name `{}` and user `{}`; password remains in {SECRETS_PATH}.",
+                plan.database_name, plan.database_user
+            ),
+        ),
+        InstallCheck::pass(
+            "app-install-screen",
+            format!(
+                "Gnuboard7 browser installer should be available at {}.",
+                app_entry_url(plan)
+            ),
+        ),
+    ])
+}
+
+fn install_wordpress_app<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+) -> Result<Vec<InstallCheck>> {
+    remove_existing_path(paths, WORDPRESS_EXTRACT_DIR)?;
+    let output = probe
+        .download_file(WORDPRESS_DOWNLOAD_URL, WORDPRESS_ARCHIVE_PATH)
+        .map_err(|err| {
+            command_error(
+                "wordpress-download",
+                format!("curl -fsSL -o {WORDPRESS_ARCHIVE_PATH} {WORDPRESS_DOWNLOAD_URL}"),
+                err,
+            )
+        })?;
+    require_success(
+        "wordpress-download",
+        format!("curl -fsSL -o {WORDPRESS_ARCHIVE_PATH} {WORDPRESS_DOWNLOAD_URL}"),
+        output,
+    )?;
+
+    let output = probe
+        .unzip_archive(WORDPRESS_ARCHIVE_PATH, WORDPRESS_EXTRACT_DIR)
+        .map_err(|err| {
+            command_error(
+                "wordpress-unzip",
+                format!("unzip -q {WORDPRESS_ARCHIVE_PATH} -d {WORDPRESS_EXTRACT_DIR}"),
+                err,
+            )
+        })?;
+    require_success(
+        "wordpress-unzip",
+        format!("unzip -q {WORDPRESS_ARCHIVE_PATH} -d {WORDPRESS_EXTRACT_DIR}"),
+        output,
+    )?;
+
+    let output = probe
+        .copy_dir_contents(WORDPRESS_SOURCE_DIR, &plan.web_root)
+        .map_err(|err| {
+            command_error(
+                "wordpress-copy",
+                format!("cp -a {WORDPRESS_SOURCE_DIR}/. {}", plan.web_root),
+                err,
+            )
+        })?;
+    require_success(
+        "wordpress-copy",
+        format!("cp -a {WORDPRESS_SOURCE_DIR}/. {}", plan.web_root),
+        output,
+    )?;
+
+    Ok(vec![
+        InstallCheck::pass(
+            "app-source",
+            format!(
+                "Downloaded WordPress latest.zip and copied it into {}.",
+                plan.web_root
+            ),
+        ),
+        InstallCheck::pass(
+            "app-install-screen",
+            format!(
+                "WordPress browser installer should be available at {}.",
+                app_entry_url(plan)
+            ),
+        ),
+        InstallCheck {
+            name: "app-db-handoff".to_string(),
+            status: "info".to_string(),
+            message: format!(
+                "Use DB `{}` and user `{}` from {SECRETS_PATH} in the WordPress install screen.",
+                plan.database_name, plan.database_user
+            ),
+        },
+    ])
+}
+
+fn install_placeholder_app(
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+    owned: &mut Vec<String>,
+) -> Result<Vec<InstallCheck>> {
+    let index_path = format!("{}/index.php", plan.app_document_root);
+    write_new_file(paths, &index_path, &placeholder_app_content(plan), owned)?;
+    Ok(vec![
+        InstallCheck {
+            name: "app-source".to_string(),
+            status: "deferred".to_string(),
+            message: format!(
+                "{} source URL is not selected yet; wrote a temporary handoff page at {index_path}.",
+                plan.app_profile_label
+            ),
+        },
+        InstallCheck::pass(
+            "app-install-screen",
+            format!(
+                "Temporary app handoff page is available at {}.",
+                app_entry_url(plan)
+            ),
         ),
     ])
 }
@@ -1570,6 +1966,108 @@ fn ready_probe_path(plan: &plan::InstallPlan) -> String {
 
 fn ready_probe_content() -> &'static str {
     "<?php\nheader('Content-Type: text/plain; charset=utf-8');\necho \"G7inst vhost ready\\n\";\n"
+}
+
+fn app_entry_url(plan: &plan::InstallPlan) -> String {
+    format!("http://{}{}", primary_http_host(plan), app_entry_path(plan))
+}
+
+fn app_access_url(plan: &plan::InstallPlan, summary: &ApplySummary) -> String {
+    let scheme = if summary
+        .certbot_checks
+        .iter()
+        .any(|check| check.name == "tls-certificate" && check.status == "pass")
+    {
+        "https"
+    } else {
+        "http"
+    };
+    format!(
+        "{scheme}://{}{}",
+        primary_http_host(plan),
+        app_entry_path(plan)
+    )
+}
+
+fn app_entry_path(plan: &plan::InstallPlan) -> &'static str {
+    match plan.app_profile.as_str() {
+        "gnuboard7" => "/install",
+        "wordpress" => "/wp-admin/install.php",
+        _ => "/",
+    }
+}
+
+fn read_database_password(paths: &InstallPaths) -> Result<Option<String>> {
+    let target = paths.resolve(SECRETS_PATH);
+    let content = match fs::read_to_string(&target) {
+        Ok(content) => content,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(Error::FileReadFailed {
+                path: SECRETS_PATH.to_string(),
+                source,
+            });
+        }
+    };
+
+    Ok(content.lines().find_map(|line| {
+        line.strip_prefix("database_password = ")
+            .map(|value| value.trim().trim_matches('"').to_string())
+    }))
+}
+
+fn laravel_env_content(plan: &plan::InstallPlan, db_password: &str) -> String {
+    let app_key = random_hex_secret().unwrap_or_else(|_| "change-me-after-install".to_string());
+    let redis_enabled = plan.redis_mode == "enable";
+    format!(
+        "APP_NAME=\"{}\"\nAPP_ENV=production\nAPP_KEY={app_key}\nAPP_DEBUG=false\nAPP_URL=http://{}\n\nDB_CONNECTION=mysql\nDB_HOST=127.0.0.1\nDB_PORT=3306\nDB_DATABASE={}\nDB_USERNAME={}\nDB_PASSWORD=\"{}\"\n\nCACHE_STORE={}\nSESSION_DRIVER={}\nQUEUE_CONNECTION={}\nREDIS_HOST=127.0.0.1\nREDIS_PORT=6379\nREDIS_PASSWORD=null\n\nMAIL_MAILER={}\n",
+        plan.app_profile_label,
+        primary_http_host(plan),
+        plan.database_name,
+        plan.database_user,
+        db_password.replace('"', "\\\""),
+        if redis_enabled { "redis" } else { "file" },
+        if redis_enabled { "redis" } else { "file" },
+        if redis_enabled { "redis" } else { "database" },
+        if plan.mail_mode == "none" {
+            "log"
+        } else {
+            "smtp"
+        },
+    )
+}
+
+fn placeholder_app_content(plan: &plan::InstallPlan) -> String {
+    format!(
+        "<?php\nheader('Content-Type: text/html; charset=utf-8');\n?><!doctype html><html lang=\"ko\"><meta charset=\"utf-8\"><title>{label} 준비됨</title><body><h1>{label} 설치 준비됨</h1><p>도메인, PHP-FPM, DB, SSL 설정이 완료되었습니다.</p><p>앱 소스 URL을 지정한 뒤 다시 설치하거나 수동 배포를 진행하세요.</p></body></html>\n",
+        label = plan.app_profile_label
+    )
+}
+
+fn remove_existing_path(paths: &InstallPaths, path: &str) -> Result<()> {
+    let target = paths.resolve(path);
+    let metadata = match fs::symlink_metadata(&target) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(Error::FileReadFailed {
+                path: path.to_string(),
+                source,
+            });
+        }
+    };
+
+    if metadata.file_type().is_dir() {
+        fs::remove_dir_all(&target).map_err(|source| Error::FileRemoveFailed {
+            path: path.to_string(),
+            source,
+        })
+    } else {
+        fs::remove_file(&target).map_err(|source| Error::FileRemoveFailed {
+            path: path.to_string(),
+            source,
+        })
+    }
 }
 
 fn detected_memory_sizing<R: CommandRunner>(probe: &SystemProbe<R>) -> plan::ResolvedMemorySizing {
@@ -1698,6 +2196,22 @@ max_heap_table_size = {tmp_table_size}
     )
 }
 
+fn apache_vhost_content(plan: &plan::InstallPlan) -> String {
+    let php_socket = format!("/run/php/php{}-fpm.sock", plan.php_version);
+    apache_vhost_content_with_socket(plan, &php_socket)
+}
+
+fn apache_vhost_content_with_socket(plan: &plan::InstallPlan, php_socket: &str) -> String {
+    let redirect_blocks = apache_http_redirect_blocks(plan);
+    let (server_name, aliases) = apache_app_hosts(plan);
+    let server_alias = apache_server_alias_line(&aliases);
+
+    format!(
+        "{redirect_blocks}<VirtualHost *:80>\n    ServerName {server_name}\n{server_alias}    DocumentRoot {root}\n\n    ErrorLog ${{APACHE_LOG_DIR}}/g7-error.log\n    CustomLog ${{APACHE_LOG_DIR}}/g7-access.log combined\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n\n    <FilesMatch \\.php$>\n        SetHandler \"proxy:unix:{php_socket}|fcgi://localhost/\"\n    </FilesMatch>\n\n    <DirectoryMatch \"^/.*/\\.git/\">\n        Require all denied\n    </DirectoryMatch>\n</VirtualHost>\n",
+        root = plan.app_document_root,
+    )
+}
+
 fn nginx_vhost_content(plan: &plan::InstallPlan) -> String {
     let php_socket = format!("/run/php/php{}-fpm.sock", plan.php_version);
     nginx_vhost_content_with_socket(plan, &php_socket)
@@ -1768,6 +2282,24 @@ fn nginx_redirect_blocks(plan: &plan::InstallPlan) -> String {
     }
 }
 
+fn apache_http_redirect_blocks(plan: &plan::InstallPlan) -> String {
+    if plan.domain.starts_with("www.") {
+        return String::new();
+    }
+
+    match plan.www_mode.as_str() {
+        "redirect-to-root" => format!(
+            "<VirtualHost *:80>\n    ServerName www.{domain}\n    Redirect permanent / http://{domain}/\n</VirtualHost>\n\n",
+            domain = plan.domain
+        ),
+        "redirect-to-www" => format!(
+            "<VirtualHost *:80>\n    ServerName {domain}\n    Redirect permanent / http://www.{domain}/\n</VirtualHost>\n\n",
+            domain = plan.domain
+        ),
+        _ => String::new(),
+    }
+}
+
 fn nginx_tls_vhost_content(plan: &plan::InstallPlan, php_socket: &str) -> String {
     let http_hosts = certificate_hosts(plan).join(" ");
     let cert_name = &plan.domain;
@@ -1776,6 +2308,20 @@ fn nginx_tls_vhost_content(plan: &plan::InstallPlan, php_socket: &str) -> String
 
     format!(
         "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {http_hosts};\n    return 301 https://$host$request_uri;\n}}\n\n{canonical_redirect}server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    ssl_certificate /etc/letsencrypt/live/{cert_name}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{cert_name}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_prefer_server_ciphers off;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    add_header X-Content-Type-Options nosniff always;\n    add_header X-Frame-Options SAMEORIGIN always;\n    add_header Referrer-Policy strict-origin-when-cross-origin always;\n\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
+        root = plan.app_document_root,
+    )
+}
+
+fn apache_tls_vhost_content(plan: &plan::InstallPlan, php_socket: &str) -> String {
+    let http_hosts = certificate_hosts(plan).join(" ");
+    let cert_name = &plan.domain;
+    let canonical_redirect = apache_https_canonical_redirect(plan);
+    let (server_name, aliases) = apache_app_hosts(plan);
+    let server_alias = apache_server_alias_line(&aliases);
+
+    format!(
+        "<VirtualHost *:80>\n    ServerName {primary_host}\n    ServerAlias {http_hosts}\n    RewriteEngine On\n    RewriteRule ^ https://%{{HTTP_HOST}}%{{REQUEST_URI}} [R=301,L]\n</VirtualHost>\n\n{canonical_redirect}<VirtualHost *:443>\n    ServerName {server_name}\n{server_alias}    DocumentRoot {root}\n\n    ErrorLog ${{APACHE_LOG_DIR}}/g7-error.log\n    CustomLog ${{APACHE_LOG_DIR}}/g7-access.log combined\n\n    SSLEngine on\n    SSLCertificateFile /etc/letsencrypt/live/{cert_name}/fullchain.pem\n    SSLCertificateKeyFile /etc/letsencrypt/live/{cert_name}/privkey.pem\n    Protocols h2 http/1.1\n\n    Header always set X-Content-Type-Options \"nosniff\"\n    Header always set X-Frame-Options \"SAMEORIGIN\"\n    Header always set Referrer-Policy \"strict-origin-when-cross-origin\"\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n\n    <FilesMatch \\.php$>\n        SetHandler \"proxy:unix:{php_socket}|fcgi://localhost/\"\n    </FilesMatch>\n\n    <DirectoryMatch \"^/.*/\\.git/\">\n        Require all denied\n    </DirectoryMatch>\n</VirtualHost>\n",
+        primary_host = primary_http_host(plan),
         root = plan.app_document_root,
     )
 }
@@ -1798,6 +2344,52 @@ fn nginx_https_canonical_redirect(plan: &plan::InstallPlan) -> String {
     }
 }
 
+fn apache_https_canonical_redirect(plan: &plan::InstallPlan) -> String {
+    if plan.domain.starts_with("www.") {
+        return String::new();
+    }
+
+    match plan.www_mode.as_str() {
+        "redirect-to-root" => format!(
+            "<VirtualHost *:443>\n    ServerName www.{domain}\n    SSLEngine on\n    SSLCertificateFile /etc/letsencrypt/live/{domain}/fullchain.pem\n    SSLCertificateKeyFile /etc/letsencrypt/live/{domain}/privkey.pem\n    Redirect permanent / https://{domain}/\n</VirtualHost>\n\n",
+            domain = plan.domain
+        ),
+        "redirect-to-www" => format!(
+            "<VirtualHost *:443>\n    ServerName {domain}\n    SSLEngine on\n    SSLCertificateFile /etc/letsencrypt/live/{domain}/fullchain.pem\n    SSLCertificateKeyFile /etc/letsencrypt/live/{domain}/privkey.pem\n    Redirect permanent / https://www.{domain}/\n</VirtualHost>\n\n",
+            domain = plan.domain
+        ),
+        _ => String::new(),
+    }
+}
+
+fn apache_app_hosts(plan: &plan::InstallPlan) -> (String, Vec<String>) {
+    match plan.www_mode.as_str() {
+        "redirect-to-www" if !plan.domain.starts_with("www.") => {
+            (format!("www.{}", plan.domain), Vec::new())
+        }
+        "redirect-to-root" | "none" => {
+            let aliases = if plan.www_mode == "none" && !plan.domain.starts_with("www.") {
+                vec![format!("www.{}", plan.domain)]
+            } else {
+                Vec::new()
+            };
+            (plan.domain.clone(), aliases)
+        }
+        _ if !plan.domain.starts_with("www.") => {
+            (plan.domain.clone(), vec![format!("www.{}", plan.domain)])
+        }
+        _ => (plan.domain.clone(), Vec::new()),
+    }
+}
+
+fn apache_server_alias_line(aliases: &[String]) -> String {
+    if aliases.is_empty() {
+        String::new()
+    } else {
+        format!("    ServerAlias {}\n", aliases.join(" "))
+    }
+}
+
 fn certificate_email(plan: &plan::InstallPlan) -> String {
     plan.smtp_from
         .clone()
@@ -1812,6 +2404,14 @@ fn primary_http_host(plan: &plan::InstallPlan) -> String {
     }
 }
 
+fn web_service_name(plan: &plan::InstallPlan) -> &'static str {
+    if plan.web_server == "apache" {
+        g7_system::apache::SERVICE_NAME
+    } else {
+        g7_system::nginx::SERVICE_NAME
+    }
+}
+
 fn managed_services(plan: &plan::InstallPlan) -> Vec<String> {
     plan.services
         .iter()
@@ -1821,7 +2421,7 @@ fn managed_services(plan: &plan::InstallPlan) -> Vec<String> {
 }
 
 fn package_phase_manages_service(service: &str, plan: &plan::InstallPlan) -> bool {
-    service == plan.web_server
+    service == web_service_name(plan)
         || service == format!("php{}-fpm", plan.php_version)
         || service
             == if plan.database_engine == "mysql" {
@@ -2251,6 +2851,12 @@ fn create_owned_symlink(
 ) -> Result<()> {
     let source_path = paths.resolve(source);
     let link_path = paths.resolve(link);
+    if let Some(parent) = link_path.parent() {
+        fs::create_dir_all(parent).map_err(|source| Error::FileWriteFailed {
+            path: parent.display().to_string(),
+            source,
+        })?;
+    }
     #[cfg(unix)]
     {
         unix_fs::symlink(&source_path, &link_path).map_err(|source| Error::FileWriteFailed {
@@ -2471,6 +3077,10 @@ fn report_content(
         serde_json::json!(&plan.app_document_root),
     );
     value.insert(
+        "app_url".to_string(),
+        serde_json::json!(app_access_url(plan, summary)),
+    );
+    value.insert(
         "web_server".to_string(),
         serde_json::json!(&plan.web_server),
     );
@@ -2670,22 +3280,14 @@ fn setup_guide_content(
     };
     let fpm_service = format!("php{}-fpm", plan.php_version);
     let db_service = database_service_name(plan);
-    let access_url = if summary
-        .certbot_checks
-        .iter()
-        .any(|check| check.name == "tls-certificate" && check.status == "pass")
-    {
-        format!("https://{}", primary_http_host(plan))
-    } else {
-        format!("http://{}", primary_http_host(plan))
-    };
+    let access_url = app_access_url(plan, summary);
 
     let mut content = String::new();
     content.push_str(&format!("# G7 Installer Setup Guide - {}\n\n", plan.domain));
     content.push_str("이 문서는 설치기가 만든 서버 구성을 사람이 확인하기 위한 안내서입니다. DB 비밀번호 같은 민감값은 화면에 쓰지 않고 root 전용 파일 경로만 표시합니다.\n\n");
     content.push_str("## 요약\n\n");
     content.push_str(&format!("- 도메인: `{}`\n", plan.domain));
-    content.push_str(&format!("- 접속 주소: `{access_url}`\n"));
+    content.push_str(&format!("- 웹앱 접속 주소: `{access_url}`\n"));
     content.push_str(&format!("- 현재 단계: `{phase}`\n"));
     content.push_str(&format!(
         "- 앱 프로필: `{}` ({})\n",
@@ -2700,6 +3302,7 @@ fn setup_guide_content(
     content.push_str("\n## 주요 경로\n\n");
     content.push_str(&format!("- 웹 루트: `{}`\n", plan.web_root));
     content.push_str(&format!("- 앱 문서 루트: `{}`\n", plan.app_document_root));
+    content.push_str(&format!("- 웹앱 링크: `{access_url}`\n"));
     content.push_str(&format!("- 설치 상태: `{STATE_PATH}`\n"));
     content.push_str(&format!("- 설치 리포트(JSON): `{REPORT_PATH}`\n"));
     content.push_str(&format!("- 설정 안내서(MD): `{SETUP_GUIDE_PATH}`\n"));
@@ -3082,6 +3685,61 @@ mod tests {
     }
 
     #[test]
+    fn install_applies_apache_vhost_runtime_tls_and_app_link()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let os_release_path = write_temp_os_release()?;
+        let fs_root = create_temp_fs_root()?;
+        let options = super::plan::PlanOptions {
+            web_server: "apache".to_string(),
+            ..super::plan::PlanOptions::default()
+        };
+        let probe =
+            clean_root_probe_for_options(&os_release_path, &fs_root, "example.com", &options)?;
+        let paths = InstallPaths::with_root(&fs_root);
+
+        let report = run_with_probe_and_paths("example.com".to_string(), options, &probe, &paths)?;
+
+        assert_eq!(report.web_server, "apache");
+        assert_eq!(report.app_url, "https://example.com/install");
+        assert!(fs_root.join("etc/apache2/sites-available/g7.conf").exists());
+        assert!(fs_root.join("etc/apache2/sites-enabled/g7.conf").exists());
+        assert!(
+            report
+                .service_checks
+                .iter()
+                .any(|check| check.name == "apache2" && check.status == "pass")
+        );
+        assert!(
+            report
+                .vhost_checks
+                .iter()
+                .any(|check| check.name == "apache-vhost" && check.status == "pass")
+        );
+        assert!(
+            report
+                .runtime_checks
+                .iter()
+                .any(|check| check.name == "apache-runtime-reload" && check.status == "pass")
+        );
+        assert!(
+            report
+                .certbot_checks
+                .iter()
+                .any(|check| check.name == "apache-https-vhost" && check.status == "pass")
+        );
+        assert!(
+            report
+                .app_checks
+                .iter()
+                .any(|check| check.name == "app-url" && check.status == "pass")
+        );
+
+        fs::remove_file(os_release_path)?;
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
     fn install_reports_smtp_relay_reachability()
     -> std::result::Result<(), Box<dyn std::error::Error>> {
         let os_release_path = write_temp_os_release()?;
@@ -3375,7 +4033,13 @@ mod tests {
         }
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
-        if install_plan.web_server != "nginx" {
+        if install_plan.web_server == "apache" {
+            for _module in super::apache_http_modules() {
+                runner.push_output(CommandOutput::success(""));
+            }
+            runner.push_output(CommandOutput::success(""));
+            runner.push_output(CommandOutput::success(""));
+            runner.push_output(CommandOutput::success(""));
             push_successful_runtime_database_tls_outputs(runner, install_plan);
             return;
         }
@@ -3391,7 +4055,7 @@ mod tests {
         install_plan: &super::plan::InstallPlan,
     ) {
         runner.push_output(CommandOutput::success(""));
-        if install_plan.web_server == "nginx" {
+        if matches!(install_plan.web_server.as_str(), "nginx" | "apache") {
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success(""));
         }
@@ -3403,7 +4067,36 @@ mod tests {
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success("renew ok\n"));
+        } else if install_plan.deployment_mode == "public" && install_plan.web_server == "apache" {
+            runner.push_output(CommandOutput::success("cert issued\n"));
+            for _module in super::apache_tls_modules() {
+                runner.push_output(CommandOutput::success(""));
+            }
+            runner.push_output(CommandOutput::success(""));
+            runner.push_output(CommandOutput::success(""));
+            runner.push_output(CommandOutput::success("renew ok\n"));
         }
+        push_successful_app_outputs(runner, install_plan);
+    }
+
+    fn push_successful_app_outputs(
+        runner: &FakeCommandRunner,
+        install_plan: &super::plan::InstallPlan,
+    ) {
+        match install_plan.app_profile.as_str() {
+            "gnuboard7" => {
+                runner.push_output(CommandOutput::success("cloned\n"));
+                runner.push_output(CommandOutput::success(""));
+            }
+            "wordpress" => {
+                runner.push_output(CommandOutput::success(""));
+                runner.push_output(CommandOutput::success(""));
+                runner.push_output(CommandOutput::success(""));
+            }
+            _ => {}
+        }
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
     }
 
     fn write_temp_os_release() -> std::result::Result<PathBuf, Box<dyn std::error::Error>> {

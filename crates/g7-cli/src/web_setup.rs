@@ -278,6 +278,7 @@ struct InstallApiReport {
     app_package: String,
     site_user: String,
     web_root: String,
+    app_url: String,
     mail_mode: String,
     smtp_host: Option<String>,
     smtp_port: Option<u16>,
@@ -1214,6 +1215,7 @@ fn install_to_api(report: install::InstallReport, database_version: String) -> I
         app_package: report.app_profile,
         site_user: report.site_user,
         web_root: report.web_root,
+        app_url: report.app_url,
         mail_mode: report.mail_mode,
         smtp_host: report.smtp_host,
         smtp_port: report.smtp_port,
@@ -1930,6 +1932,7 @@ mod tests {
                 site_user: "g7".to_string(),
                 web_root_mode: "public-html".to_string(),
                 web_root: "/home/g7/public_html".to_string(),
+                app_url: "http://g7-test.local/install".to_string(),
                 www_mode: "redirect-to-root".to_string(),
                 redis_mode: "enable".to_string(),
                 mail_mode: "none".to_string(),
@@ -1979,6 +1982,7 @@ mod tests {
         assert_eq!(install_api.database_version, "apt-default");
         assert_eq!(install_api.app_package, "gnuboard7");
         assert_eq!(install_api.app_document_root, "/home/g7/public_html/public");
+        assert_eq!(install_api.app_url, "http://g7-test.local/install");
         assert_eq!(install_api.mail_mode, "none");
         assert!(!install_api.dns_check);
         assert_eq!(

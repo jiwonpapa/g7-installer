@@ -5,14 +5,16 @@ use std::path::{Path, PathBuf};
 use crate::account::{
     chmod_recursive, chown_recursive, create_login_user, set_login_password, user_exists,
 };
+use crate::apache::{config_test as apache_config_test, enable_module as apache_enable_module};
 use crate::apt::{apt_add_repository, apt_candidate_available, apt_install, apt_purge, apt_update};
+use crate::archive::{copy_dir_contents, download_file, git_clone, unzip_archive};
 use crate::certbot::{certonly_webroot, renew_dry_run};
 use crate::command::{CommandError, CommandOutput, CommandRunner, RealCommandRunner};
 use crate::database::{DatabaseEngine, apply_sql};
 use crate::network::{
     dns_ipv4_records, dns_ipv6_records, http_host_smoke, public_ipv4, public_ipv6, tcp_connect,
 };
-use crate::nginx::config_test;
+use crate::nginx::config_test as nginx_config_test;
 use crate::os::{OsRelease, OsReleaseError, read_os_release};
 use crate::package::{PackageStatus, package_status};
 use crate::port::{PortStatus, tcp_port_status};
@@ -163,7 +165,49 @@ impl<R: CommandRunner> SystemProbe<R> {
     }
 
     pub fn nginx_config_test(&self) -> Result<CommandOutput, SystemProbeError> {
-        config_test(&self.runner).map_err(SystemProbeError::Command)
+        nginx_config_test(&self.runner).map_err(SystemProbeError::Command)
+    }
+
+    pub fn apache_config_test(&self) -> Result<CommandOutput, SystemProbeError> {
+        apache_config_test(&self.runner).map_err(SystemProbeError::Command)
+    }
+
+    pub fn apache_enable_module(&self, module: &str) -> Result<CommandOutput, SystemProbeError> {
+        apache_enable_module(&self.runner, module).map_err(SystemProbeError::Command)
+    }
+
+    pub fn download_file(
+        &self,
+        url: &str,
+        output_path: &str,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        download_file(&self.runner, url, output_path).map_err(SystemProbeError::Command)
+    }
+
+    pub fn unzip_archive(
+        &self,
+        archive_path: &str,
+        destination: &str,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        unzip_archive(&self.runner, archive_path, destination).map_err(SystemProbeError::Command)
+    }
+
+    pub fn git_clone(
+        &self,
+        repo_url: &str,
+        reference: &str,
+        destination: &str,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        git_clone(&self.runner, repo_url, reference, destination).map_err(SystemProbeError::Command)
+    }
+
+    pub fn copy_dir_contents(
+        &self,
+        source_dir: &str,
+        destination_dir: &str,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        copy_dir_contents(&self.runner, source_dir, destination_dir)
+            .map_err(SystemProbeError::Command)
     }
 
     pub fn user_exists(&self, user: &str) -> Result<bool, SystemProbeError> {

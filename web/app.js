@@ -1334,11 +1334,11 @@ function restoreInstallStateFromReport(report) {
 }
 
 function renderInstallReport(report) {
-  const link = accessLink(report.domain, report.phase);
+  const link = report.app_url ? urlLink(report.app_url) : accessLink(report.domain, report.phase);
   nodes.reportOutput.innerHTML = [
     reportSummaryCard("기본 서버 구성 완료", [
       ["도메인", report.domain],
-      ["접속 주소", link.html],
+      ["웹앱 링크", link.html],
       ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / ${phpRuntimeLabel(report.php_version, report.php_source)}`],
       ["데이터베이스", `${databaseLabel(report.database)} (${databaseVersionLabel(report.database_version)})`],
       ["앱 패키지", appPackageLabel(report.app_package)],
@@ -1408,12 +1408,12 @@ function renderSavedReport(payload) {
     return;
   }
 
-  const link = accessLink(report.domain || "example.com", report.phase);
+  const link = report.app_url ? urlLink(report.app_url) : accessLink(report.domain || "example.com", report.phase);
   nodes.reportOutput.innerHTML = [
     reportSummaryCard("저장된 설치 리포트", [
       ["리포트 파일", payload.path],
       ["도메인", report.domain || "-"],
-      ["접속 주소", link.html],
+      ["웹앱 링크", link.html],
       ["단계", report.phase || "-"],
       ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / ${phpRuntimeLabel(report.php_version, report.php_source)}`],
       ["데이터베이스", databaseLabel(report.database)],
@@ -1589,6 +1589,13 @@ function accessLink(domain, phase = "packages-installed") {
   return {
     html: `<a class="link link-primary" href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${escapeHtml(href)}</a>`,
     hint: "인증서 발급 전까지는 HTTP 주소로 먼저 접속합니다.",
+  };
+}
+
+function urlLink(url) {
+  return {
+    html: `<a class="link link-primary" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${escapeHtml(url)}</a>`,
+    hint: "웹앱 설치 화면 또는 준비 페이지로 바로 이동합니다.",
   };
 }
 
@@ -2100,7 +2107,7 @@ function bindEvents() {
 
     try {
       markStage("preflight", "진행");
-      setAlert(nodes.installStatus, "info", "기본 서버 구성 진행 중", "apt 패키지 설치, Nginx 도메인 연결 설정 생성, HTTP 검증을 진행합니다.");
+      setAlert(nodes.installStatus, "info", "기본 서버 구성 진행 중", "apt 패키지 설치, Nginx/Apache 도메인 연결 설정 생성, HTTP 검증을 진행합니다.");
       log("기본 서버 구성 시작");
       const report = await apiFetch("/api/install/prepare", {
         method: "POST",

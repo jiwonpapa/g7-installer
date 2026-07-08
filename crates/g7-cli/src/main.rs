@@ -560,6 +560,7 @@ fn print_install(report: install::InstallReport) {
     println!("site_user: {}", report.site_user);
     println!("web_root_mode: {}", report.web_root_mode);
     println!("web_root: {}", report.web_root);
+    println!("app_url: {}", report.app_url);
     println!("www_mode: {}", report.www_mode);
     println!("redis: {}", report.redis_mode);
     println!("mail_mode: {}", report.mail_mode);
@@ -597,9 +598,12 @@ fn print_install(report: install::InstallReport) {
     print_install_checks("Service checks", &report.service_checks);
     print_install_checks("Port checks", &report.port_checks);
     print_install_checks("Network checks", &report.network_checks);
+    print_install_checks("Runtime checks", &report.runtime_checks);
+    print_install_checks("Database checks", &report.database_checks);
     print_install_checks("Vhost checks", &report.vhost_checks);
     print_install_checks("Mail checks", &report.mail_checks);
     print_install_checks("Certbot checks", &report.certbot_checks);
+    print_install_checks("App checks", &report.app_checks);
     print_install_checks("App requirements", &report.app_requirements);
 }
 
