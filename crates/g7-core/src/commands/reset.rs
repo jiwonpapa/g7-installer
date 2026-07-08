@@ -215,7 +215,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             ResetAction::new(
                 format!("package:{package}"),
                 "would-purge",
-                "package installed by G7 installer would be purged",
+                "설치기가 설치한 패키지를 제거할 예정입니다.",
             )
         }));
     } else if !packages.is_empty() {
@@ -225,7 +225,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             ResetAction::new(
                 format!("package:{package}"),
                 "purged",
-                "package installed by G7 installer purged",
+                "설치기가 설치한 패키지를 제거했습니다.",
             )
         }));
     }

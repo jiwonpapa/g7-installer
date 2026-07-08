@@ -899,87 +899,87 @@ fn packages(input: PackageInput<'_>) -> Vec<PlanPackage> {
     let mut packages = vec![
         PlanPackage {
             name: web_server_package(input.web_server).to_string(),
-            description: "Web server and reverse proxy.",
+            description: "도메인 요청을 PHP 앱으로 전달하는 웹서버입니다.",
         },
         PlanPackage {
             name: format!("php{}-fpm", input.php_version),
-            description: "PHP-FPM runtime for the selected app.",
+            description: "선택한 앱을 실행하는 PHP-FPM 런타임입니다.",
         },
         PlanPackage {
             name: format!(
                 "php{}-mysql php{}-mbstring php{}-xml",
                 input.php_version, input.php_version, input.php_version
             ),
-            description: "Core PHP extensions for database, strings, and XML.",
+            description: "DB 접속, 한글 문자열, XML 처리를 위한 PHP 확장입니다.",
         },
         PlanPackage {
             name: format!(
                 "php{}-curl php{}-gd php{}-zip",
                 input.php_version, input.php_version, input.php_version
             ),
-            description: "PHP extensions for HTTP, images, and archives.",
+            description: "외부 HTTP 요청, 이미지 처리, 압축 파일 처리를 위한 PHP 확장입니다.",
         },
         PlanPackage {
             name: format!(
                 "php{}-intl php{}-bcmath",
                 input.php_version, input.php_version
             ),
-            description: "PHP extensions for locale and decimal math.",
+            description: "다국어/지역화와 정밀 숫자 계산을 위한 PHP 확장입니다.",
         },
         PlanPackage {
             name: format!("php{}-imagick", input.php_version),
-            description: "Image processing extension for app media support.",
+            description: "업로드 이미지와 썸네일 처리를 돕는 PHP 이미지 확장입니다.",
         },
         PlanPackage {
             name: database_package(input.database_engine).to_string(),
-            description: "Selected SQL database server.",
+            description: "게시글, 회원, 설정 데이터를 저장하는 SQL 데이터베이스입니다.",
         },
         PlanPackage {
             name: "curl unzip ca-certificates".to_string(),
-            description: "Release download and extraction utilities.",
+            description: "앱 소스 다운로드, 압축 해제, HTTPS 검증에 필요한 도구입니다.",
         },
     ];
 
     if matches!(input.app_profile.id, "gnuboard7" | "laravel") {
         packages.push(PlanPackage {
             name: "git composer nodejs npm".to_string(),
-            description: "Application source checkout and PHP/asset build utilities.",
+            description: "앱 소스 내려받기와 PHP/프론트엔드 빌드에 필요한 도구입니다.",
         });
     }
 
     if input.php_source == PHP_SOURCE_ONDREJ {
         packages.push(PlanPackage {
             name: "software-properties-common lsb-release".to_string(),
-            description: "Required to add the Ondrej PHP PPA for non-default PHP versions.",
+            description: "Ubuntu 기본값이 아닌 PHP 버전을 설치하기 위한 apt 저장소 도구입니다.",
         });
     }
 
     if !input.local_test {
         packages.push(PlanPackage {
             name: "certbot".to_string(),
-            description: "Let's Encrypt certificate issuance.",
+            description: "Let's Encrypt SSL 인증서를 발급하고 갱신합니다.",
         });
         packages.push(PlanPackage {
             name: certbot_web_plugin_package(input.web_server).to_string(),
-            description: "Certbot web server integration.",
+            description: "웹서버와 Certbot 인증서 발급을 연결합니다.",
         });
     }
 
     if input.redis_mode == "enable" {
         packages.push(PlanPackage {
             name: "redis-server".to_string(),
-            description: "Local Redis cache/session/queue backend.",
+            description: "캐시, 세션, 큐 처리를 위한 로컬 Redis 서버입니다.",
         });
         packages.push(PlanPackage {
             name: format!("php{}-redis", input.php_version),
-            description: "PHP Redis extension.",
+            description: "PHP 앱이 Redis에 접속하도록 하는 확장입니다.",
         });
     }
 
     if input.mail_mode == "local-postfix" {
         packages.push(PlanPackage {
             name: "postfix mailutils".to_string(),
-            description: "Optional local outbound mail transport.",
+            description: "서버에서 알림 메일을 발송하기 위한 Postfix 메일 도구입니다.",
         });
     }
 

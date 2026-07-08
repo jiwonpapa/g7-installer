@@ -720,7 +720,7 @@ mod tests {
 
         assert!(output.contains("mode: dry-run"));
         assert!(output.contains("changes_made: false"));
-        assert!(output.contains("- nginx: Web server and reverse proxy."));
+        assert!(output.contains("- nginx: 도메인 요청을 PHP 앱으로 전달하는 웹서버입니다."));
         assert!(output.contains("site_user: g7"));
         assert!(output.contains("web_root: /home/g7/public_html"));
         assert!(output.contains("database_password_policy: generate-random-store-root-only"));

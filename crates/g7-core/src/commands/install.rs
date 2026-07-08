@@ -913,7 +913,7 @@ fn apply_package_phase<R: CommandRunner>(
         if !available {
             candidate_checks.push(InstallCheck::fail(
                 package,
-                "package candidate is not available from configured apt sources",
+                "현재 apt 저장소에서 설치 후보를 찾지 못했습니다.",
             ));
             summary.package_checks = candidate_checks;
             completed_steps.push("package-candidates-checked".to_string());
@@ -927,7 +927,7 @@ fn apply_package_phase<R: CommandRunner>(
         }
         candidate_checks.push(InstallCheck::pass(
             package,
-            "package candidate is available from configured apt sources",
+            "apt 저장소에서 설치 후보를 확인했습니다.",
         ));
     }
     summary.package_checks = candidate_checks;
@@ -3255,13 +3255,16 @@ fn verify_packages<R: CommandRunner>(
     packages
         .iter()
         .map(|package| match probe.package_status(package) {
-            Ok(PackageStatus::Installed) => Ok(InstallCheck::pass(package, "package installed")),
+            Ok(PackageStatus::Installed) => {
+                Ok(InstallCheck::pass(package, "패키지 설치 확인 완료"))
+            }
             Ok(PackageStatus::NotInstalled) => {
-                Ok(InstallCheck::fail(package, "package is not installed"))
+                Ok(InstallCheck::fail(package, "패키지가 설치되지 않았습니다."))
             }
-            Ok(PackageStatus::Unknown) => {
-                Ok(InstallCheck::fail(package, "package status is unknown"))
-            }
+            Ok(PackageStatus::Unknown) => Ok(InstallCheck::fail(
+                package,
+                "패키지 상태를 확인하지 못했습니다.",
+            )),
             Err(err) => Err(command_error(
                 "package-verify",
                 format!("dpkg-query {package}"),
@@ -3281,17 +3284,17 @@ fn inspect_preinstall_packages<R: CommandRunner>(
             Ok(PackageStatus::Installed) => Ok(InstallCheck {
                 name: package.clone(),
                 status: "installed".to_string(),
-                message: "package was already installed before G7 installer ran".to_string(),
+                message: "설치 전부터 있던 패키지입니다. 그대로 사용합니다.".to_string(),
             }),
             Ok(PackageStatus::NotInstalled) => Ok(InstallCheck {
                 name: package.clone(),
                 status: "not-installed".to_string(),
-                message: "package was absent before G7 installer ran".to_string(),
+                message: "설치 전에는 없던 패키지입니다. 이번 설치 대상입니다.".to_string(),
             }),
             Ok(PackageStatus::Unknown) => Ok(InstallCheck {
                 name: package.clone(),
                 status: "unknown".to_string(),
-                message: "package preinstall state is unknown".to_string(),
+                message: "설치 전 패키지 상태를 확인하지 못했습니다.".to_string(),
             }),
             Err(err) => Err(command_error(
                 "package-baseline",

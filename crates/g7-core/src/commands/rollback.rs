@@ -165,7 +165,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
                 RollbackAction::new(
                     &check.name,
                     "skipped",
-                    "package was already installed before G7 installer ran",
+                    "설치 전부터 있던 패키지라 보존합니다.",
                 )
             }),
     );
@@ -300,12 +300,12 @@ fn planned_package_actions(baseline: &[ReportCheck]) -> Vec<RollbackAction> {
         .iter()
         .map(|check| {
             if check.status == SAFE_BASELINE_STATUS {
-                RollbackAction::new(&check.name, "would-purge", "package would be purged")
+                RollbackAction::new(&check.name, "would-purge", "패키지를 제거할 예정입니다.")
             } else {
                 RollbackAction::new(
                     &check.name,
                     "skipped",
-                    "package was already installed before G7 installer ran",
+                    "설치 전부터 있던 패키지라 보존합니다.",
                 )
             }
         })
@@ -535,17 +535,17 @@ fn verify_packages_removed<R: CommandRunner>(
             Ok(PackageStatus::NotInstalled) => Ok(RollbackAction::new(
                 package,
                 "removed",
-                "package is no longer installed",
+                "패키지가 제거되었습니다.",
             )),
             Ok(PackageStatus::Installed) => Ok(RollbackAction::new(
                 package,
                 "fail",
-                "package is still installed",
+                "패키지가 아직 설치되어 있습니다.",
             )),
             Ok(PackageStatus::Unknown) => Ok(RollbackAction::new(
                 package,
                 "fail",
-                "package status is unknown",
+                "패키지 상태를 확인하지 못했습니다.",
             )),
             Err(err) => Err(command_error(
                 "package-verify",
@@ -726,8 +726,8 @@ mod tests {
     { "name": "php8.3-fpm", "status": "not-installed", "message": "absent" }
   ],
   "package_checks": [
-    { "name": "nginx", "status": "pass", "message": "package installed" },
-    { "name": "php8.3-fpm", "status": "pass", "message": "package installed" }
+    { "name": "nginx", "status": "pass", "message": "패키지 설치 확인 완료" },
+    { "name": "php8.3-fpm", "status": "pass", "message": "패키지 설치 확인 완료" }
   ],
   "service_checks": [
     { "name": "nginx", "status": "pass", "message": "service is active" },
@@ -975,8 +975,8 @@ mod tests {
   "web_root": "/home/g7/public_html",
 {baseline}
   "package_checks": [
-    {{ "name": "nginx", "status": "pass", "message": "package installed" }},
-    {{ "name": "php8.3-fpm", "status": "pass", "message": "package installed" }}
+    {{ "name": "nginx", "status": "pass", "message": "패키지 설치 확인 완료" }},
+    {{ "name": "php8.3-fpm", "status": "pass", "message": "패키지 설치 확인 완료" }}
   ],
   "service_checks": [
     {{ "name": "nginx", "status": "pass", "message": "service is active" }},

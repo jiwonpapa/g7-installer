@@ -2045,7 +2045,7 @@ mod tests {
                 preinstall_package_checks: vec![install::InstallCheck {
                     name: "nginx".to_string(),
                     status: "not-installed".to_string(),
-                    message: "package was absent before G7 installer ran".to_string(),
+                    message: "설치 전에는 없던 패키지입니다. 이번 설치 대상입니다.".to_string(),
                 }],
                 package_checks: vec![install::InstallCheck {
                     name: "nginx".to_string(),

@@ -105,8 +105,8 @@ const statusLabel = {
   fail: "실패",
   pending: "대기",
   info: "정보",
-  installed: "기존 보존",
-  "not-installed": "신규 설치",
+  installed: "기존 패키지",
+  "not-installed": "설치 대상",
   unknown: "확인 필요",
   skipped: "건너뜀",
   deferred: "후속 단계",
@@ -1066,8 +1066,133 @@ function flattenPlanPackages(packages) {
     .filter(Boolean)
     .map((name) => ({
       name,
-      description: packageGroup.description || "설치 예정 패키지",
+      description: packageDescription(name, packageGroup.description),
     })));
+}
+
+function packagePurpose(name) {
+  const packageName = String(name || "");
+  const exact = {
+    nginx: "Nginx 웹서버가 도메인 요청을 앱으로 전달합니다.",
+    apache2: "Apache 웹서버가 도메인 요청을 앱으로 전달합니다.",
+    "mysql-server": "MySQL이 사이트 데이터를 저장합니다.",
+    "mariadb-server": "MariaDB가 사이트 데이터를 저장합니다.",
+    curl: "원격 파일 다운로드에 사용합니다.",
+    unzip: "다운로드한 압축 파일을 해제합니다.",
+    "ca-certificates": "HTTPS 인증서 검증에 필요합니다.",
+    git: "앱 소스를 Git 저장소에서 내려받습니다.",
+    composer: "PHP 의존성을 설치합니다.",
+    nodejs: "프론트엔드 빌드 런타임입니다.",
+    npm: "프론트엔드 패키지를 설치하고 빌드합니다.",
+    "software-properties-common": "추가 apt 저장소를 등록합니다.",
+    "lsb-release": "Ubuntu 버전 정보를 확인합니다.",
+    certbot: "Let's Encrypt SSL 인증서를 발급하고 갱신합니다.",
+    "python3-certbot-nginx": "Nginx와 Certbot 인증서 작업을 연결합니다.",
+    "python3-certbot-apache": "Apache와 Certbot 인증서 작업을 연결합니다.",
+    "redis-server": "캐시, 세션, 큐를 처리하는 Redis 서버입니다.",
+    postfix: "서버에서 알림 메일을 발송합니다.",
+    mailutils: "메일 발송 테스트 도구입니다.",
+  };
+
+  if (exact[packageName]) {
+    return exact[packageName];
+  }
+  if (/^php\d+\.\d+-fpm$/.test(packageName)) {
+    return "PHP-FPM이 PHP 앱 실행을 담당합니다.";
+  }
+  if (/^php\d+\.\d+-mysql$/.test(packageName)) {
+    return "PHP에서 MySQL/MariaDB에 접속합니다.";
+  }
+  if (/^php\d+\.\d+-mbstring$/.test(packageName)) {
+    return "한글과 다국어 문자열 처리를 지원합니다.";
+  }
+  if (/^php\d+\.\d+-xml$/.test(packageName)) {
+    return "XML과 DOM 처리를 지원합니다.";
+  }
+  if (/^php\d+\.\d+-curl$/.test(packageName)) {
+    return "PHP에서 외부 HTTP 요청을 처리합니다.";
+  }
+  if (/^php\d+\.\d+-gd$/.test(packageName)) {
+    return "이미지 업로드와 썸네일 처리를 지원합니다.";
+  }
+  if (/^php\d+\.\d+-zip$/.test(packageName)) {
+    return "PHP에서 압축 파일을 처리합니다.";
+  }
+  if (/^php\d+\.\d+-intl$/.test(packageName)) {
+    return "다국어와 지역화 처리를 지원합니다.";
+  }
+  if (/^php\d+\.\d+-bcmath$/.test(packageName)) {
+    return "정밀 숫자 계산을 지원합니다.";
+  }
+  if (/^php\d+\.\d+-imagick$/.test(packageName)) {
+    return "고급 이미지 처리와 썸네일 생성을 지원합니다.";
+  }
+  if (/^php\d+\.\d+-redis$/.test(packageName)) {
+    return "PHP 앱이 Redis에 접속합니다.";
+  }
+
+  return "";
+}
+
+function packageDescription(name, fallback = "") {
+  return packagePurpose(name) || localizeMessage(fallback) || "설치 예정 패키지입니다.";
+}
+
+function isPackageLikeCheck(name, message = "") {
+  const packageName = String(name || "");
+  return Boolean(packagePurpose(packageName))
+    || /^php\d+\.\d+-/.test(packageName)
+    || String(message || "").startsWith("package ");
+}
+
+function packageStatusMessage(check) {
+  const purpose = packageDescription(check?.name);
+  const status = check?.status || "";
+  const message = String(check?.message || "");
+
+  if (status === "pass" || message === "package installed" || message === "패키지 설치 확인 완료") {
+    return `${purpose} 패키지 설치와 검증이 완료되었습니다.`;
+  }
+  if (
+    status === "installed"
+    || message === "package was already installed before G7 installer ran"
+    || message === "설치 전부터 있던 패키지입니다. 그대로 사용합니다."
+  ) {
+    return `${purpose} 이미 서버에 있어 그대로 사용합니다.`;
+  }
+  if (
+    status === "not-installed"
+    || message === "package was absent before G7 installer ran"
+    || message === "설치 전에는 없던 패키지입니다. 이번 설치 대상입니다."
+  ) {
+    return `${purpose} 이번 설치에서 새로 준비합니다.`;
+  }
+  if (
+    message === "package candidate is available from configured apt sources"
+    || message === "apt 저장소에서 설치 후보를 확인했습니다."
+  ) {
+    return `${purpose} apt 저장소에서 설치 가능함을 확인했습니다.`;
+  }
+  if (
+    message === "package candidate is not available from configured apt sources"
+    || message === "현재 apt 저장소에서 설치 후보를 찾지 못했습니다."
+  ) {
+    return `${purpose} 현재 apt 저장소에서 찾지 못했습니다.`;
+  }
+  if (status === "fail" || message === "package is not installed" || message === "패키지가 설치되지 않았습니다.") {
+    return `${purpose} 설치 확인에 실패했습니다.`;
+  }
+  if (
+    status === "unknown"
+    || message === "package preinstall state is unknown"
+    || message === "package status is unknown"
+    || message === "설치 전 패키지 상태를 확인하지 못했습니다."
+    || message === "패키지 상태를 확인하지 못했습니다."
+  ) {
+    return `${purpose} 설치 상태를 확인하지 못했습니다.`;
+  }
+
+  return purpose;
 }
 
 function renderPackageProgress(packages) {
@@ -1128,7 +1253,12 @@ function startPackageTicker() {
 
   let index = 0;
   let percent = 0;
-  updatePackageProgress(state.planPackages[index].name, "설치 중", 5, "apt 작업을 준비하고 있습니다.");
+  updatePackageProgress(
+    state.planPackages[index].name,
+    "설치 중",
+    5,
+    `${packageDescription(state.planPackages[index].name)} 설치를 준비하고 있습니다.`,
+  );
 
   state.packageTicker = window.setInterval(() => {
     if (!state.installRunning) {
@@ -1138,18 +1268,23 @@ function startPackageTicker() {
 
     const packageItem = state.planPackages[index];
     percent = Math.min(95, percent + 10);
-    updatePackageProgress(packageItem.name, "설치 중", percent, "apt 설치 또는 검증을 진행 중입니다.");
+    updatePackageProgress(packageItem.name, "설치 중", percent, `${packageDescription(packageItem.name)} 설치 또는 검증을 진행 중입니다.`);
 
     if (percent >= 95 && index < state.planPackages.length - 1) {
       updatePackageProgress(
         packageItem.name,
         "검증 대기",
         100,
-        "apt 설치 요청을 넘겼고 최종 검증 결과를 기다리고 있습니다.",
+        `${packageDescription(packageItem.name)} 최종 검증 결과를 기다리고 있습니다.`,
       );
       index += 1;
       percent = 5;
-      updatePackageProgress(state.planPackages[index].name, "설치 중", percent, "apt 작업을 준비하고 있습니다.");
+      updatePackageProgress(
+        state.planPackages[index].name,
+        "설치 중",
+        percent,
+        `${packageDescription(state.planPackages[index].name)} 설치를 준비하고 있습니다.`,
+      );
     }
   }, 700);
 }
@@ -1170,9 +1305,9 @@ function applyPackageChecks(checks) {
   checks.forEach((check) => {
     updatePackageProgress(
       check.name,
-      check.status === "pass" ? "설치됨" : "실패",
+      check.status === "pass" ? "설치 완료" : "실패",
       100,
-      check.message || "",
+      packageStatusMessage(check),
     );
   });
 }
@@ -1337,7 +1472,7 @@ function packageItemsFromChecks(checks) {
 
   return checks.map((check) => ({
     name: check.name,
-    description: check.message || "저장된 설치 리포트",
+    description: packageStatusMessage(check),
   }));
 }
 
@@ -1613,12 +1748,12 @@ function checksCard(title, checks) {
         ${rows.map((check) => {
           const normalizedStatus = checkStatus(check.status);
           return `
-          <div class="result-row" data-status="${normalizedStatus}">
+            <div class="result-row" data-status="${normalizedStatus}">
             <div class="result-copy">
               <span>${escapeHtml(check.name)}</span>
-              <p>${escapeHtml(checkMessage(check.status, check.message))}</p>
+              <p>${escapeHtml(checkMessage(check))}</p>
             </div>
-            <strong>${escapeHtml(checkStatusLabel(check.status, normalizedStatus))}</strong>
+            <strong>${escapeHtml(checkStatusLabel(check.status, normalizedStatus, check))}</strong>
           </div>
         `;
         }).join("")}
@@ -1660,17 +1795,37 @@ function checkStatus(status) {
   return status === "fail" ? "fail" : "pending";
 }
 
-function checkStatusLabel(status, normalizedStatus) {
+function checkStatusLabel(status, normalizedStatus, check = null) {
+  if (check && isPackageLikeCheck(check.name, check.message)) {
+    if (status === "pass") {
+      return "설치 완료";
+    }
+    if (status === "installed") {
+      return "기존 패키지";
+    }
+    if (status === "not-installed") {
+      return "설치 대상";
+    }
+    if (status === "fail") {
+      return "설치 실패";
+    }
+  }
   return statusLabel[status] || statusLabel[normalizedStatus] || status || "대기";
 }
 
-function checkMessage(status, message) {
+function checkMessage(checkOrStatus, maybeMessage = "") {
+  const check = typeof checkOrStatus === "object" && checkOrStatus !== null
+    ? checkOrStatus
+    : { status: checkOrStatus, message: maybeMessage, name: "" };
+  if (isPackageLikeCheck(check.name, check.message)) {
+    return packageStatusMessage(check);
+  }
   const labelByMessage = {
     "package was already installed before G7 installer ran": "설치 전부터 있던 패키지입니다. 되돌리기 때 보존합니다.",
-    "package was absent before G7 installer ran": "설치 전에는 없던 패키지입니다. 이번 설치기가 설치했습니다.",
+    "package was absent before G7 installer ran": "설치 전에는 없던 패키지입니다. 이번 설치 대상입니다.",
     "package preinstall state is unknown": "설치 전 패키지 상태를 확인하지 못했습니다.",
   };
-  return labelByMessage[message] || message || "";
+  return labelByMessage[check.message] || localizeMessage(check.message) || "";
 }
 
 function actionStatus(status) {
