@@ -13,9 +13,13 @@ use crate::{Error, Result};
 pub use crate::app_profile::DEFAULT_APP_PROFILE;
 use g7_state::owned_files::OWNED_FILES_PATH;
 use g7_state::state::STATE_PATH;
-use g7_system::php::{DEFAULT_FPM_VERSION, SUPPORTED_FPM_VERSIONS};
+use g7_system::php::{
+    DEFAULT_FPM_VERSION, PHP_SOURCE_AUTO, PHP_SOURCE_ONDREJ, PHP_SOURCE_UBUNTU,
+    SUPPORTED_FPM_VERSIONS, SUPPORTED_PHP_SOURCES,
+};
 
 pub const DEFAULT_PHP_VERSION: &str = DEFAULT_FPM_VERSION;
+pub const DEFAULT_PHP_SOURCE: &str = PHP_SOURCE_AUTO;
 pub const DEFAULT_WEB_SERVER: &str = "nginx";
 pub const DEFAULT_DATABASE_ENGINE: &str = "mysql";
 pub const DEFAULT_SITE_USER: &str = "g7";
@@ -48,6 +52,7 @@ pub struct InstallPlan {
     pub app_document_root: String,
     pub web_server: String,
     pub php_version: String,
+    pub php_source: String,
     pub database_engine: String,
     pub site_user: String,
     pub web_root_mode: String,
@@ -416,6 +421,7 @@ pub struct PlanOptions {
     pub app_profile: String,
     pub web_server: String,
     pub php_version: String,
+    pub php_source: String,
     pub database_engine: String,
     pub site_user: String,
     pub site_user_password: Option<String>,
@@ -442,6 +448,7 @@ impl Default for PlanOptions {
             app_profile: DEFAULT_APP_PROFILE.to_string(),
             web_server: DEFAULT_WEB_SERVER.to_string(),
             php_version: DEFAULT_PHP_VERSION.to_string(),
+            php_source: DEFAULT_PHP_SOURCE.to_string(),
             database_engine: DEFAULT_DATABASE_ENGINE.to_string(),
             site_user: DEFAULT_SITE_USER.to_string(),
             site_user_password: None,
@@ -478,6 +485,7 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         options.database_engine,
         &SUPPORTED_DATABASE_ENGINES,
     )?;
+    let php_source = normalize_php_source(&php_version, options.php_source)?;
     let site_user = normalize_site_user(options.site_user)?;
     validate_site_user_password(options.site_user_password.as_deref())?;
     let web_root_mode = normalize_web_root_mode(options.web_root_mode, &options.custom_web_root)?;
@@ -524,6 +532,7 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
     let packages = packages(
         &web_server,
         &php_version,
+        &php_source,
         &database_engine,
         &redis_mode,
         &mail_mode,
@@ -568,6 +577,7 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         app_document_root: &app_document_root,
         web_server: &web_server,
         php_version: &php_version,
+        php_source: &php_source,
         database_engine: &database_engine,
         database_name: &database_name,
         database_user: &database_user,
@@ -592,6 +602,7 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         app_document_root,
         web_server,
         php_version: php_version.clone(),
+        php_source,
         database_engine,
         site_user,
         web_root_mode,
@@ -707,6 +718,7 @@ fn preflight_gates(local_test: bool) -> Vec<PlanGate> {
 fn packages(
     web_server: &str,
     php_version: &str,
+    php_source: &str,
     database_engine: &str,
     redis_mode: &str,
     mail_mode: &str,
@@ -746,6 +758,13 @@ fn packages(
             description: "Release download and extraction utilities.",
         },
     ];
+
+    if php_source == PHP_SOURCE_ONDREJ {
+        packages.push(PlanPackage {
+            name: "software-properties-common lsb-release".to_string(),
+            description: "Required to add the Ondrej PHP PPA for non-default PHP versions.",
+        });
+    }
 
     if !local_test {
         packages.push(PlanPackage {
@@ -1243,6 +1262,7 @@ struct ProvisioningInput<'a> {
     app_document_root: &'a str,
     web_server: &'a str,
     php_version: &'a str,
+    php_source: &'a str,
     database_engine: &'a str,
     database_name: &'a str,
     database_user: &'a str,
@@ -1368,6 +1388,7 @@ fn provisioning_sections(input: ProvisioningInput<'_>) -> Vec<ProvisioningSectio
                 input.php_version
             ),
             settings: vec![
+                ProvisioningSetting::new("package_source", input.php_source),
                 ProvisioningSetting::new("pool_user", input.site_user),
                 ProvisioningSetting::new(
                     "pm_policy",
@@ -1776,6 +1797,31 @@ fn normalize_php_version(version: String) -> Result<String> {
             supported: SUPPORTED_FPM_VERSIONS.join(", "),
         })
     }
+}
+
+fn normalize_php_source(php_version: &str, source: String) -> Result<String> {
+    let source = normalize_supported_option("php-source", source, &SUPPORTED_PHP_SOURCES)?;
+    let source = if source == PHP_SOURCE_AUTO {
+        if php_version == DEFAULT_PHP_VERSION {
+            PHP_SOURCE_UBUNTU
+        } else {
+            PHP_SOURCE_ONDREJ
+        }
+    } else {
+        source.as_str()
+    };
+
+    if source == PHP_SOURCE_UBUNTU && php_version != DEFAULT_PHP_VERSION {
+        return Err(Error::InvalidOption {
+            field: "php-source",
+            value: format!("{source}+php{php_version}"),
+            supported: format!(
+                "Ubuntu 24.04 기본 apt는 PHP {DEFAULT_PHP_VERSION} 기준입니다. PHP {php_version}은 php-source=ondrej로 Ondrej PHP PPA를 추가해야 합니다."
+            ),
+        });
+    }
+
+    Ok(source.to_string())
 }
 
 fn normalize_site_user(site_user: String) -> Result<String> {
@@ -2251,11 +2297,41 @@ mod tests {
         let plan = build_with_options("example.com".to_string(), options)?;
 
         assert_eq!(plan.php_version, "8.5");
+        assert_eq!(plan.php_source, "ondrej");
         assert!(
             plan.packages
                 .iter()
                 .any(|package| package.name == "php8.5-fpm")
         );
+        assert!(
+            plan.packages
+                .iter()
+                .any(|package| package.name.contains("software-properties-common"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn plan_rejects_php_85_with_ubuntu_source()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let options = PlanOptions {
+            php_version: "8.5".to_string(),
+            php_source: "ubuntu".to_string(),
+            ..PlanOptions::default()
+        };
+
+        let err = match build_with_options("example.com".to_string(), options) {
+            Ok(_) => return Err(std::io::Error::other("ubuntu php source should fail").into()),
+            Err(err) => err,
+        };
+
+        assert!(matches!(
+            err,
+            Error::InvalidOption {
+                field: "php-source",
+                ..
+            }
+        ));
         Ok(())
     }
 

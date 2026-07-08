@@ -109,6 +109,8 @@ struct SetupRequest {
     local_test: bool,
     web_server: String,
     php_version: String,
+    #[serde(default = "default_php_source")]
+    php_source: String,
     database: String,
     database_version: String,
     app_package: String,
@@ -185,6 +187,7 @@ struct PlanApiReport {
     app_document_root: String,
     web_server: String,
     php_version: String,
+    php_source: String,
     database: String,
     database_version: String,
     app_package: String,
@@ -269,6 +272,7 @@ struct InstallApiReport {
     app_document_root: String,
     web_server: String,
     php_version: String,
+    php_source: String,
     database: String,
     database_version: String,
     app_package: String,
@@ -762,7 +766,7 @@ async fn api_install_prepare(
             );
             Err(ApiError::bad_request(error)
                 .with_hint(
-                    "리포트의 실패 항목을 확인하세요. 패키지 버전 문제면 PHP 8.3 같은 Ubuntu 기본 패키지 조합으로 다시 시도하세요.",
+                    "리포트의 실패 항목을 확인하세요. PHP 8.5 선택 시 Ondrej PHP PPA 추가 단계와 apt 네트워크 로그를 먼저 확인하세요.",
                 )
                 .with_details(details))
         }
@@ -980,6 +984,7 @@ fn options_from_request(request: SetupRequest) -> plan::PlanOptions {
         request.app_package,
         request.web_server,
         request.php_version,
+        request.php_source,
         request.database,
         request.site_user,
         request
@@ -1000,6 +1005,10 @@ fn options_from_request(request: SetupRequest) -> plan::PlanOptions {
         request.preserve_config,
         request.dns_check,
     )
+}
+
+fn default_php_source() -> String {
+    plan::DEFAULT_PHP_SOURCE.to_string()
 }
 
 fn validate_site_password_request(request: &SetupRequest) -> std::result::Result<(), ApiError> {
@@ -1095,6 +1104,7 @@ fn plan_to_api(install_plan: plan::InstallPlan, database_version: String) -> Pla
         app_document_root: install_plan.app_document_root.clone(),
         web_server: install_plan.web_server,
         php_version: install_plan.php_version,
+        php_source: install_plan.php_source,
         database: install_plan.database_engine,
         database_version,
         app_package: install_plan.app_profile,
@@ -1193,6 +1203,7 @@ fn install_to_api(report: install::InstallReport, database_version: String) -> I
         app_document_root: report.app_document_root.clone(),
         web_server: report.web_server,
         php_version: report.php_version,
+        php_source: report.php_source,
         database: report.database_engine,
         database_version,
         app_package: report.app_profile,
@@ -1592,6 +1603,7 @@ mod tests {
             local_test: true,
             web_server: "nginx".to_string(),
             php_version: "8.3".to_string(),
+            php_source: "auto".to_string(),
             database: "mysql".to_string(),
             database_version: "apt-default".to_string(),
             app_package: "gnuboard7".to_string(),
@@ -1903,6 +1915,7 @@ mod tests {
                 app_document_root: "/home/g7/public_html/public".to_string(),
                 web_server: "nginx".to_string(),
                 php_version: "8.3".to_string(),
+                php_source: "ubuntu".to_string(),
                 database_engine: "mysql".to_string(),
                 site_user: "g7".to_string(),
                 web_root_mode: "public-html".to_string(),

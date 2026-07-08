@@ -609,6 +609,7 @@ function optionPayload() {
     domain: form.get("domain")?.trim() || "example.com",
     web_server: form.get("web_server"),
     php_version: form.get("php_version"),
+    php_source: phpSourceForVersion(form.get("php_version")),
     database: form.get("database"),
     database_version: form.get("database_version"),
     app_package: form.get("app_package"),
@@ -755,7 +756,7 @@ function refreshSummary() {
 
   const payload = optionPayload();
   nodes.summaryDomain.textContent = payload.domain;
-  nodes.summaryRuntime.textContent = `${runtimeLabel(payload.web_server)} / PHP ${payload.php_version}`;
+  nodes.summaryRuntime.textContent = `${runtimeLabel(payload.web_server)} / ${phpRuntimeLabel(payload.php_version, payload.php_source)}`;
   nodes.summaryData.textContent = `${databaseLabel(payload.database)} / Redis ${payload.redis === "enable" ? "사용" : "미사용"}`;
   nodes.summaryApp.textContent = appPackageLabel(payload.app_package);
 }
@@ -766,7 +767,7 @@ function renderDraftPlan() {
     "설치 계획 요청값",
     `도메인: ${payload.domain}`,
     `웹서버: ${runtimeLabel(payload.web_server)}`,
-    `PHP: ${payload.php_version}`,
+    `PHP: ${phpRuntimeLabel(payload.php_version, payload.php_source)}`,
     `데이터베이스: ${databaseLabel(payload.database)} (${databaseVersionLabel(payload.database_version)})`,
     `설치할 앱: ${appPackageLabel(payload.app_package)}`,
     `사이트 계정: ${payload.site_user}`,
@@ -783,6 +784,18 @@ function renderDraftPlan() {
 
 function runtimeLabel(value) {
   return value === "apache" ? "Apache" : "Nginx";
+}
+
+function phpSourceForVersion(version) {
+  return version === "8.3" ? "ubuntu" : "ondrej";
+}
+
+function phpSourceLabel(value) {
+  return value === "ondrej" ? "Ondrej PPA" : "Ubuntu 기본 apt";
+}
+
+function phpRuntimeLabel(version, source = phpSourceForVersion(version)) {
+  return `PHP ${version || "-"} (${phpSourceLabel(source)})`;
 }
 
 function databaseLabel(value) {
@@ -1306,7 +1319,7 @@ function renderInstallReport(report) {
     reportSummaryCard("기본 서버 구성 완료", [
       ["도메인", report.domain],
       ["접속 주소", link.html],
-      ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / PHP ${report.php_version}`],
+      ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / ${phpRuntimeLabel(report.php_version, report.php_source)}`],
       ["데이터베이스", `${databaseLabel(report.database)} (${databaseVersionLabel(report.database_version)})`],
       ["앱 패키지", appPackageLabel(report.app_package)],
       ["앱 문서 루트", report.app_document_root || "-"],
@@ -1377,7 +1390,7 @@ function renderSavedReport(payload) {
       ["도메인", report.domain || "-"],
       ["접속 주소", link.html],
       ["단계", report.phase || "-"],
-      ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / PHP ${report.php_version || "-"}`],
+      ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / ${phpRuntimeLabel(report.php_version, report.php_source)}`],
       ["데이터베이스", databaseLabel(report.database)],
       ["앱 패키지", appPackageLabel(report.app_package || report.app_profile)],
       ["앱 문서 루트", report.app_document_root || "-"],
@@ -1578,7 +1591,7 @@ function renderPlanReport(report) {
     "설치 계획 요약",
     `도메인: ${report.domain}`,
     `웹서버: ${runtimeLabel(report.web_server)}`,
-    `PHP: ${report.php_version}`,
+    `PHP: ${phpRuntimeLabel(report.php_version, report.php_source)}`,
     `데이터베이스: ${databaseLabel(report.database)} (${databaseVersionLabel(report.database_version)})`,
     `설치할 앱: ${appPackageLabel(report.app_package)} - 서버 스택 준비 후 마지막 설치 대상`,
     `앱 문서 루트: ${report.app_document_root || "-"}`,
@@ -1626,7 +1639,7 @@ function resetInstallStages() {
 function installConfirmSummaryHtml(payload) {
   const entries = [
     ["도메인", payload.domain],
-    ["웹서버 / PHP", `${runtimeLabel(payload.web_server)} / PHP ${payload.php_version}`],
+    ["웹서버 / PHP", `${runtimeLabel(payload.web_server)} / ${phpRuntimeLabel(payload.php_version, payload.php_source)}`],
     ["데이터베이스", `${databaseLabel(payload.database)} (${databaseVersionLabel(payload.database_version)})`],
     ["앱 패키지", appPackageLabel(payload.app_package)],
     ["웹루트", payload.web_root || payload.web_root_mode],

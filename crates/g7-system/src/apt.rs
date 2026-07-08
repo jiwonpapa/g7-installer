@@ -49,6 +49,19 @@ pub fn apt_purge<R: CommandRunner>(
     )
 }
 
+pub fn apt_add_repository<R: CommandRunner>(
+    runner: &R,
+    repository: &str,
+) -> Result<CommandOutput, CommandError> {
+    runner.run(
+        &CommandSpec::new("env")
+            .arg("LC_ALL=C.UTF-8")
+            .arg("add-apt-repository")
+            .arg("-y")
+            .arg(repository),
+    )
+}
+
 pub fn apt_candidate_available<R: CommandRunner>(
     runner: &R,
     package: &str,
@@ -73,7 +86,7 @@ fn apt_env() -> CommandSpec {
 
 #[cfg(test)]
 mod tests {
-    use super::{apt_candidate_available, apt_install, apt_purge, apt_update};
+    use super::{apt_add_repository, apt_candidate_available, apt_install, apt_purge, apt_update};
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
 
@@ -140,6 +153,27 @@ mod tests {
         runner.push_output(CommandOutput::success("php8.5-fpm:\n  Candidate: (none)\n"));
 
         assert!(!apt_candidate_available(&runner, "php8.5-fpm")?);
+        Ok(())
+    }
+
+    #[test]
+    fn apt_add_repository_is_noninteractive_and_shell_free()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success(""));
+
+        apt_add_repository(&runner, "ppa:ondrej/php")?;
+        let recorded = runner.recorded();
+
+        assert_eq!(recorded[0].program, OsString::from("env"));
+        assert_eq!(recorded[0].args[0], OsString::from("LC_ALL=C.UTF-8"));
+        assert!(
+            recorded[0]
+                .args
+                .contains(&OsString::from("add-apt-repository"))
+        );
+        assert!(recorded[0].args.contains(&OsString::from("-y")));
+        assert!(recorded[0].args.contains(&OsString::from("ppa:ondrej/php")));
         Ok(())
     }
 }

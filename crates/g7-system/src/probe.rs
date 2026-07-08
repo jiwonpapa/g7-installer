@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::account::{
     chmod_recursive, chown_recursive, create_login_user, set_login_password, user_exists,
 };
-use crate::apt::{apt_candidate_available, apt_install, apt_purge, apt_update};
+use crate::apt::{apt_add_repository, apt_candidate_available, apt_install, apt_purge, apt_update};
 use crate::certbot::renew_dry_run;
 use crate::command::{CommandError, CommandOutput, CommandRunner, RealCommandRunner};
 use crate::network::{
@@ -73,6 +73,10 @@ impl<R: CommandRunner> SystemProbe<R> {
 
     pub fn apt_install(&self, packages: &[String]) -> Result<CommandOutput, SystemProbeError> {
         apt_install(&self.runner, packages).map_err(SystemProbeError::Command)
+    }
+
+    pub fn apt_add_repository(&self, repository: &str) -> Result<CommandOutput, SystemProbeError> {
+        apt_add_repository(&self.runner, repository).map_err(SystemProbeError::Command)
     }
 
     pub fn apt_purge(&self, packages: &[String]) -> Result<CommandOutput, SystemProbeError> {

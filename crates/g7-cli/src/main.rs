@@ -54,9 +54,12 @@ enum Command {
         /// Web server: nginx or apache.
         #[arg(long, default_value_t = plan::DEFAULT_WEB_SERVER.to_string())]
         web_server: String,
-        /// PHP-FPM version. Default is 8.3. Use 8.5 only when available from apt sources.
+        /// PHP-FPM version. Default is 8.3. PHP 8.5 adds the Ondrej PHP PPA automatically.
         #[arg(long, default_value_t = plan::DEFAULT_PHP_VERSION.to_string())]
         php_version: String,
+        /// PHP apt source: auto, ubuntu, or ondrej.
+        #[arg(long, default_value_t = plan::DEFAULT_PHP_SOURCE.to_string())]
+        php_source: String,
         /// Database engine: mysql or mariadb.
         #[arg(long, default_value_t = plan::DEFAULT_DATABASE_ENGINE.to_string())]
         database: String,
@@ -120,9 +123,12 @@ enum Command {
         /// Web server: nginx or apache.
         #[arg(long, default_value_t = plan::DEFAULT_WEB_SERVER.to_string())]
         web_server: String,
-        /// PHP-FPM version. Default is 8.3. Use 8.5 only when available from apt sources.
+        /// PHP-FPM version. Default is 8.3. PHP 8.5 adds the Ondrej PHP PPA automatically.
         #[arg(long, default_value_t = plan::DEFAULT_PHP_VERSION.to_string())]
         php_version: String,
+        /// PHP apt source: auto, ubuntu, or ondrej.
+        #[arg(long, default_value_t = plan::DEFAULT_PHP_SOURCE.to_string())]
+        php_source: String,
         /// Database engine: mysql or mariadb.
         #[arg(long, default_value_t = plan::DEFAULT_DATABASE_ENGINE.to_string())]
         database: String,
@@ -226,6 +232,7 @@ async fn main() -> Result<()> {
             app_profile,
             web_server,
             php_version,
+            php_source,
             database,
             site_user,
             web_root_mode,
@@ -250,6 +257,7 @@ async fn main() -> Result<()> {
                     app_profile,
                     web_server,
                     php_version,
+                    php_source,
                     database,
                     site_user,
                     None,
@@ -277,6 +285,7 @@ async fn main() -> Result<()> {
             app_profile,
             web_server,
             php_version,
+            php_source,
             database,
             site_user,
             web_root_mode,
@@ -302,6 +311,7 @@ async fn main() -> Result<()> {
                         app_profile,
                         web_server,
                         php_version,
+                        php_source,
                         database,
                         site_user,
                         None,
@@ -349,6 +359,7 @@ pub(crate) fn plan_options(
     app_profile: String,
     web_server: String,
     php_version: String,
+    php_source: String,
     database: String,
     site_user: String,
     site_user_password: Option<String>,
@@ -372,6 +383,7 @@ pub(crate) fn plan_options(
         app_profile,
         web_server,
         php_version,
+        php_source,
         database_engine: database,
         site_user,
         site_user_password,
@@ -422,6 +434,7 @@ pub(crate) fn format_plan(plan: &plan::InstallPlan) -> String {
     output.push_str(&format!("app_document_root: {}\n", plan.app_document_root));
     output.push_str(&format!("web_server: {}\n", plan.web_server));
     output.push_str(&format!("php_version: {}\n", plan.php_version));
+    output.push_str(&format!("php_source: {}\n", plan.php_source));
     output.push_str(&format!("database: {}\n", plan.database_engine));
     output.push_str(&format!("site_user: {}\n", plan.site_user));
     output.push_str(&format!("web_root_mode: {}\n", plan.web_root_mode));
@@ -542,6 +555,7 @@ fn print_install(report: install::InstallReport) {
     println!("app_document_root: {}", report.app_document_root);
     println!("web_server: {}", report.web_server);
     println!("php_version: {}", report.php_version);
+    println!("php_source: {}", report.php_source);
     println!("database: {}", report.database_engine);
     println!("site_user: {}", report.site_user);
     println!("web_root_mode: {}", report.web_root_mode);

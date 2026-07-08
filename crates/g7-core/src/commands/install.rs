@@ -50,6 +50,7 @@ pub struct InstallReport {
     pub app_document_root: String,
     pub web_server: String,
     pub php_version: String,
+    pub php_source: String,
     pub database_engine: String,
     pub site_user: String,
     pub web_root_mode: String,
@@ -266,6 +267,10 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     };
 
     completed_steps.push("apt-updated".to_string());
+    if install_plan.php_source == g7_system::php::PHP_SOURCE_ONDREJ {
+        completed_steps.push("php-apt-source-added".to_string());
+        completed_steps.push("apt-updated-after-php-source".to_string());
+    }
     completed_steps.push("package-candidates-checked".to_string());
     completed_steps.push("packages-installed".to_string());
     completed_steps.push("services-enabled".to_string());
@@ -438,6 +443,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         app_document_root: install_plan.app_document_root,
         web_server: install_plan.web_server,
         php_version: install_plan.php_version,
+        php_source: install_plan.php_source,
         database_engine: install_plan.database_engine,
         site_user: install_plan.site_user,
         web_root_mode: install_plan.web_root_mode,
@@ -518,6 +524,33 @@ fn apply_package_phase<R: CommandRunner>(
         .map_err(|err| command_error("apt-update", "apt-get update", err))?;
     require_success("apt-update", "apt-get update", output)?;
 
+    if plan.php_source == g7_system::php::PHP_SOURCE_ONDREJ {
+        let source_packages = php_source_prerequisite_packages();
+        let install_command = format!("apt-get install -y {}", source_packages.join(" "));
+        let output = probe
+            .apt_install(&source_packages)
+            .map_err(|err| command_error("php-source-prerequisites", &install_command, err))?;
+        require_success("php-source-prerequisites", install_command, output)?;
+
+        let output = probe.apt_add_repository("ppa:ondrej/php").map_err(|err| {
+            command_error(
+                "php-source-add",
+                "add-apt-repository -y ppa:ondrej/php",
+                err,
+            )
+        })?;
+        require_success(
+            "php-source-add",
+            "add-apt-repository -y ppa:ondrej/php",
+            output,
+        )?;
+
+        let output = probe
+            .apt_update()
+            .map_err(|err| command_error("apt-update-after-php-source", "apt-get update", err))?;
+        require_success("apt-update-after-php-source", "apt-get update", output)?;
+    }
+
     for package in &packages {
         let available = probe.apt_candidate_available(package).map_err(|err| {
             command_error("apt-candidate", format!("apt-cache policy {package}"), err)
@@ -562,6 +595,14 @@ fn apply_package_phase<R: CommandRunner>(
         certbot_checks,
         vhost_checks: Vec::new(),
     })
+}
+
+fn php_source_prerequisite_packages() -> Vec<String> {
+    vec![
+        "software-properties-common".to_string(),
+        "ca-certificates".to_string(),
+        "lsb-release".to_string(),
+    ]
 }
 
 fn apply_site_phase<R: CommandRunner>(
@@ -1399,6 +1440,7 @@ fn config_content(plan: &plan::InstallPlan) -> String {
     ));
     content.push_str(&format!("web_server = \"{}\"\n", plan.web_server));
     content.push_str(&format!("php_version = \"{}\"\n", plan.php_version));
+    content.push_str(&format!("php_source = \"{}\"\n", plan.php_source));
     content.push_str(&format!("database = \"{}\"\n", plan.database_engine));
     content.push_str(&format!("database_name = \"{}\"\n", plan.database_name));
     content.push_str(&format!("database_user = \"{}\"\n", plan.database_user));
@@ -1465,6 +1507,7 @@ fn report_content(
         "app_document_root": &plan.app_document_root,
         "web_server": &plan.web_server,
         "php_version": &plan.php_version,
+        "php_source": &plan.php_source,
         "database": &plan.database_engine,
         "database_name": &plan.database_name,
         "database_user": &plan.database_user,
@@ -1899,6 +1942,11 @@ mod tests {
             runner.push_output(CommandOutput::failure(1, "no packages found"));
         }
         runner.push_output(CommandOutput::success("apt update ok\n"));
+        runner.push_output(CommandOutput::success(
+            "php source prerequisites installed\n",
+        ));
+        runner.push_output(CommandOutput::success("ondrej ppa added\n"));
+        runner.push_output(CommandOutput::success("apt update after php source ok\n"));
         runner.push_output(CommandOutput::success("nginx:\n  Candidate: 1\n"));
         runner.push_output(CommandOutput::success("php8.5-fpm:\n  Candidate: (none)\n"));
         let probe = SystemProbe::new(runner)
@@ -1921,6 +1969,41 @@ mod tests {
         assert!(report.contains("\"phase\": \"package-failed\""));
         assert!(report.contains("php8.5-fpm"));
         assert!(state.contains("\"phase\": \"package-failed\""));
+
+        fs::remove_file(os_release_path)?;
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn install_adds_ondrej_source_for_php_85() -> std::result::Result<(), Box<dyn std::error::Error>>
+    {
+        let os_release_path = write_temp_os_release()?;
+        let fs_root = create_temp_fs_root()?;
+        let options = super::plan::PlanOptions {
+            php_version: "8.5".to_string(),
+            ..super::plan::PlanOptions::default()
+        };
+        let probe =
+            clean_root_probe_for_options(&os_release_path, &fs_root, "example.com", &options)?;
+        let paths = InstallPaths::with_root(&fs_root);
+
+        let report = run_with_probe_and_paths("example.com".to_string(), options, &probe, &paths)?;
+        let report_json = fs::read_to_string(fs_root.join("var/log/g7-installer/report.json"))?;
+
+        assert_eq!(report.php_version, "8.5");
+        assert_eq!(report.php_source, "ondrej");
+        assert!(
+            report
+                .completed_steps
+                .contains(&"php-apt-source-added".to_string())
+        );
+        assert!(
+            report
+                .completed_steps
+                .contains(&"apt-updated-after-php-source".to_string())
+        );
+        assert!(report_json.contains("\"php_source\": \"ondrej\""));
 
         fs::remove_file(os_release_path)?;
         fs::remove_dir_all(fs_root)?;
@@ -1994,6 +2077,13 @@ mod tests {
             runner.push_output(CommandOutput::failure(1, "no packages found"));
         }
         runner.push_output(CommandOutput::success("apt update ok\n"));
+        if install_plan.php_source == g7_system::php::PHP_SOURCE_ONDREJ {
+            runner.push_output(CommandOutput::success(
+                "php source prerequisites installed\n",
+            ));
+            runner.push_output(CommandOutput::success("ondrej ppa added\n"));
+            runner.push_output(CommandOutput::success("apt update after php source ok\n"));
+        }
         for package in &packages {
             runner.push_output(CommandOutput::success(format!(
                 "{package}:\n  Candidate: 1\n"

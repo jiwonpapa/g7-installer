@@ -79,7 +79,7 @@ pub enum Error {
     #[diagnostic(
         code(g7::install::package_unavailable),
         help(
-            "Run with a package version available on this Ubuntu release, or add the required apt source before retrying."
+            "For PHP 8.5, retry with php-source=ondrej or use the web setup option that adds the Ondrej PHP PPA automatically."
         )
     )]
     PackageUnavailable { package: String },
