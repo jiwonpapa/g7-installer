@@ -316,8 +316,16 @@ struct InstallApiCheck {
 #[derive(Debug, Serialize)]
 struct ResetApiReport {
     dry_run: bool,
+    actions: Vec<ResetApiAction>,
     removed: Vec<String>,
     missing: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ResetApiAction {
+    name: String,
+    status: String,
+    message: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -799,7 +807,7 @@ async fn api_reset(
         &state,
         "reset",
         10,
-        "reset progress: starting metadata cleanup",
+        "reset progress: starting full installer reset",
     );
     let report = match reset::run(true, request.dry_run) {
         Ok(report) => report,
@@ -807,19 +815,20 @@ async fn api_reset(
             emit_progress(&state, "reset", 100, "reset progress: failed");
             emit_log(&state, format!("reset failed: {error}"));
             return Err(ApiError::bad_request(error)
-                .with_hint("root 권한과 installer owned-files 상태를 확인하세요."));
+                .with_hint("root 권한과 installer report/owned-files 상태를 확인하세요."));
         }
     };
     emit_progress(
         &state,
         "reset",
         100,
-        "reset progress: metadata cleanup completed",
+        "reset progress: full installer reset completed",
     );
     emit_log(&state, "reset completed");
 
     Ok(Json(ResetApiReport {
         dry_run: report.dry_run,
+        actions: reset_actions_to_api(report.actions),
         removed: report.removed,
         missing: report.missing,
     }))
@@ -955,7 +964,7 @@ fn recovery_status() -> RecoveryApiStatus {
             "설치 직후 패키지 되돌리기가 가능합니다. 설치기가 새로 넣은 패키지만 제거하고 메타데이터를 정리합니다."
         }
         "reset" => {
-            "설치기 메타데이터만 정리할 수 있습니다. apt 패키지나 기존 웹서비스는 제거하지 않습니다."
+            "설치기가 만든 계정, DB, 인증서, 서비스, 웹루트/설정 파일, 패키지, 메타데이터를 제거하고 재설치 상태로 되돌립니다."
         }
         _ => {
             "설치기 소유 흔적이 확인되지 않았습니다. 기존 운영 서버일 수 있으므로 자동 초기화 버튼을 제공하지 않습니다."
@@ -1270,10 +1279,22 @@ fn rollback_to_api(report: rollback::RollbackReport) -> RollbackApiReport {
         service_actions: rollback_actions_to_api(report.service_actions),
         metadata_reset: ResetApiReport {
             dry_run: report.metadata_reset.dry_run,
+            actions: reset_actions_to_api(report.metadata_reset.actions),
             removed: report.metadata_reset.removed,
             missing: report.metadata_reset.missing,
         },
     }
+}
+
+fn reset_actions_to_api(actions: Vec<reset::ResetAction>) -> Vec<ResetApiAction> {
+    actions
+        .into_iter()
+        .map(|action| ResetApiAction {
+            name: action.name,
+            status: action.status,
+            message: action.message,
+        })
+        .collect()
 }
 
 fn rollback_actions_to_api(actions: Vec<rollback::RollbackAction>) -> Vec<RollbackApiAction> {
@@ -2014,11 +2035,17 @@ mod tests {
             }],
             metadata_reset: reset::ResetReport {
                 dry_run: false,
+                actions: vec![reset::ResetAction {
+                    name: "package:nginx".to_string(),
+                    status: "purged".to_string(),
+                    message: "package purged".to_string(),
+                }],
                 removed: vec!["/etc/g7-installer".to_string()],
                 missing: vec!["/tmp/g7".to_string()],
             },
         });
         assert_eq!(rollback_api.package_actions[0].status, "removed");
+        assert_eq!(rollback_api.metadata_reset.actions[0].status, "purged");
         assert_eq!(rollback_api.metadata_reset.missing, vec!["/tmp/g7"]);
     }
 

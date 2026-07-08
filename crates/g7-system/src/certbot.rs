@@ -43,9 +43,22 @@ pub fn renew_dry_run<R: CommandRunner>(
     )
 }
 
+pub fn delete_cert<R: CommandRunner>(
+    runner: &R,
+    cert_name: &str,
+) -> Result<CommandOutput, CommandError> {
+    runner.run(
+        &CommandSpec::new(CERTBOT)
+            .arg("delete")
+            .arg("--cert-name")
+            .arg(cert_name)
+            .arg("--non-interactive"),
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::certonly_webroot;
+    use super::{certonly_webroot, delete_cert};
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
 
@@ -73,6 +86,28 @@ mod tests {
                 .contains(&OsString::from("--non-interactive"))
         );
         assert!(recorded[0].args.contains(&OsString::from("-d")));
+        Ok(())
+    }
+
+    #[test]
+    fn delete_cert_is_noninteractive_and_shell_free()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success(""));
+
+        delete_cert(&runner, "example.com")?;
+        let recorded = runner.recorded();
+
+        assert_eq!(recorded[0].program, OsString::from("certbot"));
+        assert_eq!(
+            recorded[0].args,
+            vec![
+                OsString::from("delete"),
+                OsString::from("--cert-name"),
+                OsString::from("example.com"),
+                OsString::from("--non-interactive"),
+            ]
+        );
         Ok(())
     }
 }

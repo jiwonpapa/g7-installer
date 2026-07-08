@@ -156,7 +156,9 @@ sudo g7inst rollback --yes
 sudo g7inst reset --yes
 ```
 
-`rollback`은 설치 직후 installer가 만든 패키지/도메인 연결 설정/웹루트 흔적을 되돌리는 용도입니다. 운영 중인 사이트 백업 복구 기능이 아닙니다.
+`rollback`은 앱/DB/인증서 생성 전의 초기 실패를 되돌리는 용도입니다. 운영 중인 사이트 백업 복구 기능이 아닙니다.
+
+`reset --yes`는 이 설치기가 만든 사이트 계정, 웹루트/설정 파일, 앱 systemd unit, DB/DB 계정, Let's Encrypt 인증서, 새로 설치한 apt 패키지, installer 메타데이터를 제거해 같은 신규 VPS에서 다시 설치를 시도할 수 있게 합니다. 기존 운영 서버 보존 기능이 아니라 신규 VPS 전용 재설치 초기화입니다. 실행 전 Lightsail/VPS 스냅샷을 먼저 찍으세요.
 
 ## 열어야 할 포트
 

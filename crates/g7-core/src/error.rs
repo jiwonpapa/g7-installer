@@ -138,6 +138,21 @@ pub enum Error {
     )]
     UnsafeResetPath { path: String },
 
+    #[error("reset command failed during {step}: {command} exited with status {status}")]
+    #[diagnostic(
+        code(g7::reset::command_failed),
+        help(
+            "Review the reset output and retry after fixing the failed service, account, database, certificate, or package state."
+        )
+    )]
+    ResetCommandFailed {
+        step: &'static str,
+        command: String,
+        status: i32,
+        stdout: String,
+        stderr: String,
+    },
+
     #[error("rollback requires explicit confirmation")]
     #[diagnostic(
         code(g7::rollback::confirmation_required),

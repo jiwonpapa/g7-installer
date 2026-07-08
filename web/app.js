@@ -912,7 +912,7 @@ function renderRecoveryStatus(status) {
   recoveryActionButtons("reset").forEach((button) => {
     button.disabled = !status?.can_reset;
     button.title = status?.can_reset
-      ? "설치기 소유 설정과 웹루트 기록을 정리합니다. apt 패키지는 제거하지 않습니다."
+      ? "설치기가 만든 계정, DB, 인증서, 서비스, 웹루트/설정 파일, 패키지, 메타데이터를 정리합니다."
       : (status?.can_rollback ? "패키지 설치 직후에는 패키지 되돌리기를 먼저 사용하세요." : "설치기 소유 기록이 없어 정리할 수 없습니다.");
   });
 
@@ -1449,10 +1449,11 @@ function renderSavedReport(payload) {
 
 function renderResetReport(report) {
   nodes.reportOutput.innerHTML = [
-    reportSummaryCard("설치 기록 정리 완료", [
+    reportSummaryCard("재설치 초기화 완료", [
       ["미리보기", report.dry_run ? "예" : "아니오"],
-      ["의미", "설치기 소유 설정과 웹루트 기록을 정리했습니다. apt 패키지는 제거하지 않습니다."],
+      ["의미", "설치기가 만든 계정, DB, 인증서, 서비스, 웹루트/설정 파일, 패키지, 메타데이터를 정리했습니다."],
     ]),
+    actionCard("리소스 처리", report.actions),
     listCard("삭제됨", report.removed),
     listCard("이미 없던 항목", report.missing),
   ].join("");
@@ -1568,10 +1569,10 @@ function checkMessage(status, message) {
 }
 
 function actionStatus(status) {
-  if (["removed", "disabled", "reset", "pass", "ok"].includes(status)) {
+  if (["removed", "disabled", "reset", "pass", "ok", "deleted", "dropped", "purged", "reloaded"].includes(status)) {
     return "pass";
   }
-  if (["skipped", "missing", "pending"].includes(status)) {
+  if (["skipped", "missing", "pending", "would-disable", "would-delete", "would-drop", "would-purge", "would-reload"].includes(status)) {
     return "warn";
   }
   return "fail";
@@ -1722,13 +1723,13 @@ function recoveryConfirmContent(action) {
   }
 
   return {
-    title: "설치 기록만 정리할까요?",
-    message: "설치기 소유 설정, 도메인 연결 설정, 웹루트 기록을 정리합니다. apt 패키지와 기존 운영 웹서비스는 제거하지 않습니다.",
+    title: "재설치 초기화를 실행할까요?",
+    message: "신규 VPS 전용 작업입니다. 설치기가 만든 계정, DB, 인증서, 서비스, 웹루트/설정 파일, 패키지, 메타데이터를 정리합니다.",
     yesClass: "btn btn-primary icon-button",
     rows: [
-      ["대상", "installer 상태 파일, 리포트, installer가 만든 도메인 연결 설정/웹루트"],
-      ["보존", "apt 패키지와 서비스, 설치 전부터 있던 운영 파일"],
-      ["실행 후", "패키지가 남아 있으면 신규 설치 점검이 막힐 수 있습니다."],
+      ["대상", "installer가 생성한 사이트 계정, DB/DB 계정, 인증서, 서비스, 웹루트/설정 파일, 새 패키지, 상태 파일"],
+      ["보존", "설치 전부터 있던 패키지와 운영자가 만든 파일"],
+      ["실행 후", "서버 점검 단계로 돌아가 다시 설치할 수 있습니다."],
     ],
   };
 }
@@ -1914,7 +1915,7 @@ async function runRecoveryAction(action, button) {
       successTitle,
       action === "rollback"
         ? "서비스 중지, apt 패키지 제거, 설치 기록 정리를 완료했습니다."
-        : "installer 소유 설정과 웹루트 기록을 정리했습니다.",
+        : "installer가 만든 리소스를 정리해 재설치 가능 상태로 되돌렸습니다.",
     );
     log(successTitle);
     clearWizardState();

@@ -182,12 +182,12 @@ enum Command {
     Status,
     /// Show installer log location.
     Logs,
-    /// Remove installer-owned files and legacy g7 binary for test VM reset.
+    /// Remove installer-created app, DB, account, services, packages, and metadata for reinstall.
     Reset {
-        /// Confirm removal of installer-owned files.
+        /// Confirm removal of installer-created resources.
         #[arg(long, default_value_t = false)]
         yes: bool,
-        /// Preview paths without removing files.
+        /// Preview reset actions without changing the server.
         #[arg(long, default_value_t = false)]
         dry_run: bool,
     },
@@ -628,6 +628,16 @@ fn print_logs(location: logs::LogLocation) {
 fn print_reset(report: reset::ResetReport) {
     println!("G7 Installer Reset");
     println!("dry_run: {}", report.dry_run);
+
+    println!("actions:");
+    if report.actions.is_empty() {
+        println!("- none");
+    } else {
+        for action in report.actions {
+            println!("- [{}] {} - {}", action.status, action.name, action.message);
+        }
+    }
+
     println!("removed:");
     for path in report.removed {
         println!("- {path}");
@@ -669,6 +679,14 @@ fn print_rollback(report: rollback::RollbackReport) {
     println!();
     println!("Metadata reset:");
     println!("dry_run: {}", report.metadata_reset.dry_run);
+    println!("actions:");
+    if report.metadata_reset.actions.is_empty() {
+        println!("- none");
+    } else {
+        for action in report.metadata_reset.actions {
+            println!("- [{}] {} - {}", action.status, action.name, action.message);
+        }
+    }
     println!("removed:");
     for path in report.metadata_reset.removed {
         println!("- {path}");

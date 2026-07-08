@@ -129,7 +129,8 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     let service_plan = planned_service_actions(&services, &baseline, &report)?;
     require_web_root_owned_only(paths, report_string(&report, "web_root").as_deref())?;
 
-    let metadata_reset = reset::run_with_probe_and_paths(true, true, probe, &paths.reset_paths())?;
+    let metadata_reset =
+        reset::run_metadata_only_with_probe_and_paths(true, true, probe, &paths.reset_paths())?;
 
     if dry_run {
         return Ok(RollbackReport {
@@ -179,7 +180,8 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         });
     }
 
-    let metadata_reset = reset::run_with_probe_and_paths(true, false, probe, &paths.reset_paths())?;
+    let metadata_reset =
+        reset::run_metadata_only_with_probe_and_paths(true, false, probe, &paths.reset_paths())?;
 
     Ok(RollbackReport {
         dry_run,

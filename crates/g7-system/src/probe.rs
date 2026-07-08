@@ -3,13 +3,14 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use crate::account::{
-    chmod_recursive, chown_recursive, create_login_user, set_login_password, user_exists,
+    chmod_recursive, chown_recursive, create_login_user, delete_login_user, set_login_password,
+    user_exists,
 };
 use crate::apache::{config_test as apache_config_test, enable_module as apache_enable_module};
 use crate::app::{artisan, composer_install, npm_install, npm_run_build};
 use crate::apt::{apt_add_repository, apt_candidate_available, apt_install, apt_purge, apt_update};
 use crate::archive::{copy_dir_contents, download_file, git_clone, unzip_archive};
-use crate::certbot::{certonly_webroot, renew_dry_run};
+use crate::certbot::{certonly_webroot, delete_cert, renew_dry_run};
 use crate::command::{CommandError, CommandOutput, CommandRunner, RealCommandRunner};
 use crate::database::{DatabaseEngine, apply_sql};
 use crate::network::{
@@ -48,6 +49,10 @@ impl<R: CommandRunner> SystemProbe<R> {
             os_release_path: PathBuf::from("/etc/os-release"),
             fs_root: PathBuf::from("/"),
         }
+    }
+
+    pub fn runner(&self) -> &R {
+        &self.runner
     }
 
     pub fn with_os_release_path(mut self, path: impl Into<PathBuf>) -> Self {
@@ -136,6 +141,10 @@ impl<R: CommandRunner> SystemProbe<R> {
     ) -> Result<CommandOutput, SystemProbeError> {
         certonly_webroot(&self.runner, webroot, cert_name, domains, email)
             .map_err(SystemProbeError::Command)
+    }
+
+    pub fn certbot_delete_cert(&self, cert_name: &str) -> Result<CommandOutput, SystemProbeError> {
+        delete_cert(&self.runner, cert_name).map_err(SystemProbeError::Command)
     }
 
     pub fn database_apply_sql(
@@ -250,6 +259,10 @@ impl<R: CommandRunner> SystemProbe<R> {
         password: &str,
     ) -> Result<CommandOutput, SystemProbeError> {
         set_login_password(&self.runner, user, password).map_err(SystemProbeError::Command)
+    }
+
+    pub fn delete_login_user(&self, user: &str) -> Result<CommandOutput, SystemProbeError> {
+        delete_login_user(&self.runner, user).map_err(SystemProbeError::Command)
     }
 
     pub fn chown_recursive(

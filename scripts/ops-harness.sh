@@ -192,6 +192,7 @@ run_install_cycle() {
   local doctor_before
   local install_output
   local doctor_after_install
+  local doctor_after_reset
   local report_json
   local rollback_dry_run
   local rollback_output
@@ -226,9 +227,17 @@ run_install_cycle() {
   assert_contains "${cycle} doctor after install" "${doctor_after_install}" "install_allowed: false"
 
   if [[ "${CLEANUP}" == "1" ]]; then
-    log "${cycle}: reset installer metadata and owned files"
+    log "${cycle}: reset installer-created resources"
     reset_output="$(sudo_capture "${cycle}-reset" "${remote_bin_q} reset --yes")"
     assert_contains "${cycle} reset" "${reset_output}" "G7 Installer Reset"
+    assert_contains "${cycle} reset actions" "${reset_output}" "actions:"
+    while IFS= read -r package; do
+      [[ -n "${package}" ]] || continue
+      assert_not_installed "${cycle}" "${package}"
+    done <"${package_list_path}"
+    assert_installer_paths_absent "${cycle}"
+    doctor_after_reset="$(sudo_capture "${cycle}-doctor-after-reset" "${remote_bin_q} doctor")"
+    assert_contains "${cycle} doctor after reset" "${doctor_after_reset}" "install_allowed: true"
   fi
 }
 
@@ -258,7 +267,7 @@ fi
 if [[ "${CLEANUP}" == "0" ]]; then
   log "cleanup disabled; leaving final server state from last cycle"
 else
-  log "cleanup reset installer metadata and owned files; package cleanup requires provider snapshot restore"
+  log "cleanup reset installer-created resources completed"
 fi
 
 log "PASS"
