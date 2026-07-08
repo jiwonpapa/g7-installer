@@ -204,7 +204,7 @@
   }
 
   .log-box {
-    @apply max-h-80 min-h-64 overflow-x-hidden whitespace-pre-wrap break-words font-mono;
+    @apply max-h-80 min-h-64 overflow-x-hidden whitespace-pre-wrap break-words font-mono text-xs leading-5;
     overflow-wrap: anywhere;
   }
 
@@ -234,6 +234,18 @@
 
   .guidance-panel ul {
     @apply mt-2 grid gap-1;
+  }
+
+  .password-status {
+    @apply -mt-2 text-xs font-semibold leading-5;
+  }
+
+  .password-status[data-status="pass"] {
+    @apply text-success;
+  }
+
+  .password-status[data-status="fail"] {
+    @apply text-error;
   }
 
   .action-help-grid {
@@ -334,6 +346,14 @@
 
   .result-list {
     @apply grid gap-2;
+  }
+
+  .doctor-results {
+    @apply md:grid-cols-2;
+  }
+
+  .doctor-results .empty-state {
+    @apply md:col-span-2;
   }
 
   .result-row,

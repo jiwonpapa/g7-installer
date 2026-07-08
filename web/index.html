@@ -100,7 +100,7 @@
               <button id="doctor-button" class="btn btn-primary icon-button" type="button" data-icon="shield-check">점검 실행</button>
             </div>
             <div id="doctor-status" class="mt-5 hidden"></div>
-            <div id="doctor-results" class="result-list mt-5">
+            <div id="doctor-results" class="result-list doctor-results mt-5">
               <div class="empty-state">아직 점검 전입니다. 점검 실행을 누르세요.</div>
             </div>
             <section class="recovery-panel mt-5" data-recovery-panel hidden>
@@ -238,6 +238,7 @@
                   </span>
                   <input name="site_password_confirm" id="site-password-confirm" class="input input-bordered w-full" type="password" autocomplete="new-password" minlength="8" required />
                 </label>
+                <p id="site-password-status" class="password-status md:col-span-2" aria-live="polite" hidden></p>
               </div>
 
               <details class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-100">

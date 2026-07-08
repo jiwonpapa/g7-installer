@@ -27,6 +27,10 @@ const nodes = {
   domain: document.querySelector("#domain-input"),
   customWebRoot: document.querySelector("#custom-web-root"),
   webRootMode: document.querySelector("#web-root-mode"),
+  sitePassword: document.querySelector("#site-password"),
+  sitePasswordConfirm: document.querySelector("#site-password-confirm"),
+  sitePasswordStatus: document.querySelector("#site-password-status"),
+  optionsPlanButtons: document.querySelectorAll('[data-view="options"] [data-next="plan"]'),
   mailMode: document.querySelector("#mail-mode"),
   databaseVersion: document.querySelector("#database-version"),
   smtpHost: document.querySelector("#smtp-host"),
@@ -414,8 +418,12 @@ function clearWizardState() {
 
 function setPlanReady(ready) {
   state.planReady = ready;
+  refreshConfirmSpecButton();
+}
+
+function refreshConfirmSpecButton() {
   if (nodes.confirmSpecButton) {
-    nodes.confirmSpecButton.disabled = !ready;
+    nodes.confirmSpecButton.disabled = !state.planReady || Boolean(sitePasswordError());
   }
 }
 
@@ -514,6 +522,14 @@ function showStep(nextStep, options = {}) {
     step = "check";
   }
 
+  if (step === "plan") {
+    const passwordError = refreshSitePasswordState({ show: true });
+    if (passwordError) {
+      log(passwordError);
+      step = "options";
+    }
+  }
+
   if (step === "install" && !state.doctorPassed && !recoveryMode) {
     setAlert(
       nodes.doctorStatus,
@@ -522,6 +538,20 @@ function showStep(nextStep, options = {}) {
       "신규 서버 상태를 통과하거나 설치기 복구 상태가 확인되어야 합니다.",
     );
     step = "check";
+  }
+
+  if (step === "install" && !recoveryMode) {
+    const passwordError = refreshSitePasswordState({ show: true });
+    if (passwordError) {
+      setAlert(
+        nodes.planStatus,
+        "warning",
+        "사이트 계정 비밀번호 확인 필요",
+        passwordError,
+      );
+      log(passwordError);
+      step = "options";
+    }
   }
 
   if (step === "install" && !state.planReady && !recoveryMode) {
@@ -566,6 +596,7 @@ function showStep(nextStep, options = {}) {
     writeStepHistory(step, false);
   }
 
+  refreshSitePasswordState();
   saveWizardState();
 }
 
@@ -602,6 +633,10 @@ function optionPayload() {
 }
 
 function validateSitePassword(payload) {
+  return sitePasswordError(payload);
+}
+
+function sitePasswordError(payload = optionPayload()) {
   if (!payload.site_password) {
     return "사이트 계정 비밀번호를 입력하세요.";
   }
@@ -615,6 +650,35 @@ function validateSitePassword(payload) {
     return "사이트 계정 비밀번호에는 콜론, 줄바꿈, 제어문자를 사용할 수 없습니다.";
   }
   return null;
+}
+
+function refreshSitePasswordState(options = {}) {
+  const payload = optionPayload();
+  const error = sitePasswordError(payload);
+  const hasInput = Boolean(payload.site_password || payload.site_password_confirm);
+  const shouldShowStatus = Boolean(options.show || hasInput || state.activeStep === "options");
+
+  if (nodes.sitePassword) {
+    nodes.sitePassword.setCustomValidity(error || "");
+    nodes.sitePassword.classList.toggle("input-error", Boolean(error && shouldShowStatus));
+  }
+  if (nodes.sitePasswordConfirm) {
+    nodes.sitePasswordConfirm.setCustomValidity(error || "");
+    nodes.sitePasswordConfirm.classList.toggle("input-error", Boolean(error && shouldShowStatus));
+  }
+  if (nodes.sitePasswordStatus) {
+    nodes.sitePasswordStatus.hidden = !shouldShowStatus;
+    nodes.sitePasswordStatus.dataset.status = error ? "fail" : "pass";
+    nodes.sitePasswordStatus.textContent = error || "사이트 계정 비밀번호가 일치합니다.";
+  }
+  nodes.optionsPlanButtons.forEach((button) => {
+    button.disabled = Boolean(error);
+    button.title = error || "";
+    button.setAttribute("aria-disabled", error ? "true" : "false");
+  });
+  refreshConfirmSpecButton();
+
+  return error;
 }
 
 function setFormValue(name, value) {
@@ -677,6 +741,7 @@ function refreshFormState(options = {}) {
   }
 
   refreshSecurityGuidance();
+  refreshSitePasswordState();
   refreshSummary();
   if (shouldPersist) {
     saveWizardState();
