@@ -1050,7 +1050,7 @@ fn run_provision_action(
         "webserver" => provision_webserver(report),
         "php" => provision_php(report),
         "database" => provision_database(report),
-        "ssl" => provision_ssl(),
+        "ssl" => provision_ssl(report),
         "mail" => provision_mail(report),
         "app" => provision_app(report),
         _ => {
@@ -1129,13 +1129,54 @@ fn provision_database(report: &serde_json::Value) -> Vec<InstallApiCheck> {
     ]
 }
 
-fn provision_ssl() -> Vec<InstallApiCheck> {
-    vec![run_command_check(
-        "certbot-renew-dry-run",
-        "certbot",
-        &["renew", "--dry-run", "--no-random-sleep-on-renew"],
-        None,
-    )]
+fn provision_ssl(report: &serde_json::Value) -> Vec<InstallApiCheck> {
+    let cert_name = report_string(report, "domain").unwrap_or_default();
+    if cert_name.is_empty() {
+        return vec![InstallApiCheck {
+            name: "certbot-certificate".to_string(),
+            status: "fail".to_string(),
+            message: "리포트에서 인증서 이름으로 사용할 도메인을 찾지 못했습니다.".to_string(),
+        }];
+    }
+
+    let fullchain_path = format!("/etc/letsencrypt/live/{cert_name}/fullchain.pem");
+    let privkey_path = format!("/etc/letsencrypt/live/{cert_name}/privkey.pem");
+    if !path_is_file(&fullchain_path) || !path_is_file(&privkey_path) {
+        return vec![
+            file_check("certbot-fullchain", &fullchain_path),
+            file_check("certbot-privkey", &privkey_path),
+            InstallApiCheck {
+                name: "certbot-rate-limit-guard".to_string(),
+                status: "manual".to_string(),
+                message:
+                    "기존 인증서가 없어 7단계 점검에서는 새 발급을 실행하지 않았습니다. 중복 발급 제한을 피하려면 기본 구성/TLS 단계를 한 번만 완료하세요."
+                        .to_string(),
+            },
+        ];
+    }
+
+    vec![
+        file_check("certbot-fullchain", &fullchain_path),
+        file_check("certbot-privkey", &privkey_path),
+        run_command_check(
+            "certbot-certificate-list",
+            "certbot",
+            &["certificates", "--cert-name", &cert_name],
+            None,
+        ),
+        run_command_check(
+            "certbot-renew-dry-run",
+            "certbot",
+            &[
+                "renew",
+                "--dry-run",
+                "--no-random-sleep-on-renew",
+                "--cert-name",
+                &cert_name,
+            ],
+            None,
+        ),
+    ]
 }
 
 fn provision_mail(report: &serde_json::Value) -> Vec<InstallApiCheck> {
@@ -1168,23 +1209,31 @@ fn provision_app(report: &serde_json::Value) -> Vec<InstallApiCheck> {
         .or_else(|| report_string(report, "app_package"))
         .unwrap_or_default();
     let web_root = report_string(report, "web_root").unwrap_or_default();
+    let site_user = report_string(report, "site_user").unwrap_or_default();
     let app_document_root = report_string(report, "app_document_root").unwrap_or(web_root.clone());
 
     if app_profile == "gnuboard7" {
-        return vec![
+        let mut checks = vec![
             file_check("app-artisan", &format!("{web_root}/artisan")),
             dir_check("app-storage", &format!("{web_root}/storage")),
-            InstallApiCheck {
-                name: "app-browser-install".to_string(),
-                status: "manual".to_string(),
-                message: "그누보드7은 브라우저 /install 완료 후 artisan migrate/서비스 시작을 확인하세요."
-                    .to_string(),
-            },
         ];
+        checks.extend(app_permission_checks(
+            &web_root,
+            &site_user,
+            &["storage", "bootstrap/cache"],
+        ));
+        checks.push(InstallApiCheck {
+            name: "app-browser-install".to_string(),
+            status: "manual".to_string(),
+            message:
+                "그누보드7은 브라우저 /install 완료 후 artisan migrate/서비스 시작을 확인하세요."
+                    .to_string(),
+        });
+        return checks;
     }
 
     if app_profile == "wordpress" {
-        return vec![
+        let mut checks = vec![
             file_check(
                 "wordpress-install-screen",
                 &format!("{app_document_root}/wp-admin/install.php"),
@@ -1194,18 +1243,106 @@ fn provision_app(report: &serde_json::Value) -> Vec<InstallApiCheck> {
                 &format!("{app_document_root}/wp-content"),
             ),
         ];
+        checks.extend(app_permission_checks(
+            &web_root,
+            &site_user,
+            &["wp-content/uploads"],
+        ));
+        return checks;
     }
 
-    vec![run_command_check(
+    let mut checks = vec![file_check(
+        "laravel-artisan",
+        &format!("{web_root}/artisan"),
+    )];
+    checks.extend(app_permission_checks(
+        &web_root,
+        &site_user,
+        &["storage", "bootstrap/cache"],
+    ));
+    checks.push(run_command_check(
         "artisan-about",
         "php",
         &["artisan", "about"],
         Some(&web_root),
-    )]
+    ));
+    checks
+}
+
+fn app_permission_checks(
+    web_root: &str,
+    site_user: &str,
+    writable_paths: &[&str],
+) -> Vec<InstallApiCheck> {
+    if web_root.is_empty() {
+        return vec![InstallApiCheck {
+            name: "app-web-root".to_string(),
+            status: "fail".to_string(),
+            message: "리포트에서 앱 경로를 찾지 못했습니다.".to_string(),
+        }];
+    }
+
+    let mut checks = Vec::new();
+    if site_user.is_empty() {
+        checks.push(InstallApiCheck {
+            name: "app-site-user".to_string(),
+            status: "fail".to_string(),
+            message: "리포트에서 사이트 계정을 찾지 못해 소유권을 적용할 수 없습니다.".to_string(),
+        });
+    } else {
+        let owner_group = format!("{site_user}:www-data");
+        checks.push(run_command_check(
+            "app-web-root-owner",
+            "chown",
+            &["-R", &owner_group, web_root],
+            None,
+        ));
+    }
+
+    checks.push(run_command_check(
+        "app-web-root-mode",
+        "chmod",
+        &["-R", "0755", web_root],
+        None,
+    ));
+
+    for writable_path in writable_paths {
+        let target = format!("{web_root}/{writable_path}");
+        checks.push(dir_check(&format!("app-dir:{writable_path}"), &target));
+        if path_is_dir(&target) {
+            checks.push(run_command_check(
+                &format!("app-writable-mode:{writable_path}"),
+                "chmod",
+                &["-R", "0775", &target],
+                None,
+            ));
+            if !site_user.is_empty() {
+                checks.push(run_command_check(
+                    &format!("app-writable-test:{writable_path}"),
+                    "runuser",
+                    &["-u", site_user, "--", "test", "-w", &target],
+                    None,
+                ));
+            }
+        }
+    }
+
+    let env_path = format!("{web_root}/.env");
+    checks.push(file_check("app-env", &env_path));
+    if path_is_file(&env_path) {
+        checks.push(run_command_check(
+            "app-env-mode",
+            "chmod",
+            &["0640", &env_path],
+            None,
+        ));
+    }
+
+    checks
 }
 
 fn file_check(name: &str, path: &str) -> InstallApiCheck {
-    let exists = fs::metadata(path).is_ok_and(|metadata| metadata.is_file());
+    let exists = path_is_file(path);
     InstallApiCheck {
         name: name.to_string(),
         status: if exists { "pass" } else { "fail" }.to_string(),
@@ -1218,7 +1355,7 @@ fn file_check(name: &str, path: &str) -> InstallApiCheck {
 }
 
 fn dir_check(name: &str, path: &str) -> InstallApiCheck {
-    let exists = fs::metadata(path).is_ok_and(|metadata| metadata.is_dir());
+    let exists = path_is_dir(path);
     InstallApiCheck {
         name: name.to_string(),
         status: if exists { "pass" } else { "fail" }.to_string(),
@@ -1228,6 +1365,14 @@ fn dir_check(name: &str, path: &str) -> InstallApiCheck {
             format!("{path} 디렉터리가 없습니다.")
         },
     }
+}
+
+fn path_is_file(path: &str) -> bool {
+    fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
+}
+
+fn path_is_dir(path: &str) -> bool {
+    fs::metadata(path).is_ok_and(|metadata| metadata.is_dir())
 }
 
 fn run_command_check(

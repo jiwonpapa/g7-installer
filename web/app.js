@@ -2057,12 +2057,13 @@ function provisioningActions(report = {}) {
       ],
     }),
     provisioningAction("ssl", "SSL/Certbot", report.certbot_checks, {
-      summary: "주 도메인과 www 도메인 인증서를 발급하고 자동 갱신을 검증합니다.",
-      command: "sudo certbot renew --dry-run --no-random-sleep-on-renew",
+      summary: "기존 인증서를 확인하고 자동 갱신만 테스트합니다. 반복 발급은 하지 않습니다.",
+      command: `sudo certbot renew --dry-run --no-random-sleep-on-renew --cert-name ${certName}`,
       settings: [
         ["인증서 이름", certName],
         ["인증서 경로", `/etc/letsencrypt/live/${certName}/fullchain.pem`],
         ["키 경로", `/etc/letsencrypt/live/${certName}/privkey.pem`],
+        ["중복 발급 방지", "기존 인증서가 있으면 새 발급 생략"],
         ["갱신", "certbot.timer"],
       ],
     }),
@@ -2080,14 +2081,16 @@ function provisioningActions(report = {}) {
       ],
     }),
     provisioningAction("app", "웹앱", report.app_checks, {
-      summary: "앱 소스, .env, 권한, 설치 화면 또는 Laravel 런타임을 확인합니다.",
+      summary: "앱 소스, .env, storage/bootstrap/cache 권한과 설치 화면을 확인합니다.",
       command: report.app_profile === "gnuboard7" || report.app_package === "gnuboard7"
-        ? `브라우저에서 ${appUrl} 접속`
+        ? `chown/chmod 적용 후 브라우저에서 ${appUrl} 접속`
         : `cd ${appRoot} && php artisan about`,
       settings: [
         ["앱", appPackageLabel(report.app_package || report.app_profile)],
         ["앱 경로", appRoot],
         ["문서 루트", report.app_document_root || "-"],
+        ["쓰기 경로", "storage, bootstrap/cache"],
+        [".env 권한", "0640"],
         ["접속 링크", appUrl],
         ["안내서", report.setup_guide_path || "-"],
       ],

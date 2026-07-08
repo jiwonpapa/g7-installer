@@ -100,25 +100,15 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
                 .resolve(&format!("/etc/letsencrypt/live/{domain}"))
                 .exists()
     }) {
-        if dry_run {
-            actions.push(ResetAction::new(
-                format!("certificate:{domain}"),
-                "would-delete",
-                "Let's Encrypt certificate would be deleted",
-            ));
-        } else {
-            let output = probe.certbot_delete_cert(domain).map_err(command_error)?;
-            require_success(
-                "certificate-delete",
-                format!("certbot delete --cert-name {domain}"),
-                output,
-            )?;
-            actions.push(ResetAction::new(
-                format!("certificate:{domain}"),
-                "deleted",
-                "Let's Encrypt certificate deleted",
-            ));
-        }
+        actions.push(ResetAction::new(
+            format!("certificate:{domain}"),
+            if dry_run {
+                "would-preserve"
+            } else {
+                "preserved"
+            },
+            "Let's Encrypt certificate preserved to avoid duplicate issuance limits",
+        ));
     }
 
     if metadata.database_name.is_some() || metadata.database_user.is_some() {
@@ -786,7 +776,7 @@ mod tests {
     }
 
     #[test]
-    fn reset_removes_created_services_database_account_cert_and_packages()
+    fn reset_removes_created_services_database_account_packages_and_preserves_cert()
     -> std::result::Result<(), Box<dyn std::error::Error>> {
         let fs_root = create_temp_fs_root()?;
         fs::create_dir_all(fs_root.join("var/lib/g7-installer"))?;
@@ -872,7 +862,7 @@ mod tests {
                 .any(|action| { action.name == "database" && action.status == "dropped" })
         );
         assert!(report.actions.iter().any(|action| {
-            action.name == "certificate:example.com" && action.status == "deleted"
+            action.name == "certificate:example.com" && action.status == "preserved"
         }));
         assert!(
             report
@@ -889,13 +879,8 @@ mod tests {
 
         let recorded = probe.runner().recorded();
         assert_eq!(recorded[0].program, OsString::from("id"));
-        assert_eq!(recorded[1].program, OsString::from("certbot"));
-        assert_eq!(recorded[2].program, OsString::from("mysql"));
-        assert!(recorded.iter().any(|spec| {
-            spec.program == "certbot"
-                && spec.args.contains(&OsString::from("delete"))
-                && spec.args.contains(&OsString::from("example.com"))
-        }));
+        assert_eq!(recorded[1].program, OsString::from("mysql"));
+        assert!(!recorded.iter().any(|spec| { spec.program == "certbot" }));
         assert!(recorded.iter().any(|spec| {
             spec.program == "mysql"
                 && spec.stdin.as_deref().is_some_and(|stdin| {

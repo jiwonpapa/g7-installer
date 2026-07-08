@@ -1637,6 +1637,7 @@ fn apply_tls_phase<R: CommandRunner>(
     let email = certificate_email(plan);
     let certbot_challenge_dir = certbot_http01_challenge_dir(plan);
     let certbot_http01_smoke_path = certbot_http01_smoke_path(plan);
+    let existing_certificate = certificate_files_exist(paths, &cert_name);
     create_owned_dir_if_absent(
         paths,
         &format!("{}/.well-known", plan.app_document_root),
@@ -1689,26 +1690,42 @@ fn apply_tls_phase<R: CommandRunner>(
         }
     }
 
-    let output = probe
-        .certbot_certonly_webroot(&plan.app_document_root, &cert_name, &domains, &email)
-        .map_err(|err| {
-            command_error(
-                "certbot-certonly",
-                format!(
-                    "certbot certonly --webroot -w {} --cert-name {}",
-                    plan.app_document_root, cert_name
-                ),
-                err,
-            )
-        })?;
-    require_success(
-        "certbot-certonly",
-        format!(
-            "certbot certonly --webroot -w {} --cert-name {}",
-            plan.app_document_root, cert_name
-        ),
-        output,
-    )?;
+    let certificate_check = if existing_certificate {
+        InstallCheck::pass(
+            "tls-certificate",
+            format!(
+                "기존 Let's Encrypt 인증서 `{cert_name}`를 확인했습니다. 중복 발급 제한을 피하기 위해 새 발급은 실행하지 않았습니다."
+            ),
+        )
+    } else {
+        let output = probe
+            .certbot_certonly_webroot(&plan.app_document_root, &cert_name, &domains, &email)
+            .map_err(|err| {
+                command_error(
+                    "certbot-certonly",
+                    format!(
+                        "certbot certonly --webroot -w {} --cert-name {}",
+                        plan.app_document_root, cert_name
+                    ),
+                    err,
+                )
+            })?;
+        require_success(
+            "certbot-certonly",
+            format!(
+                "certbot certonly --webroot -w {} --cert-name {}",
+                plan.app_document_root, cert_name
+            ),
+            output,
+        )?;
+        InstallCheck::pass(
+            "tls-certificate",
+            format!(
+                "Issued Let's Encrypt certificate `{cert_name}` for {} with Certbot webroot.",
+                domains.join(", ")
+            ),
+        )
+    };
 
     let vhost_check = if plan.web_server == "nginx" {
         write_existing_file(
@@ -1777,13 +1794,7 @@ fn apply_tls_phase<R: CommandRunner>(
                 domains.join(", ")
             ),
         ),
-        InstallCheck::pass(
-            "tls-certificate",
-            format!(
-                "Issued/verified Let's Encrypt certificate `{cert_name}` for {} with Certbot webroot.",
-                domains.join(", ")
-            ),
-        ),
+        certificate_check,
         vhost_check,
         InstallCheck::pass(
             "certbot-renew-dry-run",
@@ -1862,8 +1873,32 @@ fn apply_app_permissions<R: CommandRunner>(
             format!("Set writable runtime path `{target}` to mode 0775."),
         ));
     }
+    if let Some(check) = apply_app_env_permissions(probe, paths, plan)? {
+        checks.push(check);
+    }
 
     Ok(checks)
+}
+
+fn apply_app_env_permissions<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+) -> Result<Option<InstallCheck>> {
+    let env_path = format!("{}/.env", plan.web_root);
+    if !paths.resolve(&env_path).exists() {
+        return Ok(None);
+    }
+
+    let command = format!("chmod 0640 {env_path}");
+    let output = probe
+        .chmod_path("0640", &env_path)
+        .map_err(|err| command_error("app-env-permissions", &command, err))?;
+    require_success("app-env-permissions", command, output)?;
+    Ok(Some(InstallCheck::pass(
+        "app-env-permissions",
+        format!("Set `{env_path}` to mode 0640 after web-root permission normalization."),
+    )))
 }
 
 fn install_gnuboard7_app<R: CommandRunner>(
@@ -2589,6 +2624,12 @@ fn certbot_http01_smoke_path(plan: &plan::InstallPlan) -> String {
 
 fn certbot_http01_smoke_uri() -> String {
     format!("/{CERTBOT_HTTP01_CHALLENGE_DIR}/{CERTBOT_HTTP01_SMOKE_FILENAME}")
+}
+
+fn certificate_files_exist(paths: &InstallPaths, cert_name: &str) -> bool {
+    let cert_dir = format!("/etc/letsencrypt/live/{cert_name}");
+    paths.resolve(&format!("{cert_dir}/fullchain.pem")).exists()
+        && paths.resolve(&format!("{cert_dir}/privkey.pem")).exists()
 }
 
 fn app_entry_url(plan: &plan::InstallPlan) -> String {
@@ -4294,6 +4335,13 @@ mod tests {
             .find(|(_, spec)| spec.display() == "chmod -R 0775 /home/g7/public_html/storage")
             .map(|(index, _)| index)
             .ok_or_else(|| std::io::Error::other("missing storage chmod command after copy"))?;
+        let env_chmod_index = recorded
+            .iter()
+            .enumerate()
+            .skip(app_copy_index + 1)
+            .find(|(_, spec)| spec.display() == "chmod 0640 /home/g7/public_html/.env")
+            .map(|(index, _)| index)
+            .ok_or_else(|| std::io::Error::other("missing .env chmod command after copy"))?;
         let composer_index = recorded
             .iter()
             .position(|spec| spec.display().starts_with("composer install "))
@@ -4301,6 +4349,7 @@ mod tests {
         assert!(app_copy_index < app_chown_index);
         assert!(app_chown_index < composer_index);
         assert!(storage_chmod_index < composer_index);
+        assert!(env_chmod_index < composer_index);
         assert!(
             report
                 .owned_files
@@ -5028,6 +5077,9 @@ mod tests {
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         for _writable_path in super::app_writable_paths(install_plan) {
+            runner.push_output(CommandOutput::success(""));
+        }
+        if matches!(install_plan.app_profile.as_str(), "gnuboard7" | "laravel") {
             runner.push_output(CommandOutput::success(""));
         }
     }

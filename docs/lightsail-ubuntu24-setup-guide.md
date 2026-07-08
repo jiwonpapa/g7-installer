@@ -216,7 +216,7 @@ sudo tail -120 /var/log/g7-lightsail-bootstrap.log
 3. `스냅샷 생성`을 누릅니다.
 4. 이름 예시: `before-g7inst-YYYYMMDD-HHMM`
 
-`g7inst rollback`은 앱/DB/인증서 생성 전의 초기 실패만 되돌립니다. `g7inst reset --yes`는 설치기가 만든 계정, DB/DB 계정, 인증서, 서비스, 웹루트/설정 파일, 새로 설치한 패키지, 메타데이터를 제거해 같은 신규 VPS에서 다시 설치할 수 있게 합니다. 서버 전체 복구는 Lightsail 스냅샷이 가장 확실합니다.
+`g7inst rollback`은 앱/DB/인증서 생성 전의 초기 실패만 되돌립니다. `g7inst reset --yes`는 설치기가 만든 계정, DB/DB 계정, 서비스, 웹루트/설정 파일, 새로 설치한 패키지, 메타데이터를 제거해 같은 신규 VPS에서 다시 설치할 수 있게 합니다. Let's Encrypt 인증서는 중복 발급 제한을 피하기 위해 보존합니다. 서버 전체 복구는 Lightsail 스냅샷이 가장 확실합니다.
 
 ## 10. 설치 웹 UI 열기
 

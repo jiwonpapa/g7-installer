@@ -9,7 +9,7 @@ Date: 2026-07-08
 - Current measured line coverage is 79.30%.
 - Web controller line coverage is 81.72%.
 - Release assets are Linux musl binaries for x86_64 and aarch64 plus `checksums.txt`.
-- `scripts/ops-harness.sh` verifies a disposable Ubuntu 24.04 server through install, report validation, setup-guide capture, and full installer reset. The reset path removes installer-created services, account, DB/user, certificate, packages, owned files, and metadata for a fresh reinstall attempt.
+- `scripts/ops-harness.sh` verifies a disposable Ubuntu 24.04 server through install, report validation, setup-guide capture, and full installer reset. The reset path removes installer-created services, account, DB/user, packages, owned files, and metadata for a fresh reinstall attempt while preserving Let's Encrypt certificates to avoid duplicate issuance limits.
 - GitHub Actions workflow is not present in this workspace yet.
 
 ## Gaps Found
