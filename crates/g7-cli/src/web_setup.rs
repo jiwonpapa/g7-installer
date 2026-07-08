@@ -147,6 +147,19 @@ struct RollbackRequest {
     dry_run: bool,
 }
 
+#[derive(Debug, Deserialize)]
+struct ProvisionActionRequest {
+    action: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ProvisionActionReport {
+    action: String,
+    status: String,
+    message: String,
+    checks: Vec<InstallApiCheck>,
+}
+
 #[derive(Debug, Serialize)]
 struct ApiErrorBody {
     error: String,
@@ -405,6 +418,7 @@ pub async fn run(config: WebSetupConfig) -> Result<()> {
         .route("/api/doctor", get(api_doctor))
         .route("/api/plan", post(api_plan))
         .route("/api/install/prepare", post(api_install_prepare))
+        .route("/api/provision/action", post(api_provision_action))
         .route("/api/reset", post(api_reset))
         .route("/api/rollback", post(api_rollback))
         .route("/api/status", get(api_status))
@@ -811,6 +825,38 @@ async fn api_install_prepare(
     }
 }
 
+async fn api_provision_action(
+    axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(request): Json<ProvisionActionRequest>,
+) -> std::result::Result<impl IntoResponse, ApiError> {
+    let session = require_authenticated_session(&state, &headers, peer.ip())?;
+    require_csrf(&headers, &session)?;
+
+    if state.install_running.load(Ordering::SeqCst) {
+        return Err(ApiError::conflict(
+            "provision action is blocked while install is running",
+        ));
+    }
+
+    let report = read_saved_report_json()?;
+    emit_log(
+        &state,
+        format!("running provision action: {}", request.action),
+    );
+    let action_report = run_provision_action(&request.action, &report)?;
+    emit_log(
+        &state,
+        format!(
+            "provision action completed: {} {}",
+            action_report.action, action_report.status
+        ),
+    );
+
+    Ok(Json(action_report))
+}
+
 async fn api_reset(
     axum::extract::State(state): axum::extract::State<WebState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -959,6 +1005,264 @@ async fn api_report(
             content: format!("failed to read report: {err}"),
         })),
     }
+}
+
+fn read_saved_report_json() -> std::result::Result<serde_json::Value, ApiError> {
+    let content = fs::read_to_string(REPORT_PATH).map_err(|error| {
+        ApiError::bad_request(format!("failed to read report: {error}"))
+            .with_hint("먼저 기본 서버 구성을 실행해 리포트를 생성하세요.")
+    })?;
+    serde_json::from_str(&content).map_err(|error| {
+        ApiError::bad_request(format!("failed to parse report: {error}"))
+            .with_hint("리포트 파일이 손상되었습니다. 재설치 초기화 후 다시 진행하세요.")
+    })
+}
+
+fn run_provision_action(
+    action: &str,
+    report: &serde_json::Value,
+) -> std::result::Result<ProvisionActionReport, ApiError> {
+    let action = action.trim();
+    let checks = match action {
+        "webserver" => provision_webserver(report),
+        "php" => provision_php(report),
+        "database" => provision_database(report),
+        "ssl" => provision_ssl(),
+        "mail" => provision_mail(report),
+        "app" => provision_app(report),
+        _ => {
+            return Err(
+                ApiError::bad_request(format!("unsupported provision action: {action}"))
+                    .with_hint("지원 작업은 webserver, php, database, ssl, mail, app 입니다."),
+            );
+        }
+    };
+    let status = if checks.iter().any(|check| check.status == "fail") {
+        "fail"
+    } else if checks.iter().any(|check| check.status == "manual") {
+        "manual"
+    } else {
+        "pass"
+    }
+    .to_string();
+    let message = match status.as_str() {
+        "pass" => "재시작/점검이 완료되었습니다.",
+        "manual" => "자동 실행 대신 후속 수동 확인이 필요합니다.",
+        _ => "실패 항목을 확인하세요.",
+    }
+    .to_string();
+
+    Ok(ProvisionActionReport {
+        action: action.to_string(),
+        status,
+        message,
+        checks,
+    })
+}
+
+fn provision_webserver(report: &serde_json::Value) -> Vec<InstallApiCheck> {
+    let web_server = report_string(report, "web_server").unwrap_or_else(|| "nginx".to_string());
+    if web_server == "apache" {
+        vec![
+            run_command_check("apache-configtest", "apache2ctl", &["configtest"], None),
+            run_command_check("apache-reload", "systemctl", &["reload", "apache2"], None),
+        ]
+    } else {
+        vec![
+            run_command_check("nginx-configtest", "nginx", &["-t"], None),
+            run_command_check("nginx-reload", "systemctl", &["reload", "nginx"], None),
+        ]
+    }
+}
+
+fn provision_php(report: &serde_json::Value) -> Vec<InstallApiCheck> {
+    let version = report_string(report, "php_version").unwrap_or_else(|| "8.3".to_string());
+    let service = format!("php{version}-fpm");
+    vec![
+        run_command_check("php-fpm-restart", "systemctl", &["restart", &service], None),
+        run_command_check(
+            "php-fpm-active",
+            "systemctl",
+            &["is-active", "--quiet", &service],
+            None,
+        ),
+    ]
+}
+
+fn provision_database(report: &serde_json::Value) -> Vec<InstallApiCheck> {
+    let service = if report_string(report, "database").as_deref() == Some("mariadb") {
+        "mariadb"
+    } else {
+        "mysql"
+    };
+    vec![
+        run_command_check("database-restart", "systemctl", &["restart", service], None),
+        run_command_check(
+            "database-active",
+            "systemctl",
+            &["is-active", "--quiet", service],
+            None,
+        ),
+    ]
+}
+
+fn provision_ssl() -> Vec<InstallApiCheck> {
+    vec![run_command_check(
+        "certbot-renew-dry-run",
+        "certbot",
+        &["renew", "--dry-run", "--no-random-sleep-on-renew"],
+        None,
+    )]
+}
+
+fn provision_mail(report: &serde_json::Value) -> Vec<InstallApiCheck> {
+    if report_string(report, "mail_mode").as_deref() != Some("local-postfix") {
+        return vec![InstallApiCheck {
+            name: "mail".to_string(),
+            status: "manual".to_string(),
+            message: "로컬 Postfix 모드가 아니라 자동 재시작 대상이 없습니다.".to_string(),
+        }];
+    }
+
+    vec![
+        run_command_check(
+            "postfix-restart",
+            "systemctl",
+            &["restart", "postfix"],
+            None,
+        ),
+        run_command_check(
+            "postfix-active",
+            "systemctl",
+            &["is-active", "--quiet", "postfix"],
+            None,
+        ),
+    ]
+}
+
+fn provision_app(report: &serde_json::Value) -> Vec<InstallApiCheck> {
+    let app_profile = report_string(report, "app_profile")
+        .or_else(|| report_string(report, "app_package"))
+        .unwrap_or_default();
+    let web_root = report_string(report, "web_root").unwrap_or_default();
+    let app_document_root = report_string(report, "app_document_root").unwrap_or(web_root.clone());
+
+    if app_profile == "gnuboard7" {
+        return vec![
+            file_check("app-artisan", &format!("{web_root}/artisan")),
+            dir_check("app-storage", &format!("{web_root}/storage")),
+            InstallApiCheck {
+                name: "app-browser-install".to_string(),
+                status: "manual".to_string(),
+                message: "그누보드7은 브라우저 /install 완료 후 artisan migrate/서비스 시작을 확인하세요."
+                    .to_string(),
+            },
+        ];
+    }
+
+    if app_profile == "wordpress" {
+        return vec![
+            file_check(
+                "wordpress-install-screen",
+                &format!("{app_document_root}/wp-admin/install.php"),
+            ),
+            dir_check(
+                "wordpress-uploads",
+                &format!("{app_document_root}/wp-content"),
+            ),
+        ];
+    }
+
+    vec![run_command_check(
+        "artisan-about",
+        "php",
+        &["artisan", "about"],
+        Some(&web_root),
+    )]
+}
+
+fn file_check(name: &str, path: &str) -> InstallApiCheck {
+    let exists = fs::metadata(path).is_ok_and(|metadata| metadata.is_file());
+    InstallApiCheck {
+        name: name.to_string(),
+        status: if exists { "pass" } else { "fail" }.to_string(),
+        message: if exists {
+            format!("{path} 파일을 확인했습니다.")
+        } else {
+            format!("{path} 파일이 없습니다.")
+        },
+    }
+}
+
+fn dir_check(name: &str, path: &str) -> InstallApiCheck {
+    let exists = fs::metadata(path).is_ok_and(|metadata| metadata.is_dir());
+    InstallApiCheck {
+        name: name.to_string(),
+        status: if exists { "pass" } else { "fail" }.to_string(),
+        message: if exists {
+            format!("{path} 디렉터리를 확인했습니다.")
+        } else {
+            format!("{path} 디렉터리가 없습니다.")
+        },
+    }
+}
+
+fn run_command_check(
+    name: &str,
+    program: &str,
+    args: &[&str],
+    cwd: Option<&str>,
+) -> InstallApiCheck {
+    let mut command = Command::new(program);
+    command.args(args);
+    if let Some(cwd) = cwd {
+        command.current_dir(cwd);
+    }
+    let display = std::iter::once(program)
+        .chain(args.iter().copied())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    match command.output() {
+        Ok(output) if output.status.success() => InstallApiCheck {
+            name: name.to_string(),
+            status: "pass".to_string(),
+            message: format!("{display} 성공"),
+        },
+        Ok(output) => InstallApiCheck {
+            name: name.to_string(),
+            status: "fail".to_string(),
+            message: format!(
+                "{display} 실패: status={} stdout={} stderr={}",
+                output.status,
+                trim_command_output(&output.stdout),
+                trim_command_output(&output.stderr)
+            ),
+        },
+        Err(error) => InstallApiCheck {
+            name: name.to_string(),
+            status: "fail".to_string(),
+            message: format!("{display} 실행 실패: {error}"),
+        },
+    }
+}
+
+fn trim_command_output(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let trimmed = text.trim();
+    if trimmed.chars().count() > 400 {
+        let prefix = trimmed.chars().take(400).collect::<String>();
+        format!("{prefix}...")
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn report_string(report: &serde_json::Value, key: &str) -> Option<String> {
+    report
+        .get(key)
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
 }
 
 fn recovery_status() -> RecoveryApiStatus {

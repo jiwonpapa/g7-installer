@@ -1842,7 +1842,10 @@ function provisioningActionPanel(report) {
             </div>
             <p>${escapeHtml(action.summary)}</p>
             <code>${escapeHtml(action.command)}</code>
-            <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="scan-line" data-report-jump="${escapeHtml(action.target)}">${escapeHtml(action.cta)}</button>
+            <div class="provisioning-action-buttons">
+              <button class="btn btn-sm btn-primary icon-button" type="button" data-icon="refresh-cw" data-provision-action="${escapeHtml(action.key)}">${escapeHtml(action.actionLabel)}</button>
+              <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="scan-line" data-report-jump="${escapeHtml(action.target)}">${escapeHtml(action.cta)}</button>
+            </div>
           </article>
         `).join("")}
       </div>
@@ -1860,34 +1863,34 @@ function provisioningActions(report = {}) {
   const mailSkipped = report.mail_mode === "none";
 
   return [
-    provisioningAction("웹서버/vhost", report.vhost_checks, {
+    provisioningAction("webserver", "웹서버/vhost", report.vhost_checks, {
       target: "report-vhost",
       summary: "도메인 요청을 앱 문서 루트와 PHP-FPM으로 연결합니다.",
       command: `${webCheck} && sudo systemctl reload ${webService}`,
     }),
-    provisioningAction("PHP-FPM", report.runtime_checks, {
+    provisioningAction("php", "PHP-FPM", report.runtime_checks, {
       target: "report-runtime",
       summary: "사이트 계정으로 PHP 풀을 실행하고 메모리 기준 튜닝값을 적용합니다.",
       command: `sudo systemctl restart ${fpmService}`,
     }),
-    provisioningAction("데이터베이스", report.database_checks, {
+    provisioningAction("database", "데이터베이스", report.database_checks, {
       target: "report-database",
       summary: "앱 전용 DB와 DB 계정을 만들고 root 전용 비밀 파일에 저장합니다.",
       command: `sudo systemctl restart ${dbService}`,
     }),
-    provisioningAction("SSL/Certbot", report.certbot_checks, {
+    provisioningAction("ssl", "SSL/Certbot", report.certbot_checks, {
       target: "report-ssl",
       summary: "주 도메인과 www 도메인 인증서를 발급하고 자동 갱신을 검증합니다.",
       command: "sudo certbot renew --dry-run --no-random-sleep-on-renew",
     }),
-    provisioningAction("메일 발송", report.mail_checks, {
+    provisioningAction("mail", "메일 발송", report.mail_checks, {
       target: "report-mail",
       summary: mailSkipped ? "메일 발송 설정을 선택하지 않아 건너뛰었습니다." : "Postfix 또는 SMTP 릴레이 발송 설정을 확인합니다.",
       command: mailSkipped ? "설정 안 함" : "sudo systemctl restart postfix",
       forceStatus: mailSkipped ? "info" : null,
       forceLabel: mailSkipped ? "건너뜀" : null,
     }),
-    provisioningAction("웹앱", report.app_checks, {
+    provisioningAction("app", "웹앱", report.app_checks, {
       target: "report-app",
       summary: "앱 소스, .env, 권한, 설치 화면 또는 Laravel 런타임을 확인합니다.",
       command: report.app_profile === "gnuboard7" || report.app_package === "gnuboard7"
@@ -1897,9 +1900,10 @@ function provisioningActions(report = {}) {
   ];
 }
 
-function provisioningAction(title, checks, options) {
+function provisioningAction(key, title, checks, options) {
   const status = options.forceStatus || provisioningStatus(checks);
   return {
+    key,
     title,
     status,
     label: options.forceLabel || provisioningStatusLabel(status),
@@ -1907,6 +1911,7 @@ function provisioningAction(title, checks, options) {
     command: options.command,
     target: options.target,
     cta: status === "fail" ? "실패 항목 확인" : status === "warn" ? "후속 확인" : "상세 확인",
+    actionLabel: status === "fail" ? "다시 점검" : "재시작/점검",
   };
 }
 
@@ -1963,6 +1968,14 @@ function overallProvisioningStatus(actions) {
 
 function overallProvisioningLabel(actions) {
   return provisioningStatusLabel(overallProvisioningStatus(actions));
+}
+
+function formatProvisionActionResult(result) {
+  const rows = Array.isArray(result?.checks) ? result.checks : [];
+  const details = rows
+    .map((check) => `- [${checkStatusLabel(check.status, checkStatus(check.status), check)}] ${check.name}: ${checkMessage(check)}`)
+    .join("\n");
+  return [result?.message || "작업 결과를 확인하세요.", details].filter(Boolean).join("\n");
 }
 
 function checksCard(title, checks, id = "") {
@@ -2595,6 +2608,32 @@ function bindEvents() {
     if (target) {
       target.scrollIntoView({ behavior: "smooth", block: "start" });
     }
+  });
+
+  document.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-provision-action]");
+    if (!button) {
+      return;
+    }
+    await withBusy(button, "실행 중", async () => {
+      try {
+        const result = await apiFetch("/api/provision/action", {
+          method: "POST",
+          body: JSON.stringify({ action: button.dataset.provisionAction }),
+        });
+        const failed = result.status === "fail";
+        setAlert(
+          nodes.reportStatus,
+          failed ? "error" : "success",
+          failed ? "세부 설정 점검 실패" : "세부 설정 점검 완료",
+          formatProvisionActionResult(result),
+        );
+        log(`세부 설정 점검: ${result.action} ${result.status}`);
+      } catch (error) {
+        setAlert(nodes.reportStatus, "error", "세부 설정 점검 실패", formatError(error));
+        log(formatError(error));
+      }
+    });
   });
 
   document.querySelectorAll('input[name="install_template"]').forEach((radio) => {
