@@ -422,6 +422,7 @@ pub struct ResolvedMemorySizing {
     pub tier_label: String,
     pub total_memory_kib: u64,
     pub vcpu_count: usize,
+    pub swap_size: String,
     pub php_max_children: u16,
     pub php_start_servers: u16,
     pub php_min_spare_servers: u16,
@@ -473,6 +474,7 @@ pub fn resolve_memory_sizing(total_memory_kib: u64, vcpu_count: usize) -> Resolv
         tier_label: preset.label.to_string(),
         total_memory_kib,
         vcpu_count,
+        swap_size: canonical_swap_size(preset.swap),
         php_max_children: preset.php_max_children.parse::<u16>().unwrap_or(8),
         php_start_servers,
         php_min_spare_servers,
@@ -563,6 +565,7 @@ fn resolved_formula_sizing(
         tier_label: preset.label.to_string(),
         total_memory_kib,
         vcpu_count,
+        swap_size: canonical_swap_size(preset.swap),
         php_max_children,
         php_start_servers,
         php_min_spare_servers: php_spare,
@@ -582,6 +585,10 @@ fn resolved_formula_sizing(
         apache_max_request_workers,
         note: preset.note.to_string(),
     }
+}
+
+fn canonical_swap_size(value: &str) -> String {
+    value.split_whitespace().next().unwrap_or("2GB").to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

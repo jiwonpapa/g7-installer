@@ -61,6 +61,9 @@ const WORDPRESS_SOURCE_DIR: &str = "/var/lib/g7-installer/app-source/wordpress-e
 const CERTBOT_HTTP01_CHALLENGE_DIR: &str = ".well-known/acme-challenge";
 const CERTBOT_HTTP01_SMOKE_FILENAME: &str = "g7inst-certbot-http01-smoke.txt";
 const CERTBOT_HTTP01_SMOKE_CONTENT: &str = "g7-installer-certbot-http01-ok\n";
+const SWAP_FILE_PATH: &str = "/swapfile";
+const SWAP_UNIT_PATH: &str = "/etc/systemd/system/swapfile.swap";
+const SWAP_SYSCTL_PATH: &str = "/etc/sysctl.d/99-g7-installer-swap.conf";
 const GNUBOARD7_REQUIRED_FILES: &[&str] = &[
     "artisan",
     "composer.json",
@@ -1368,13 +1371,16 @@ fn apply_runtime_phase<R: CommandRunner>(
     let ini_path = php_ini_override_path(plan);
     let nginx_tuning_path = "/etc/nginx/conf.d/g7-runtime-tuning.conf";
 
+    checks.extend(apply_swap_configuration(probe, paths, &sizing, owned)?);
+
     checks.push(InstallCheck::pass(
         "server-sizing",
         format!(
-            "Detected {} MiB RAM, {} vCPU; selected {} sizing preset.",
+            "Detected {} MiB RAM, {} vCPU; selected {} sizing preset with {} swap.",
             sizing.total_memory_kib / 1024,
             sizing.vcpu_count,
-            sizing.tier_label
+            sizing.tier_label,
+            sizing.swap_size
         ),
     ));
 
@@ -1547,6 +1553,8 @@ fn php_runtime_diagnostic_checks<R: CommandRunner>(
             "opcache.memory_consumption",
             sizing.opcache_memory.trim_end_matches('M'),
         ),
+        ("opcache.validate_timestamps", "0"),
+        ("opcache.enable_file_override", "1"),
     ];
     let mismatches = limits
         .iter()
@@ -1621,7 +1629,7 @@ echo "php_version=".PHP_VERSION."\n";
 echo "sapi=".PHP_SAPI."\n";
 echo "loaded_ini=".(php_ini_loaded_file() ?: "-")."\n";
 echo "scan_dir=".(getenv("PHP_INI_SCAN_DIR") ?: "-")."\n";
-foreach (["memory_limit","upload_max_filesize","post_max_size","max_execution_time","max_input_vars","date.timezone","opcache.enable","opcache.memory_consumption"] as $key) {
+foreach (["memory_limit","upload_max_filesize","post_max_size","max_execution_time","max_input_vars","date.timezone","realpath_cache_size","realpath_cache_ttl","opcache.enable","opcache.memory_consumption","opcache.validate_timestamps","opcache.enable_file_override"] as $key) {
     $value = ini_get($key);
     echo $key."=".($value === false ? "-" : $value)."\n";
 }
@@ -3233,11 +3241,12 @@ fn laravel_env_content(
     let app_key = random_laravel_app_key()?;
     let redis_enabled = plan.redis_mode == "enable";
     let mut env = format!(
-        "APP_NAME=\"{}\"\nAPP_ENV=production\nAPP_KEY=base64:{app_key}\nAPP_DEBUG=false\nAPP_URL={app_url}\n\nDB_CONNECTION=mysql\nDB_HOST=localhost\nDB_PORT=3306\nDB_DATABASE={}\nDB_USERNAME={}\nDB_PASSWORD=\"{}\"\n\nCACHE_STORE={}\nSESSION_DRIVER={}\nQUEUE_CONNECTION={}\nREDIS_CLIENT=phpredis\nREDIS_HOST=127.0.0.1\nREDIS_PORT=6379\nREDIS_PASSWORD=null\n\n",
+        "APP_NAME=\"{}\"\nAPP_ENV=production\nAPP_KEY=base64:{app_key}\nAPP_DEBUG=false\nAPP_URL={app_url}\n\nDB_CONNECTION=mysql\nDB_HOST=localhost\nDB_PORT=3306\nDB_DATABASE={}\nDB_USERNAME={}\nDB_PASSWORD=\"{}\"\n\nCACHE_STORE={}\nCACHE_DRIVER={}\nSESSION_DRIVER={}\nQUEUE_CONNECTION={}\nREDIS_CLIENT=phpredis\nREDIS_HOST=127.0.0.1\nREDIS_PORT=6379\nREDIS_PASSWORD=null\n\n",
         plan.app_profile_label,
         plan.database_name,
         plan.database_user,
         db_password.replace('"', "\\\""),
+        if redis_enabled { "redis" } else { "file" },
         if redis_enabled { "redis" } else { "file" },
         if redis_enabled { "redis" } else { "file" },
         if redis_enabled { "redis" } else { "database" },
@@ -3340,6 +3349,133 @@ fn detected_memory_sizing<R: CommandRunner>(probe: &SystemProbe<R>) -> plan::Res
     plan::resolve_memory_sizing(total_memory_kib, vcpu_count)
 }
 
+fn apply_swap_configuration<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    paths: &InstallPaths,
+    sizing: &plan::ResolvedMemorySizing,
+    owned: &mut Vec<String>,
+) -> Result<Vec<InstallCheck>> {
+    let mut checks = Vec::new();
+    write_new_file(paths, SWAP_UNIT_PATH, &swap_unit_content(), owned)?;
+    write_new_file(paths, SWAP_SYSCTL_PATH, swap_sysctl_content(), owned)?;
+
+    if paths.resolve("/") != Path::new("/") {
+        let swap_path = paths.resolve(SWAP_FILE_PATH);
+        fs::write(
+            &swap_path,
+            format!("g7inst simulated {}\n", sizing.swap_size),
+        )
+        .map_err(|source| Error::FileWriteFailed {
+            path: SWAP_FILE_PATH.to_string(),
+            source,
+        })?;
+        owned.push(SWAP_FILE_PATH.to_string());
+        checks.push(InstallCheck::pass(
+            "swapfile",
+            format!(
+                "Prepared managed {} swapfile at {SWAP_FILE_PATH} with systemd unit {SWAP_UNIT_PATH}.",
+                sizing.swap_size
+            ),
+        ));
+        checks.push(InstallCheck::pass(
+            "swap-sysctl",
+            format!("Prepared swap sysctl policy at {SWAP_SYSCTL_PATH}."),
+        ));
+        return Ok(checks);
+    }
+
+    let output = probe
+        .runner()
+        .run(&swap_apply_command(&sizing.swap_size))
+        .map_err(|err| {
+            command_error(
+                "swapfile",
+                format!("create and enable {SWAP_FILE_PATH}"),
+                err,
+            )
+        })?;
+    require_success(
+        "swapfile",
+        format!("create and enable {SWAP_FILE_PATH}"),
+        output,
+    )?;
+    if !owned.iter().any(|path| path == SWAP_FILE_PATH) {
+        owned.push(SWAP_FILE_PATH.to_string());
+    }
+
+    checks.push(InstallCheck::pass(
+        "swapfile",
+        format!(
+            "Enabled managed {} swapfile through systemd unit {SWAP_UNIT_PATH}.",
+            sizing.swap_size
+        ),
+    ));
+    checks.push(InstallCheck::pass(
+        "swap-sysctl",
+        format!("Applied vm.swappiness=10 and vm.vfs_cache_pressure=50 from {SWAP_SYSCTL_PATH}."),
+    ));
+    Ok(checks)
+}
+
+fn swap_apply_command(swap_size: &str) -> CommandSpec {
+    let swap_size = shell_single_quote(swap_size);
+    let swap_size_mib = swap_size_to_mib(swap_size.trim_matches('\''));
+    CommandSpec::new("sh").arg("-c").arg(format!(
+        r#"set -eu
+swap_size={swap_size}
+if [ ! -f {SWAP_FILE_PATH} ]; then
+    fallocate -l "$swap_size" {SWAP_FILE_PATH} || dd if=/dev/zero of={SWAP_FILE_PATH} bs=1M count="{swap_size_mib}" status=none
+    chmod 600 {SWAP_FILE_PATH}
+    mkswap {SWAP_FILE_PATH} >/dev/null
+else
+    chmod 600 {SWAP_FILE_PATH}
+fi
+systemctl daemon-reload
+systemctl enable --now swapfile.swap >/dev/null
+sysctl --system >/dev/null
+swapon --show=NAME | grep -qx {SWAP_FILE_PATH}
+"#
+    ))
+}
+
+fn swap_size_to_mib(swap_size: &str) -> u64 {
+    let normalized = swap_size.trim().to_ascii_lowercase();
+    let digits = normalized
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>()
+        .parse::<u64>()
+        .unwrap_or(2);
+    if normalized.contains('g') {
+        digits.saturating_mul(1024).max(1024)
+    } else {
+        digits.max(1024)
+    }
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn swap_unit_content() -> String {
+    format!(
+        r#"[Unit]
+Description=G7 Installer managed swapfile
+After=local-fs.target
+
+[Swap]
+What={SWAP_FILE_PATH}
+
+[Install]
+WantedBy=swap.target
+"#
+    )
+}
+
+fn swap_sysctl_content() -> &'static str {
+    "# Managed by g7inst.\nvm.swappiness = 10\nvm.vfs_cache_pressure = 50\n"
+}
+
 fn php_fpm_site_socket(plan: &plan::InstallPlan) -> String {
     format!(
         "/run/php/php{}-fpm-{}.sock",
@@ -3399,10 +3535,17 @@ memory_limit = {memory_limit}
 upload_max_filesize = {upload_limit}
 post_max_size = {upload_limit}
 max_execution_time = 120
+max_input_vars = 3000
+realpath_cache_size = 4096K
+realpath_cache_ttl = 600
 opcache.enable = 1
 opcache.memory_consumption = {opcache_memory}
 opcache.interned_strings_buffer = 16
 opcache.max_accelerated_files = 20000
+opcache.validate_timestamps = 0
+opcache.revalidate_freq = 60
+opcache.save_comments = 1
+opcache.enable_file_override = 1
 "#,
         memory_limit = sizing.php_memory_limit,
         upload_limit = sizing.php_upload_limit,
@@ -4894,6 +5037,13 @@ mod tests {
                 .join("etc/php/8.3/fpm/conf.d/99-g7-installer.ini")
                 .exists()
         );
+        assert!(fs_root.join("swapfile").exists());
+        assert!(fs_root.join("etc/systemd/system/swapfile.swap").exists());
+        assert!(
+            fs_root
+                .join("etc/sysctl.d/99-g7-installer-swap.conf")
+                .exists()
+        );
         assert!(fs_root.join("etc/mysql/conf.d/g7-installer.cnf").exists());
         assert!(fs_root.join("etc/g7-installer/secrets.toml").exists());
         assert!(fs_root.join("var/log/g7-installer/setup-guide.md").exists());
@@ -4917,6 +5067,10 @@ mod tests {
         let app_env = fs::read_to_string(fs_root.join("home/g7/public_html/.env"))?;
         assert!(app_env.contains("DB_HOST=localhost"));
         assert!(!app_env.contains("DB_HOST=127.0.0.1"));
+        assert!(app_env.contains("CACHE_STORE=redis"));
+        assert!(app_env.contains("CACHE_DRIVER=redis"));
+        assert!(app_env.contains("SESSION_DRIVER=redis"));
+        assert!(app_env.contains("QUEUE_CONNECTION=redis"));
         assert!(app_env.contains("BROADCAST_CONNECTION=reverb"));
         assert!(app_env.contains("VITE_REVERB_HOST=example.com"));
         assert!(app_env.contains("VITE_REVERB_PORT=443"));
@@ -5011,6 +5165,12 @@ mod tests {
                 .certbot_checks
                 .iter()
                 .any(|check| { check.name == "tls-certificate" && check.status == "pass" })
+        );
+        assert!(
+            report
+                .runtime_checks
+                .iter()
+                .any(|check| { check.name == "swapfile" && check.status == "pass" })
         );
         assert!(
             report
@@ -5681,10 +5841,14 @@ mod tests {
              upload_max_filesize={}\n\
              post_max_size={}\n\
              max_execution_time=120\n\
-             max_input_vars=1000\n\
+             max_input_vars=3000\n\
              date.timezone=UTC\n\
+             realpath_cache_size=4096K\n\
+             realpath_cache_ttl=600\n\
              opcache.enable=1\n\
              opcache.memory_consumption={}\n\
+             opcache.validate_timestamps=0\n\
+             opcache.enable_file_override=1\n\
              extensions={}\n",
             install_plan.php_version,
             install_plan.php_version,
