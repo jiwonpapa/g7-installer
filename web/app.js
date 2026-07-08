@@ -637,6 +637,14 @@ function validateSitePassword(payload) {
   return sitePasswordError(payload);
 }
 
+const sitePasswordAlertMessages = [
+  "사이트 계정 비밀번호를 입력하세요.",
+  "사이트 계정 비밀번호 확인이 일치하지 않습니다.",
+  "사이트 계정 비밀번호는 8자 이상이어야 합니다.",
+  "사이트 계정 비밀번호에는 콜론, 줄바꿈, 제어문자를 사용할 수 없습니다.",
+  "사이트 계정 비밀번호에 사용할 수 없는 문자가 있습니다.",
+];
+
 function sitePasswordError(payload = optionPayload()) {
   if (!payload.site_password) {
     return "사이트 계정 비밀번호를 입력하세요.";
@@ -651,6 +659,15 @@ function sitePasswordError(payload = optionPayload()) {
     return "사이트 계정 비밀번호에는 콜론, 줄바꿈, 제어문자를 사용할 수 없습니다.";
   }
   return null;
+}
+
+function clearSitePasswordAlerts() {
+  [nodes.planStatus, nodes.installStatus].forEach((node) => {
+    const text = node?.textContent || "";
+    if (sitePasswordAlertMessages.some((message) => text.includes(message))) {
+      hideAlert(node);
+    }
+  });
 }
 
 function refreshSitePasswordState(options = {}) {
@@ -678,6 +695,9 @@ function refreshSitePasswordState(options = {}) {
     button.setAttribute("aria-disabled", error ? "true" : "false");
   });
   refreshConfirmSpecButton();
+  if (!error) {
+    clearSitePasswordAlerts();
+  }
 
   return error;
 }
@@ -2084,7 +2104,13 @@ function bindEvents() {
     } catch (error) {
       markStage("packages", "실패");
       stopPackageTicker();
-      renderErrorReport("기본 서버 구성 실패", `${formatError(error)}\n\n리포트와 로그를 확인하세요. 패키지 버전 문제면 PHP 8.3 조합으로 다시 시도하세요.`);
+      const reportPayload = await apiFetch("/api/report").catch(() => null);
+      if (reportPayload?.exists) {
+        renderSavedReport(reportPayload);
+        restoreInstallStateFromReport(parseSavedReport(reportPayload));
+      } else {
+        renderErrorReport("기본 서버 구성 실패", `${formatError(error)}\n\n리포트와 로그를 확인하세요. 패키지 후보 검사 결과와 복구 버튼 상태를 먼저 확인하세요.`);
+      }
       setAlert(nodes.installStatus, "error", "기본 서버 구성 실패", formatError(error));
       setReportReady(true);
       await refreshRecoveryStatus();

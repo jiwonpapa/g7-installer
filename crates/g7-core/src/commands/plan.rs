@@ -742,8 +742,8 @@ fn packages(
             description: "PHP extensions for HTTP, images, and archives.",
         },
         PlanPackage {
-            name: format!("php{php_version}-intl php{php_version}-bcmath php{php_version}-opcache"),
-            description: "PHP extensions for locale, decimal math, and performance.",
+            name: format!("php{php_version}-intl php{php_version}-bcmath"),
+            description: "PHP extensions for locale and decimal math.",
         },
         PlanPackage {
             name: format!("php{php_version}-imagick"),
@@ -2307,6 +2307,11 @@ mod tests {
             plan.packages
                 .iter()
                 .any(|package| package.name.contains("software-properties-common"))
+        );
+        assert!(
+            plan.packages
+                .iter()
+                .all(|package| !package.name.contains("php8.5-opcache"))
         );
         Ok(())
     }

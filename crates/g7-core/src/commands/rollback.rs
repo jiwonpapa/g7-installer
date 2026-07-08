@@ -19,7 +19,8 @@ use g7_system::command::{CommandOutput, CommandRunner};
 use g7_system::package::PackageStatus;
 
 const REPORT_PATH: &str = "/var/log/g7-installer/report.json";
-const SAFE_ROLLBACK_PHASES: [&str; 3] = [
+const SAFE_ROLLBACK_PHASES: [&str; 4] = [
+    InstallerPhase::PackageFailed.as_str(),
     InstallerPhase::PackagesInstalled.as_str(),
     InstallerPhase::VhostEnabled.as_str(),
     InstallerPhase::VhostFailed.as_str(),
@@ -868,6 +869,41 @@ mod tests {
         assert!(
             matches!(err, Error::RollbackBlocked { reason } if reason.contains("missing preinstall package baseline"))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn rollback_allows_package_failed_when_baseline_exists()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let fs_root = rollback_fs_root(false, true)?;
+        let mut state = read_state_file(&fs_root.join(strip_root(STATE_PATH)))?;
+        state.phase = "package-failed".to_string();
+        state
+            .completed_steps
+            .push("package-candidates-checked".to_string());
+        write_state_file(&fs_root.join(strip_root(STATE_PATH)), &state)?;
+        fs::write(
+            fs_root.join("var/log/g7-installer/report.json"),
+            rollback_report_content_with_phase("package-failed", true),
+        )?;
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success("0\n"));
+        runner.push_output(CommandOutput::success("0\n"));
+        let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
+
+        let report =
+            run_with_probe_and_paths(false, true, &probe, &RollbackPaths::with_root(&fs_root))?;
+
+        assert!(report.dry_run);
+        assert_eq!(report.phase, "package-failed");
+        assert!(
+            report
+                .package_actions
+                .iter()
+                .any(|action| action.name == "nginx" && action.status == "would-purge")
+        );
+
+        fs::remove_dir_all(fs_root)?;
         Ok(())
     }
 

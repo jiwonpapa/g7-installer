@@ -120,6 +120,13 @@ struct ApplySummary {
     vhost_checks: Vec<InstallCheck>,
 }
 
+#[derive(Debug)]
+struct PackagePhaseFailure {
+    error: Error,
+    summary: ApplySummary,
+    completed_steps: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallPaths {
     root: PathBuf,
@@ -245,7 +252,11 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
 
     let mut apply_summary = match apply_package_phase(probe, &install_plan) {
         Ok(summary) => summary,
-        Err(err) => {
+        Err(failure) => {
+            let err = failure.error;
+            let mut failed_summary = failure.summary;
+            failed_summary.safety_checks = safety_checks(&install_plan, "package-failed");
+            completed_steps.extend(failure.completed_steps);
             state.set_phase(InstallerPhase::PackageFailed);
             state.completed_steps = completed_steps.clone();
             write_state_file(&state_path, &state).map_err(|source| Error::FileWriteFailed {
@@ -258,7 +269,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
                 &report_content(
                     &install_plan,
                     &state.phase,
-                    &ApplySummary::default(),
+                    &failed_summary,
                     Some(&err.to_string()),
                 )?,
             )?;
@@ -513,88 +524,199 @@ fn require_install_allowed(report: &doctor::DoctorReport) -> Result<()> {
 fn apply_package_phase<R: CommandRunner>(
     probe: &SystemProbe<R>,
     plan: &plan::InstallPlan,
-) -> Result<ApplySummary> {
+) -> std::result::Result<ApplySummary, PackagePhaseFailure> {
     let packages = package_names(plan);
     let services = managed_services(plan);
     let ports = managed_ports(plan);
-    let preinstall_package_checks = inspect_preinstall_packages(probe, &packages)?;
+    let preinstall_package_checks =
+        inspect_preinstall_packages(probe, &packages).map_err(|error| PackagePhaseFailure {
+            error,
+            summary: ApplySummary::default(),
+            completed_steps: Vec::new(),
+        })?;
+    let mut summary = ApplySummary {
+        preinstall_package_checks,
+        ..ApplySummary::default()
+    };
+    let mut completed_steps = Vec::new();
 
-    let output = probe
-        .apt_update()
-        .map_err(|err| command_error("apt-update", "apt-get update", err))?;
-    require_success("apt-update", "apt-get update", output)?;
+    let output = match probe.apt_update() {
+        Ok(output) => output,
+        Err(err) => {
+            return Err(package_phase_failure(
+                command_error("apt-update", "apt-get update", err),
+                &summary,
+                &completed_steps,
+            ));
+        }
+    };
+    if let Err(error) = require_success("apt-update", "apt-get update", output) {
+        return Err(package_phase_failure(error, &summary, &completed_steps));
+    }
+    completed_steps.push("apt-updated".to_string());
 
     if plan.php_source == g7_system::php::PHP_SOURCE_ONDREJ {
         let source_packages = php_source_prerequisite_packages();
         let install_command = format!("apt-get install -y {}", source_packages.join(" "));
-        let output = probe
-            .apt_install(&source_packages)
-            .map_err(|err| command_error("php-source-prerequisites", &install_command, err))?;
-        require_success("php-source-prerequisites", install_command, output)?;
+        let output = match probe.apt_install(&source_packages) {
+            Ok(output) => output,
+            Err(err) => {
+                return Err(package_phase_failure(
+                    command_error("php-source-prerequisites", &install_command, err),
+                    &summary,
+                    &completed_steps,
+                ));
+            }
+        };
+        if let Err(error) =
+            require_success("php-source-prerequisites", install_command.clone(), output)
+        {
+            return Err(package_phase_failure(error, &summary, &completed_steps));
+        }
 
-        let output = probe.apt_add_repository("ppa:ondrej/php").map_err(|err| {
-            command_error(
-                "php-source-add",
-                "add-apt-repository -y ppa:ondrej/php",
-                err,
-            )
-        })?;
-        require_success(
+        let output = match probe.apt_add_repository("ppa:ondrej/php") {
+            Ok(output) => output,
+            Err(err) => {
+                return Err(package_phase_failure(
+                    command_error(
+                        "php-source-add",
+                        "add-apt-repository -y ppa:ondrej/php",
+                        err,
+                    ),
+                    &summary,
+                    &completed_steps,
+                ));
+            }
+        };
+        if let Err(error) = require_success(
             "php-source-add",
             "add-apt-repository -y ppa:ondrej/php",
             output,
-        )?;
-
-        let output = probe
-            .apt_update()
-            .map_err(|err| command_error("apt-update-after-php-source", "apt-get update", err))?;
-        require_success("apt-update-after-php-source", "apt-get update", output)?;
-    }
-
-    for package in &packages {
-        let available = probe.apt_candidate_available(package).map_err(|err| {
-            command_error("apt-candidate", format!("apt-cache policy {package}"), err)
-        })?;
-        if !available {
-            return Err(Error::PackageUnavailable {
-                package: package.clone(),
-            });
+        ) {
+            return Err(package_phase_failure(error, &summary, &completed_steps));
         }
+        completed_steps.push("php-apt-source-added".to_string());
+
+        let output = match probe.apt_update() {
+            Ok(output) => output,
+            Err(err) => {
+                return Err(package_phase_failure(
+                    command_error("apt-update-after-php-source", "apt-get update", err),
+                    &summary,
+                    &completed_steps,
+                ));
+            }
+        };
+        if let Err(error) = require_success("apt-update-after-php-source", "apt-get update", output)
+        {
+            return Err(package_phase_failure(error, &summary, &completed_steps));
+        }
+        completed_steps.push("apt-updated-after-php-source".to_string());
     }
+
+    let mut candidate_checks = Vec::new();
+    for package in &packages {
+        let available = match probe.apt_candidate_available(package) {
+            Ok(available) => available,
+            Err(err) => {
+                return Err(package_phase_failure(
+                    command_error("apt-candidate", format!("apt-cache policy {package}"), err),
+                    &summary,
+                    &completed_steps,
+                ));
+            }
+        };
+        if !available {
+            candidate_checks.push(InstallCheck::fail(
+                package,
+                "package candidate is not available from configured apt sources",
+            ));
+            summary.package_checks = candidate_checks;
+            completed_steps.push("package-candidates-checked".to_string());
+            return Err(package_phase_failure(
+                Error::PackageUnavailable {
+                    package: package.clone(),
+                },
+                &summary,
+                &completed_steps,
+            ));
+        }
+        candidate_checks.push(InstallCheck::pass(
+            package,
+            "package candidate is available from configured apt sources",
+        ));
+    }
+    summary.package_checks = candidate_checks;
+    completed_steps.push("package-candidates-checked".to_string());
 
     let install_command = format!("apt-get install -y {}", packages.join(" "));
-    let output = probe
-        .apt_install(&packages)
-        .map_err(|err| command_error("apt-install", &install_command, err))?;
-    require_success("apt-install", install_command, output)?;
+    let output = match probe.apt_install(&packages) {
+        Ok(output) => output,
+        Err(err) => {
+            return Err(package_phase_failure(
+                command_error("apt-install", &install_command, err),
+                &summary,
+                &completed_steps,
+            ));
+        }
+    };
+    if let Err(error) = require_success("apt-install", install_command.clone(), output) {
+        return Err(package_phase_failure(error, &summary, &completed_steps));
+    }
 
     for service in &services {
         let command = format!("systemctl enable --now {service}");
-        let output = probe
-            .enable_service_now(service)
-            .map_err(|err| command_error("service-enable", &command, err))?;
-        require_success("service-enable", command, output)?;
+        let output = match probe.enable_service_now(service) {
+            Ok(output) => output,
+            Err(err) => {
+                return Err(package_phase_failure(
+                    command_error("service-enable", &command, err),
+                    &summary,
+                    &completed_steps,
+                ));
+            }
+        };
+        if let Err(error) = require_success("service-enable", command.clone(), output) {
+            return Err(package_phase_failure(error, &summary, &completed_steps));
+        }
     }
 
-    let package_checks = verify_packages(probe, &packages)?;
-    let service_checks = verify_services(probe, &services)?;
-    let port_checks = verify_ports(probe, &ports)?;
-    require_checks_passed(&package_checks, &service_checks, &port_checks)?;
+    let package_checks = verify_packages(probe, &packages)
+        .map_err(|error| package_phase_failure(error, &summary, &completed_steps))?;
+    summary.package_checks = package_checks;
+    let service_checks = verify_services(probe, &services)
+        .map_err(|error| package_phase_failure(error, &summary, &completed_steps))?;
+    summary.service_checks = service_checks;
+    let port_checks = verify_ports(probe, &ports)
+        .map_err(|error| package_phase_failure(error, &summary, &completed_steps))?;
+    summary.port_checks = port_checks;
+    if let Err(error) = require_checks_passed(
+        &summary.package_checks,
+        &summary.service_checks,
+        &summary.port_checks,
+    ) {
+        return Err(package_phase_failure(error, &summary, &completed_steps));
+    }
     let network_checks = verify_network_readiness(probe, plan);
     let mail_checks = verify_mail_readiness(probe, plan);
-    let certbot_checks = verify_certbot_readiness(probe, plan, &service_checks);
+    let certbot_checks = verify_certbot_readiness(probe, plan, &summary.service_checks);
 
-    Ok(ApplySummary {
-        safety_checks: Vec::new(),
-        preinstall_package_checks,
-        package_checks,
-        service_checks,
-        port_checks,
-        network_checks,
-        mail_checks,
-        certbot_checks,
-        vhost_checks: Vec::new(),
-    })
+    summary.network_checks = network_checks;
+    summary.mail_checks = mail_checks;
+    summary.certbot_checks = certbot_checks;
+    Ok(summary)
+}
+
+fn package_phase_failure(
+    error: Error,
+    summary: &ApplySummary,
+    completed_steps: &[String],
+) -> PackagePhaseFailure {
+    PackagePhaseFailure {
+        error,
+        summary: summary.clone(),
+        completed_steps: completed_steps.to_vec(),
+    }
 }
 
 fn php_source_prerequisite_packages() -> Vec<String> {
