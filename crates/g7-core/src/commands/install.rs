@@ -16,6 +16,8 @@ use std::io::Write;
 use std::net::IpAddr;
 #[cfg(unix)]
 use std::os::unix::fs as unix_fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -26,6 +28,7 @@ use g7_state::owned_files::{OWNED_FILES_PATH, OwnedFiles, write_owned_files};
 use g7_state::state::{InstallerPhase, InstallerState, STATE_PATH, write_state_file};
 use g7_system::SystemProbe;
 use g7_system::command::CommandRunner;
+use g7_system::database::DatabaseEngine;
 use g7_system::package::PackageStatus;
 use g7_system::port::PortStatus;
 use g7_system::service::ServiceActivity;
@@ -40,6 +43,8 @@ const REPORT_PATH: &str = "/var/log/g7-installer/report.json";
 const ROLLBACK_PATH: &str = "/var/lib/g7-installer/rollback.json";
 const LOCAL_HOSTS_PATH: &str = "/etc/g7-installer/local-hosts.txt";
 const PHP_READY_FILENAME: &str = "g7inst-ready.php";
+const SECRETS_PATH: &str = "/etc/g7-installer/secrets.toml";
+const SETUP_GUIDE_PATH: &str = "/var/log/g7-installer/setup-guide.md";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallReport {
@@ -76,9 +81,14 @@ pub struct InstallReport {
     pub service_checks: Vec<InstallCheck>,
     pub port_checks: Vec<InstallCheck>,
     pub network_checks: Vec<InstallCheck>,
+    pub runtime_checks: Vec<InstallCheck>,
+    pub database_checks: Vec<InstallCheck>,
+    pub firewall_checks: Vec<InstallCheck>,
     pub mail_checks: Vec<InstallCheck>,
     pub certbot_checks: Vec<InstallCheck>,
     pub vhost_checks: Vec<InstallCheck>,
+    pub app_checks: Vec<InstallCheck>,
+    pub setup_guide_path: PathBuf,
     pub app_requirements: Vec<InstallCheck>,
 }
 
@@ -115,9 +125,13 @@ struct ApplySummary {
     service_checks: Vec<InstallCheck>,
     port_checks: Vec<InstallCheck>,
     network_checks: Vec<InstallCheck>,
+    runtime_checks: Vec<InstallCheck>,
+    database_checks: Vec<InstallCheck>,
+    firewall_checks: Vec<InstallCheck>,
     mail_checks: Vec<InstallCheck>,
     certbot_checks: Vec<InstallCheck>,
     vhost_checks: Vec<InstallCheck>,
+    app_checks: Vec<InstallCheck>,
 }
 
 #[derive(Debug)]
@@ -125,6 +139,12 @@ struct PackagePhaseFailure {
     error: Error,
     summary: ApplySummary,
     completed_steps: Vec<String>,
+}
+
+struct ProgressContext<'a> {
+    paths: &'a InstallPaths,
+    state_path: &'a Path,
+    owned_files_path: &'a Path,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -244,6 +264,11 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     state.completed_steps = completed_steps.clone();
 
     let state_path = paths.resolve(STATE_PATH);
+    let progress = ProgressContext {
+        paths,
+        state_path: &state_path,
+        owned_files_path: &owned_files_path,
+    };
     write_state_file(&state_path, &state).map_err(|source| Error::FileWriteFailed {
         path: STATE_PATH.to_string(),
         source,
@@ -253,6 +278,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     let mut apply_summary = match apply_package_phase(probe, &install_plan) {
         Ok(summary) => summary,
         Err(failure) => {
+            let failure = *failure;
             let err = failure.error;
             let mut failed_summary = failure.summary;
             failed_summary.safety_checks = safety_checks(&install_plan, "package-failed");
@@ -446,6 +472,174 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         }
     }
 
+    match apply_runtime_phase(probe, paths, &install_plan, &mut owned_file_list) {
+        Ok(runtime_checks) => {
+            apply_summary.runtime_checks = runtime_checks;
+            completed_steps.push("php-fpm-config-written".to_string());
+            completed_steps.push("php-runtime-config-written".to_string());
+            if install_plan.web_server == "nginx" {
+                completed_steps.push("nginx-runtime-config-written".to_string());
+                completed_steps.push("nginx-runtime-reloaded".to_string());
+            }
+            apply_summary.safety_checks = safety_checks(&install_plan, "runtime-configured");
+            state.set_phase(InstallerPhase::RuntimeConfigured);
+            state.completed_steps = completed_steps.clone();
+            persist_progress(
+                &progress,
+                &mut owned_files,
+                &owned_file_list,
+                &state,
+                &install_plan,
+                &apply_summary,
+                None,
+            )?;
+        }
+        Err(err) => {
+            apply_summary.runtime_checks = vec![InstallCheck::fail(
+                "runtime-config",
+                format!("Runtime configuration failed: {err}"),
+            )];
+            state.completed_steps = completed_steps.clone();
+            persist_progress(
+                &progress,
+                &mut owned_files,
+                &owned_file_list,
+                &state,
+                &install_plan,
+                &apply_summary,
+                Some(&err.to_string()),
+            )?;
+            return Err(err);
+        }
+    }
+
+    match apply_database_phase(probe, paths, &install_plan, &mut owned_file_list) {
+        Ok(database_checks) => {
+            apply_summary.database_checks = database_checks;
+            completed_steps.push("database-runtime-configured".to_string());
+            completed_steps.push("database-secret-written".to_string());
+            completed_steps.push("database-created".to_string());
+            completed_steps.push("database-user-created".to_string());
+            apply_summary.safety_checks = safety_checks(&install_plan, "database-configured");
+            state.set_phase(InstallerPhase::DatabaseConfigured);
+            state.completed_steps = completed_steps.clone();
+            persist_progress(
+                &progress,
+                &mut owned_files,
+                &owned_file_list,
+                &state,
+                &install_plan,
+                &apply_summary,
+                None,
+            )?;
+        }
+        Err(err) => {
+            apply_summary.database_checks = vec![InstallCheck::fail(
+                "database-config",
+                format!("Database configuration failed: {err}"),
+            )];
+            state.completed_steps = completed_steps.clone();
+            persist_progress(
+                &progress,
+                &mut owned_files,
+                &owned_file_list,
+                &state,
+                &install_plan,
+                &apply_summary,
+                Some(&err.to_string()),
+            )?;
+            return Err(err);
+        }
+    }
+
+    let (firewall_checks, mail_checks, certbot_checks, app_checks) =
+        apply_post_database_guidance(&install_plan);
+    apply_summary.firewall_checks = firewall_checks;
+    apply_summary.mail_checks.extend(mail_checks);
+    apply_summary.certbot_checks = certbot_checks;
+    apply_summary.app_checks = app_checks;
+
+    match apply_tls_phase(
+        probe,
+        paths,
+        &install_plan,
+        &mut owned_file_list,
+        &apply_summary.network_checks,
+    ) {
+        Ok(certbot_checks) => {
+            let tls_passed = certbot_checks
+                .iter()
+                .any(|check| check.name == "tls-certificate" && check.status == "pass");
+            let tls_skipped = certbot_checks
+                .iter()
+                .any(|check| check.name == "tls" && check.status == "skipped");
+            apply_summary.certbot_checks = certbot_checks;
+            if tls_passed {
+                completed_steps.push("certbot-issued".to_string());
+                completed_steps.push("https-vhost-written".to_string());
+                completed_steps.push("certbot-renew-dry-run".to_string());
+                state.set_phase(InstallerPhase::TlsEnabled);
+            } else if tls_skipped {
+                completed_steps.push("tls-skipped".to_string());
+            }
+            state.completed_steps = completed_steps.clone();
+            persist_progress(
+                &progress,
+                &mut owned_files,
+                &owned_file_list,
+                &state,
+                &install_plan,
+                &apply_summary,
+                None,
+            )?;
+        }
+        Err(err) => {
+            apply_summary.certbot_checks = vec![InstallCheck::fail(
+                "tls-config",
+                format!("TLS configuration failed: {err}"),
+            )];
+            state.completed_steps = completed_steps.clone();
+            persist_progress(
+                &progress,
+                &mut owned_files,
+                &owned_file_list,
+                &state,
+                &install_plan,
+                &apply_summary,
+                Some(&err.to_string()),
+            )?;
+            return Err(err);
+        }
+    }
+
+    completed_steps.push("setup-guide-written".to_string());
+    if state.phase == InstallerPhase::TlsEnabled.as_str()
+        || completed_steps.iter().any(|step| step == "tls-skipped")
+    {
+        state.set_phase(InstallerPhase::Completed);
+    }
+    state.completed_steps = completed_steps.clone();
+    write_new_file(
+        paths,
+        SETUP_GUIDE_PATH,
+        &setup_guide_content(
+            &install_plan,
+            &state.phase,
+            &apply_summary,
+            &completed_steps,
+        ),
+        &mut owned_file_list,
+    )?;
+    persist_progress(
+        &progress,
+        &mut owned_files,
+        &owned_file_list,
+        &state,
+        &install_plan,
+        &apply_summary,
+        None,
+    )?;
+
     Ok(InstallReport {
         domain: state.domain,
         deployment_mode: install_plan.deployment_mode,
@@ -480,9 +674,14 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         service_checks: apply_summary.service_checks,
         port_checks: apply_summary.port_checks,
         network_checks: apply_summary.network_checks,
+        runtime_checks: apply_summary.runtime_checks,
+        database_checks: apply_summary.database_checks,
+        firewall_checks: apply_summary.firewall_checks,
         mail_checks: apply_summary.mail_checks,
         certbot_checks: apply_summary.certbot_checks,
         vhost_checks: apply_summary.vhost_checks,
+        app_checks: apply_summary.app_checks,
+        setup_guide_path: paths.resolve(SETUP_GUIDE_PATH),
         app_requirements: app_requirements_to_checks(install_plan.app_requirements),
     })
 }
@@ -524,7 +723,7 @@ fn require_install_allowed(report: &doctor::DoctorReport) -> Result<()> {
 fn apply_package_phase<R: CommandRunner>(
     probe: &SystemProbe<R>,
     plan: &plan::InstallPlan,
-) -> std::result::Result<ApplySummary, PackagePhaseFailure> {
+) -> std::result::Result<ApplySummary, Box<PackagePhaseFailure>> {
     let packages = package_names(plan);
     let services = managed_services(plan);
     let ports = managed_ports(plan);
@@ -711,12 +910,12 @@ fn package_phase_failure(
     error: Error,
     summary: &ApplySummary,
     completed_steps: &[String],
-) -> PackagePhaseFailure {
-    PackagePhaseFailure {
+) -> Box<PackagePhaseFailure> {
+    Box::new(PackagePhaseFailure {
         error,
         summary: summary.clone(),
         completed_steps: completed_steps.to_vec(),
-    }
+    })
 }
 
 fn php_source_prerequisite_packages() -> Vec<String> {
@@ -926,6 +1125,365 @@ fn deferred_vhost_checks(plan: &plan::InstallPlan) -> Vec<InstallCheck> {
     }]
 }
 
+fn apply_runtime_phase<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+    owned: &mut Vec<String>,
+) -> Result<Vec<InstallCheck>> {
+    let mut checks = Vec::new();
+    let sizing = detected_memory_sizing(probe);
+    let pool_path = php_pool_path(plan);
+    let ini_path = php_ini_override_path(plan);
+    let nginx_tuning_path = "/etc/nginx/conf.d/g7-runtime-tuning.conf";
+
+    checks.push(InstallCheck::pass(
+        "server-sizing",
+        format!(
+            "Detected {} MiB RAM, {} vCPU; selected {} sizing preset.",
+            sizing.total_memory_kib / 1024,
+            sizing.vcpu_count,
+            sizing.tier_label
+        ),
+    ));
+
+    write_new_file(paths, &pool_path, &php_pool_content(plan, &sizing), owned)?;
+    checks.push(InstallCheck::pass(
+        "php-fpm-pool",
+        format!(
+            "Created PHP-FPM pool config at {pool_path}; max_children={}, memory_limit={}.",
+            sizing.php_max_children, sizing.php_memory_limit
+        ),
+    ));
+
+    write_new_file(paths, &ini_path, &php_ini_override_content(&sizing), owned)?;
+    checks.push(InstallCheck::pass(
+        "php-runtime-ini",
+        format!("Created PHP runtime override at {ini_path}."),
+    ));
+
+    if plan.web_server == "nginx" {
+        write_new_file(
+            paths,
+            nginx_tuning_path,
+            &nginx_runtime_tuning_content(&sizing),
+            owned,
+        )?;
+        write_existing_file(
+            paths,
+            g7_system::nginx::G7_SITE_AVAILABLE,
+            &nginx_vhost_content_with_socket(plan, &php_fpm_site_socket(plan)),
+        )?;
+        checks.push(InstallCheck::pass(
+            "nginx-fastcgi-runtime",
+            format!(
+                "Updated Nginx vhost to use site PHP-FPM socket {}.",
+                php_fpm_site_socket(plan)
+            ),
+        ));
+        checks.push(InstallCheck {
+            name: "nginx-worker-mode".to_string(),
+            status: "info".to_string(),
+            message: format!(
+                "Recommended nginx.conf values: worker_processes={}, worker_connections={}, rlimit_nofile={}. These are reported but not rewritten until nginx.conf backup ownership is implemented.",
+                sizing.nginx_worker_processes,
+                sizing.nginx_worker_connections,
+                sizing.nginx_worker_rlimit_nofile
+            ),
+        });
+    } else {
+        checks.push(InstallCheck {
+            name: "apache-worker-mode".to_string(),
+            status: "info".to_string(),
+            message: format!(
+                "Apache mpm_event target: MaxRequestWorkers={} with PHP-FPM pool max_children={}. Apache vhost mutation is separate from the current Nginx path.",
+                sizing.apache_max_request_workers, sizing.php_max_children
+            ),
+        });
+    }
+
+    let fpm_service = format!("php{}-fpm", plan.php_version);
+    let output = probe.reload_service(&fpm_service).map_err(|err| {
+        command_error(
+            "php-fpm-reload",
+            format!("systemctl reload {fpm_service}"),
+            err,
+        )
+    })?;
+    require_success(
+        "php-fpm-reload",
+        format!("systemctl reload {fpm_service}"),
+        output,
+    )?;
+    checks.push(InstallCheck::pass(
+        "php-fpm-reload",
+        format!("Reloaded {fpm_service}."),
+    ));
+
+    if plan.web_server == "nginx" {
+        let output = probe
+            .nginx_config_test()
+            .map_err(|err| command_error("nginx-configtest", "nginx -t", err))?;
+        require_success("nginx-configtest", "nginx -t", output)?;
+        let output = probe
+            .reload_service(g7_system::nginx::SERVICE_NAME)
+            .map_err(|err| command_error("nginx-reload", "systemctl reload nginx", err))?;
+        require_success("nginx-reload", "systemctl reload nginx", output)?;
+        checks.push(InstallCheck::pass(
+            "nginx-runtime-reload",
+            "Validated and reloaded Nginx after runtime tuning.",
+        ));
+    }
+
+    Ok(checks)
+}
+
+fn apply_database_phase<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+    owned: &mut Vec<String>,
+) -> Result<Vec<InstallCheck>> {
+    let sizing = detected_memory_sizing(probe);
+    let db_config_path = database_config_path(plan);
+    write_new_file(
+        paths,
+        db_config_path,
+        &database_runtime_content(&sizing),
+        owned,
+    )?;
+
+    let db_service = database_service_name(plan);
+    let command = format!("systemctl restart {db_service}");
+    let output = probe
+        .restart_service(db_service)
+        .map_err(|err| command_error("database-restart", &command, err))?;
+    require_success("database-restart", command, output)?;
+
+    let password = random_hex_secret()?;
+    write_secret_file(
+        paths,
+        SECRETS_PATH,
+        &secrets_content(plan, &password),
+        owned,
+    )?;
+
+    let sql = database_sql(plan, &password);
+    let engine = DatabaseEngine::from_id(&plan.database_engine);
+    let output = probe.database_apply_sql(engine, &sql).map_err(|err| {
+        command_error("database-provision", "mysql --protocol=socket -uroot", err)
+    })?;
+    require_success(
+        "database-provision",
+        "mysql --protocol=socket -uroot",
+        output,
+    )?;
+
+    Ok(vec![
+        InstallCheck::pass(
+            "database-runtime",
+            format!(
+                "Created {db_config_path}; innodb_buffer_pool_size={}, max_connections={}.",
+                sizing.db_buffer_pool, sizing.db_max_connections
+            ),
+        ),
+        InstallCheck::pass(
+            "database-restart",
+            format!("Restarted {db_service} after DB runtime tuning."),
+        ),
+        InstallCheck::pass(
+            "database-secret",
+            format!("Generated DB password and stored it root-only at {SECRETS_PATH}."),
+        ),
+        InstallCheck::pass(
+            "database-created",
+            format!("Ensured database `{}` exists.", plan.database_name),
+        ),
+        InstallCheck::pass(
+            "database-user-created",
+            format!(
+                "Ensured app DB user `{}`@`localhost` has privileges only for `{}`.",
+                plan.database_user, plan.database_name
+            ),
+        ),
+    ])
+}
+
+fn apply_post_database_guidance(
+    plan: &plan::InstallPlan,
+) -> (
+    Vec<InstallCheck>,
+    Vec<InstallCheck>,
+    Vec<InstallCheck>,
+    Vec<InstallCheck>,
+) {
+    let firewall_checks = vec![InstallCheck {
+        name: "ufw-policy".to_string(),
+        status: "deferred".to_string(),
+        message: "UFW apply is deferred until active SSH port detection is implemented; provider firewall should allow SSH, 80, and 443 only.".to_string(),
+    }];
+    let mail_checks = if plan.mail_mode == "none" {
+        vec![InstallCheck {
+            name: "mail-delivery".to_string(),
+            status: "skipped".to_string(),
+            message: "Mail delivery is disabled for this install.".to_string(),
+        }]
+    } else {
+        vec![InstallCheck {
+            name: "mail-config".to_string(),
+            status: "deferred".to_string(),
+            message: format!(
+                "{} mail settings will be written into the app .env during app configuration.",
+                plan.mail_mode
+            ),
+        }]
+    };
+    let certbot_checks = if plan.deployment_mode == "local-test" {
+        vec![InstallCheck {
+            name: "tls".to_string(),
+            status: "skipped".to_string(),
+            message: "Local test mode skips Let's Encrypt.".to_string(),
+        }]
+    } else {
+        vec![InstallCheck {
+            name: "tls".to_string(),
+            status: "deferred".to_string(),
+            message: "Let's Encrypt issuance will run after DNS and HTTP challenge checks in the TLS batch.".to_string(),
+        }]
+    };
+    let app_checks = vec![InstallCheck {
+        name: "app-fetch".to_string(),
+        status: "deferred".to_string(),
+        message: "Selected web app source fetch and .env generation will run after runtime, database, and TLS are stable.".to_string(),
+    }];
+    (firewall_checks, mail_checks, certbot_checks, app_checks)
+}
+
+fn apply_tls_phase<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+    owned: &mut Vec<String>,
+    network_checks: &[InstallCheck],
+) -> Result<Vec<InstallCheck>> {
+    if plan.deployment_mode == "local-test" {
+        return Ok(vec![
+            InstallCheck {
+                name: "certbot".to_string(),
+                status: "skipped".to_string(),
+                message: "Local test mode skips Let's Encrypt certificates.".to_string(),
+            },
+            InstallCheck {
+                name: "tls".to_string(),
+                status: "skipped".to_string(),
+                message: "Local test mode skips HTTPS vhost mutation.".to_string(),
+            },
+        ]);
+    }
+
+    if plan.web_server != "nginx" {
+        return Ok(vec![InstallCheck {
+            name: "tls-webserver".to_string(),
+            status: "deferred".to_string(),
+            message: format!(
+                "{} TLS mutation is not applied by the Nginx Certbot webroot path.",
+                plan.web_server
+            ),
+        }]);
+    }
+
+    let failed_dns = network_checks
+        .iter()
+        .filter(|check| check.status == "fail")
+        .map(|check| format!("{}: {}", check.name, check.message))
+        .collect::<Vec<_>>();
+    if !failed_dns.is_empty() {
+        return Ok(vec![
+            InstallCheck::fail(
+                "tls-dns",
+                format!(
+                    "Let's Encrypt was not attempted because DNS/IP checks failed: {}",
+                    failed_dns.join("; ")
+                ),
+            ),
+            InstallCheck {
+                name: "tls-certificate".to_string(),
+                status: "deferred".to_string(),
+                message: "Fix DNS A records, confirm HTTP access, then resume the TLS phase."
+                    .to_string(),
+            },
+        ]);
+    }
+
+    let domains = certificate_hosts(plan);
+    let cert_name = plan.domain.clone();
+    let email = certificate_email(plan);
+    let output = probe
+        .certbot_certonly_webroot(&plan.app_document_root, &cert_name, &domains, &email)
+        .map_err(|err| {
+            command_error(
+                "certbot-certonly",
+                format!(
+                    "certbot certonly --webroot -w {} --cert-name {}",
+                    plan.app_document_root, cert_name
+                ),
+                err,
+            )
+        })?;
+    require_success(
+        "certbot-certonly",
+        format!(
+            "certbot certonly --webroot -w {} --cert-name {}",
+            plan.app_document_root, cert_name
+        ),
+        output,
+    )?;
+
+    write_existing_file(
+        paths,
+        g7_system::nginx::G7_SITE_AVAILABLE,
+        &nginx_tls_vhost_content(plan, &php_fpm_site_socket(plan)),
+    )?;
+
+    let output = probe
+        .nginx_config_test()
+        .map_err(|err| command_error("nginx-configtest", "nginx -t", err))?;
+    require_success("nginx-configtest", "nginx -t", output)?;
+
+    let output = probe
+        .reload_service(g7_system::nginx::SERVICE_NAME)
+        .map_err(|err| command_error("nginx-reload", "systemctl reload nginx", err))?;
+    require_success("nginx-reload", "systemctl reload nginx", output)?;
+
+    let output = probe
+        .certbot_renew_dry_run(&cert_name)
+        .map_err(|err| command_error("certbot-renew-dry-run", "certbot renew --dry-run", err))?;
+    require_success("certbot-renew-dry-run", "certbot renew --dry-run", output)?;
+
+    let _ = owned;
+    Ok(vec![
+        InstallCheck::pass(
+            "tls-certificate",
+            format!(
+                "Issued/verified Let's Encrypt certificate `{cert_name}` for {} with Certbot webroot.",
+                domains.join(", ")
+            ),
+        ),
+        InstallCheck::pass(
+            "nginx-https-vhost",
+            format!(
+                "Rewrote {} with HTTPS server blocks for {}.",
+                g7_system::nginx::G7_SITE_AVAILABLE,
+                domains.join(", ")
+            ),
+        ),
+        InstallCheck::pass(
+            "certbot-renew-dry-run",
+            "certbot renew --dry-run completed successfully.",
+        ),
+    ])
+}
+
 fn package_names(plan: &plan::InstallPlan) -> Vec<String> {
     plan.packages
         .iter()
@@ -1014,10 +1572,140 @@ fn ready_probe_content() -> &'static str {
     "<?php\nheader('Content-Type: text/plain; charset=utf-8');\necho \"G7inst vhost ready\\n\";\n"
 }
 
+fn detected_memory_sizing<R: CommandRunner>(probe: &SystemProbe<R>) -> plan::ResolvedMemorySizing {
+    let total_memory_kib = probe
+        .total_memory_kib()
+        .ok()
+        .flatten()
+        .unwrap_or(1024 * 1024);
+    let vcpu_count = probe.vcpu_count().ok().flatten().unwrap_or(1);
+    plan::resolve_memory_sizing(total_memory_kib, vcpu_count)
+}
+
+fn php_fpm_site_socket(plan: &plan::InstallPlan) -> String {
+    format!(
+        "/run/php/php{}-fpm-{}.sock",
+        plan.php_version, plan.site_user
+    )
+}
+
+fn php_pool_path(plan: &plan::InstallPlan) -> String {
+    format!(
+        "/etc/php/{}/fpm/pool.d/g7-{}.conf",
+        plan.php_version, plan.site_user
+    )
+}
+
+fn php_ini_override_path(plan: &plan::InstallPlan) -> String {
+    format!(
+        "/etc/php/{}/fpm/conf.d/99-g7-installer.ini",
+        plan.php_version
+    )
+}
+
+fn php_pool_content(plan: &plan::InstallPlan, sizing: &plan::ResolvedMemorySizing) -> String {
+    format!(
+        r#"[g7-{site_user}]
+user = {site_user}
+group = www-data
+listen = {socket}
+listen.owner = www-data
+listen.group = www-data
+listen.mode = 0660
+
+pm = dynamic
+pm.max_children = {php_max_children}
+pm.start_servers = {php_start_servers}
+pm.min_spare_servers = {php_min_spare_servers}
+pm.max_spare_servers = {php_max_spare_servers}
+pm.max_requests = 500
+
+php_admin_value[open_basedir] = {web_root}:/tmp
+php_admin_value[session.save_path] = /tmp
+catch_workers_output = yes
+"#,
+        site_user = plan.site_user,
+        socket = php_fpm_site_socket(plan),
+        web_root = plan.web_root,
+        php_max_children = sizing.php_max_children,
+        php_start_servers = sizing.php_start_servers,
+        php_min_spare_servers = sizing.php_min_spare_servers,
+        php_max_spare_servers = sizing.php_max_spare_servers,
+    )
+}
+
+fn php_ini_override_content(sizing: &plan::ResolvedMemorySizing) -> String {
+    format!(
+        r#"; Managed by g7inst.
+memory_limit = {memory_limit}
+upload_max_filesize = {upload_limit}
+post_max_size = {upload_limit}
+max_execution_time = 120
+opcache.enable = 1
+opcache.memory_consumption = {opcache_memory}
+opcache.interned_strings_buffer = 16
+opcache.max_accelerated_files = 20000
+"#,
+        memory_limit = sizing.php_memory_limit,
+        upload_limit = sizing.php_upload_limit,
+        opcache_memory = sizing.opcache_memory.trim_end_matches('M'),
+    )
+}
+
+fn nginx_runtime_tuning_content(sizing: &plan::ResolvedMemorySizing) -> String {
+    format!(
+        r#"# Managed by g7inst. This file is included inside the nginx http context.
+client_max_body_size {upload_limit};
+keepalive_timeout {keepalive};
+fastcgi_buffers {fastcgi_buffers};
+fastcgi_buffer_size 32k;
+"#,
+        upload_limit = sizing.php_upload_limit.to_ascii_lowercase(),
+        keepalive = sizing.nginx_keepalive_timeout,
+        fastcgi_buffers = sizing.nginx_fastcgi_buffers,
+    )
+}
+
+fn database_config_path(plan: &plan::InstallPlan) -> &'static str {
+    if plan.database_engine == "mariadb" {
+        "/etc/mysql/mariadb.conf.d/60-g7-installer.cnf"
+    } else {
+        "/etc/mysql/conf.d/g7-installer.cnf"
+    }
+}
+
+fn database_service_name(plan: &plan::InstallPlan) -> &'static str {
+    if plan.database_engine == "mariadb" {
+        "mariadb"
+    } else {
+        "mysql"
+    }
+}
+
+fn database_runtime_content(sizing: &plan::ResolvedMemorySizing) -> String {
+    format!(
+        r#"# Managed by g7inst.
+[mysqld]
+bind-address = 127.0.0.1
+innodb_buffer_pool_size = {buffer_pool}
+max_connections = {max_connections}
+tmp_table_size = {tmp_table_size}
+max_heap_table_size = {tmp_table_size}
+"#,
+        buffer_pool = sizing.db_buffer_pool,
+        max_connections = sizing.db_max_connections,
+        tmp_table_size = sizing.db_tmp_table_size,
+    )
+}
+
 fn nginx_vhost_content(plan: &plan::InstallPlan) -> String {
+    let php_socket = format!("/run/php/php{}-fpm.sock", plan.php_version);
+    nginx_vhost_content_with_socket(plan, &php_socket)
+}
+
+fn nginx_vhost_content_with_socket(plan: &plan::InstallPlan, php_socket: &str) -> String {
     let app_hosts = nginx_app_hosts(plan);
     let redirect_blocks = nginx_redirect_blocks(plan);
-    let php_socket = format!("/run/php/php{}-fpm.sock", plan.php_version);
 
     format!(
         "{redirect_blocks}server {{\n    listen 80;\n    listen [::]:80;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
@@ -1032,6 +1720,34 @@ fn nginx_app_hosts(plan: &plan::InstallPlan) -> String {
         _ if !plan.domain.starts_with("www.") => format!("{} www.{}", plan.domain, plan.domain),
         _ => plan.domain.clone(),
     }
+}
+
+fn secrets_content(plan: &plan::InstallPlan, db_password: &str) -> String {
+    format!(
+        "database_name = \"{}\"\ndatabase_user = \"{}\"\ndatabase_password = \"{}\"\n",
+        plan.database_name, plan.database_user, db_password
+    )
+}
+
+fn database_sql(plan: &plan::InstallPlan, db_password: &str) -> String {
+    format!(
+        "CREATE DATABASE IF NOT EXISTS `{db}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n\
+         CREATE USER IF NOT EXISTS '{user}'@'localhost' IDENTIFIED BY '{password}';\n\
+         ALTER USER '{user}'@'localhost' IDENTIFIED BY '{password}';\n\
+         GRANT ALL PRIVILEGES ON `{db}`.* TO '{user}'@'localhost';\n\
+         FLUSH PRIVILEGES;\n",
+        db = sql_identifier(&plan.database_name),
+        user = sql_string(&plan.database_user),
+        password = sql_string(db_password),
+    )
+}
+
+fn sql_identifier(value: &str) -> String {
+    value.replace('`', "``")
+}
+
+fn sql_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('\'', "''")
 }
 
 fn nginx_redirect_blocks(plan: &plan::InstallPlan) -> String {
@@ -1050,6 +1766,42 @@ fn nginx_redirect_blocks(plan: &plan::InstallPlan) -> String {
         ),
         _ => String::new(),
     }
+}
+
+fn nginx_tls_vhost_content(plan: &plan::InstallPlan, php_socket: &str) -> String {
+    let http_hosts = certificate_hosts(plan).join(" ");
+    let cert_name = &plan.domain;
+    let app_hosts = nginx_app_hosts(plan);
+    let canonical_redirect = nginx_https_canonical_redirect(plan);
+
+    format!(
+        "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {http_hosts};\n    return 301 https://$host$request_uri;\n}}\n\n{canonical_redirect}server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    ssl_certificate /etc/letsencrypt/live/{cert_name}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{cert_name}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_prefer_server_ciphers off;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    add_header X-Content-Type-Options nosniff always;\n    add_header X-Frame-Options SAMEORIGIN always;\n    add_header Referrer-Policy strict-origin-when-cross-origin always;\n\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
+        root = plan.app_document_root,
+    )
+}
+
+fn nginx_https_canonical_redirect(plan: &plan::InstallPlan) -> String {
+    if plan.domain.starts_with("www.") {
+        return String::new();
+    }
+
+    match plan.www_mode.as_str() {
+        "redirect-to-root" => format!(
+            "server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name www.{domain};\n    ssl_certificate /etc/letsencrypt/live/{domain}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{domain}/privkey.pem;\n    return 301 https://{domain}$request_uri;\n}}\n\n",
+            domain = plan.domain
+        ),
+        "redirect-to-www" => format!(
+            "server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name {domain};\n    ssl_certificate /etc/letsencrypt/live/{domain}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{domain}/privkey.pem;\n    return 301 https://www.{domain}$request_uri;\n}}\n\n",
+            domain = plan.domain
+        ),
+        _ => String::new(),
+    }
+}
+
+fn certificate_email(plan: &plan::InstallPlan) -> String {
+    plan.smtp_from
+        .clone()
+        .unwrap_or_else(|| format!("admin@{}", plan.domain.trim_start_matches("www.")))
 }
 
 fn primary_http_host(plan: &plan::InstallPlan) -> String {
@@ -1524,6 +2276,12 @@ fn write_new_file(
     owned: &mut Vec<String>,
 ) -> Result<()> {
     let target = paths.resolve(path);
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|source| Error::FileWriteFailed {
+            path: parent.display().to_string(),
+            source,
+        })?;
+    }
     let mut file = OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -1544,10 +2302,77 @@ fn write_new_file(
 
 fn write_existing_file(paths: &InstallPaths, path: &str, content: &str) -> Result<()> {
     let target = paths.resolve(path);
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|source| Error::FileWriteFailed {
+            path: parent.display().to_string(),
+            source,
+        })?;
+    }
     fs::write(&target, content).map_err(|source| Error::FileWriteFailed {
         path: path.to_string(),
         source,
     })
+}
+
+fn write_secret_file(
+    paths: &InstallPaths,
+    path: &str,
+    content: &str,
+    owned: &mut Vec<String>,
+) -> Result<()> {
+    write_new_file(paths, path, content, owned)?;
+    #[cfg(unix)]
+    {
+        let target = paths.resolve(path);
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).map_err(|source| {
+            Error::FileWriteFailed {
+                path: path.to_string(),
+                source,
+            }
+        })?;
+    }
+    Ok(())
+}
+
+fn persist_progress(
+    progress: &ProgressContext<'_>,
+    owned_files: &mut OwnedFiles,
+    owned_file_list: &[String],
+    state: &InstallerState,
+    plan: &plan::InstallPlan,
+    summary: &ApplySummary,
+    problem: Option<&str>,
+) -> Result<()> {
+    owned_files.files = owned_file_list.to_vec();
+    write_owned_files(progress.owned_files_path, owned_files).map_err(|source| {
+        Error::FileWriteFailed {
+            path: OWNED_FILES_PATH.to_string(),
+            source,
+        }
+    })?;
+    write_existing_file(
+        progress.paths,
+        ROLLBACK_PATH,
+        &rollback_content(owned_file_list),
+    )?;
+    write_state_file(progress.state_path, state).map_err(|source| Error::FileWriteFailed {
+        path: STATE_PATH.to_string(),
+        source,
+    })?;
+    write_existing_file(
+        progress.paths,
+        REPORT_PATH,
+        &report_content(plan, &state.phase, summary, problem)?,
+    )?;
+    Ok(())
+}
+
+fn random_hex_secret() -> Result<String> {
+    let mut bytes = [0u8; 24];
+    getrandom::fill(&mut bytes).map_err(|source| Error::InstallVerificationFailed {
+        checks: format!("failed to generate database password: {source}"),
+    })?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 fn config_content(plan: &plan::InstallPlan) -> String {
@@ -1617,52 +2442,157 @@ fn report_content(
     summary: &ApplySummary,
     problem: Option<&str>,
 ) -> Result<String> {
-    let value = serde_json::json!({
-        "version": 1,
-        "domain": &plan.domain,
-        "phase": phase,
-        "deployment_mode": &plan.deployment_mode,
-        "app_package": &plan.app_profile,
-        "app_profile": &plan.app_profile,
-        "app_profile_label": &plan.app_profile_label,
-        "app_summary": &plan.app_summary,
-        "app_document_root": &plan.app_document_root,
-        "web_server": &plan.web_server,
-        "php_version": &plan.php_version,
-        "php_source": &plan.php_source,
-        "database": &plan.database_engine,
-        "database_name": &plan.database_name,
-        "database_user": &plan.database_user,
-        "site_user": &plan.site_user,
-        "web_root_mode": &plan.web_root_mode,
-        "web_root": &plan.web_root,
-        "www_mode": &plan.www_mode,
-        "redis": &plan.redis_mode,
-        "mail_mode": &plan.mail_mode,
-        "smtp_host": &plan.smtp_host,
-        "smtp_port": &plan.smtp_port,
-        "smtp_from": &plan.smtp_from,
-        "smtp_encryption": &plan.smtp_encryption,
-        "dns_check": plan.dns_check_required,
-        "security_profile": &plan.security_profile,
-        "ssh_policy": &plan.ssh_policy,
-        "safety_checks": checks_json(&summary.safety_checks),
-        "preinstall_package_checks": checks_json(&summary.preinstall_package_checks),
-        "package_checks": checks_json(&summary.package_checks),
-        "service_checks": checks_json(&summary.service_checks),
-        "port_checks": checks_json(&summary.port_checks),
-        "network_checks": checks_json(&summary.network_checks),
-        "mail_checks": checks_json(&summary.mail_checks),
-        "certbot_checks": checks_json(&summary.certbot_checks),
-        "vhost_checks": checks_json(&summary.vhost_checks),
-        "app_requirements": requirements_json(&plan.app_requirements),
-        "app_followup_steps": followup_steps_json(&plan.app_followup_steps),
-        "problem": problem,
-    });
+    let mut value = serde_json::Map::new();
+    value.insert("version".to_string(), serde_json::json!(1));
+    value.insert("domain".to_string(), serde_json::json!(&plan.domain));
+    value.insert("phase".to_string(), serde_json::json!(phase));
+    value.insert(
+        "deployment_mode".to_string(),
+        serde_json::json!(&plan.deployment_mode),
+    );
+    value.insert(
+        "app_package".to_string(),
+        serde_json::json!(&plan.app_profile),
+    );
+    value.insert(
+        "app_profile".to_string(),
+        serde_json::json!(&plan.app_profile),
+    );
+    value.insert(
+        "app_profile_label".to_string(),
+        serde_json::json!(&plan.app_profile_label),
+    );
+    value.insert(
+        "app_summary".to_string(),
+        serde_json::json!(&plan.app_summary),
+    );
+    value.insert(
+        "app_document_root".to_string(),
+        serde_json::json!(&plan.app_document_root),
+    );
+    value.insert(
+        "web_server".to_string(),
+        serde_json::json!(&plan.web_server),
+    );
+    value.insert(
+        "php_version".to_string(),
+        serde_json::json!(&plan.php_version),
+    );
+    value.insert(
+        "php_source".to_string(),
+        serde_json::json!(&plan.php_source),
+    );
+    value.insert(
+        "database".to_string(),
+        serde_json::json!(&plan.database_engine),
+    );
+    value.insert(
+        "database_name".to_string(),
+        serde_json::json!(&plan.database_name),
+    );
+    value.insert(
+        "database_user".to_string(),
+        serde_json::json!(&plan.database_user),
+    );
+    value.insert("site_user".to_string(), serde_json::json!(&plan.site_user));
+    value.insert(
+        "web_root_mode".to_string(),
+        serde_json::json!(&plan.web_root_mode),
+    );
+    value.insert("web_root".to_string(), serde_json::json!(&plan.web_root));
+    value.insert("www_mode".to_string(), serde_json::json!(&plan.www_mode));
+    value.insert("redis".to_string(), serde_json::json!(&plan.redis_mode));
+    value.insert("mail_mode".to_string(), serde_json::json!(&plan.mail_mode));
+    value.insert("smtp_host".to_string(), serde_json::json!(&plan.smtp_host));
+    value.insert("smtp_port".to_string(), serde_json::json!(plan.smtp_port));
+    value.insert("smtp_from".to_string(), serde_json::json!(&plan.smtp_from));
+    value.insert(
+        "smtp_encryption".to_string(),
+        serde_json::json!(&plan.smtp_encryption),
+    );
+    value.insert(
+        "dns_check".to_string(),
+        serde_json::json!(plan.dns_check_required),
+    );
+    value.insert(
+        "security_profile".to_string(),
+        serde_json::json!(&plan.security_profile),
+    );
+    value.insert(
+        "ssh_policy".to_string(),
+        serde_json::json!(&plan.ssh_policy),
+    );
+    value.insert(
+        "safety_checks".to_string(),
+        serde_json::json!(checks_json(&summary.safety_checks)),
+    );
+    value.insert(
+        "preinstall_package_checks".to_string(),
+        serde_json::json!(checks_json(&summary.preinstall_package_checks)),
+    );
+    value.insert(
+        "package_checks".to_string(),
+        serde_json::json!(checks_json(&summary.package_checks)),
+    );
+    value.insert(
+        "service_checks".to_string(),
+        serde_json::json!(checks_json(&summary.service_checks)),
+    );
+    value.insert(
+        "port_checks".to_string(),
+        serde_json::json!(checks_json(&summary.port_checks)),
+    );
+    value.insert(
+        "network_checks".to_string(),
+        serde_json::json!(checks_json(&summary.network_checks)),
+    );
+    value.insert(
+        "runtime_checks".to_string(),
+        serde_json::json!(checks_json(&summary.runtime_checks)),
+    );
+    value.insert(
+        "database_checks".to_string(),
+        serde_json::json!(checks_json(&summary.database_checks)),
+    );
+    value.insert(
+        "firewall_checks".to_string(),
+        serde_json::json!(checks_json(&summary.firewall_checks)),
+    );
+    value.insert(
+        "mail_checks".to_string(),
+        serde_json::json!(checks_json(&summary.mail_checks)),
+    );
+    value.insert(
+        "certbot_checks".to_string(),
+        serde_json::json!(checks_json(&summary.certbot_checks)),
+    );
+    value.insert(
+        "vhost_checks".to_string(),
+        serde_json::json!(checks_json(&summary.vhost_checks)),
+    );
+    value.insert(
+        "app_checks".to_string(),
+        serde_json::json!(checks_json(&summary.app_checks)),
+    );
+    value.insert(
+        "setup_guide_path".to_string(),
+        serde_json::json!(SETUP_GUIDE_PATH),
+    );
+    value.insert(
+        "app_requirements".to_string(),
+        serde_json::json!(requirements_json(&plan.app_requirements)),
+    );
+    value.insert(
+        "app_followup_steps".to_string(),
+        serde_json::json!(followup_steps_json(&plan.app_followup_steps)),
+    );
+    value.insert("problem".to_string(), serde_json::json!(problem));
     let mut payload =
-        serde_json::to_string_pretty(&value).map_err(|source| Error::FileWriteFailed {
-            path: REPORT_PATH.to_string(),
-            source: io::Error::other(source),
+        serde_json::to_string_pretty(&serde_json::Value::Object(value)).map_err(|source| {
+            Error::FileWriteFailed {
+                path: REPORT_PATH.to_string(),
+                source: io::Error::other(source),
+            }
         })?;
     payload.push('\n');
     Ok(payload)
@@ -1727,6 +2657,152 @@ fn local_hosts_content(domain: &str) -> String {
     )
 }
 
+fn setup_guide_content(
+    plan: &plan::InstallPlan,
+    phase: &str,
+    summary: &ApplySummary,
+    completed_steps: &[String],
+) -> String {
+    let web_service = if plan.web_server == "apache" {
+        "apache2"
+    } else {
+        "nginx"
+    };
+    let fpm_service = format!("php{}-fpm", plan.php_version);
+    let db_service = database_service_name(plan);
+    let access_url = if summary
+        .certbot_checks
+        .iter()
+        .any(|check| check.name == "tls-certificate" && check.status == "pass")
+    {
+        format!("https://{}", primary_http_host(plan))
+    } else {
+        format!("http://{}", primary_http_host(plan))
+    };
+
+    let mut content = String::new();
+    content.push_str(&format!("# G7 Installer Setup Guide - {}\n\n", plan.domain));
+    content.push_str("이 문서는 설치기가 만든 서버 구성을 사람이 확인하기 위한 안내서입니다. DB 비밀번호 같은 민감값은 화면에 쓰지 않고 root 전용 파일 경로만 표시합니다.\n\n");
+    content.push_str("## 요약\n\n");
+    content.push_str(&format!("- 도메인: `{}`\n", plan.domain));
+    content.push_str(&format!("- 접속 주소: `{access_url}`\n"));
+    content.push_str(&format!("- 현재 단계: `{phase}`\n"));
+    content.push_str(&format!(
+        "- 앱 프로필: `{}` ({})\n",
+        plan.app_profile, plan.app_profile_label
+    ));
+    content.push_str(&format!(
+        "- 웹서버 / PHP: `{}` / `PHP {}` ({})\n",
+        plan.web_server, plan.php_version, plan.php_source
+    ));
+    content.push_str(&format!("- DB: `{}`\n", plan.database_engine));
+    content.push_str(&format!("- 사이트 계정: `{}`\n", plan.site_user));
+    content.push_str("\n## 주요 경로\n\n");
+    content.push_str(&format!("- 웹 루트: `{}`\n", plan.web_root));
+    content.push_str(&format!("- 앱 문서 루트: `{}`\n", plan.app_document_root));
+    content.push_str(&format!("- 설치 상태: `{STATE_PATH}`\n"));
+    content.push_str(&format!("- 설치 리포트(JSON): `{REPORT_PATH}`\n"));
+    content.push_str(&format!("- 설정 안내서(MD): `{SETUP_GUIDE_PATH}`\n"));
+    content.push_str(&format!("- 기본 설정: `{CONFIG_PATH}`\n"));
+    content.push_str(&format!("- 비밀 설정: `{SECRETS_PATH}`\n"));
+    content.push_str("\n## 설정 파일\n\n");
+    if plan.web_server == "nginx" {
+        content.push_str(&format!(
+            "- Nginx vhost: `{}`\n",
+            g7_system::nginx::G7_SITE_AVAILABLE
+        ));
+        content.push_str(&format!(
+            "- Nginx enabled: `{}`\n",
+            g7_system::nginx::G7_SITE_ENABLED
+        ));
+        content.push_str("- Nginx runtime: `/etc/nginx/conf.d/g7-runtime-tuning.conf`\n");
+    } else {
+        content.push_str("- Apache vhost: `/etc/apache2/sites-available/g7.conf`\n");
+        content.push_str("- Apache enabled: `/etc/apache2/sites-enabled/g7.conf`\n");
+    }
+    content.push_str(&format!("- PHP-FPM pool: `{}`\n", php_pool_path(plan)));
+    content.push_str(&format!(
+        "- PHP override: `{}`\n",
+        php_ini_override_path(plan)
+    ));
+    content.push_str(&format!("- DB tuning: `{}`\n", database_config_path(plan)));
+    if plan.redis_mode == "enable" {
+        content.push_str("- Redis config: `/etc/redis/redis.conf`\n");
+    }
+    content.push_str("\n## 계정과 DB\n\n");
+    content.push_str(&format!("- Linux 사이트 계정: `{}`\n", plan.site_user));
+    content.push_str(&format!("- DB 이름: `{}`\n", plan.database_name));
+    content.push_str(&format!(
+        "- DB 사용자: `{}`@`localhost`\n",
+        plan.database_user
+    ));
+    content.push_str(&format!(
+        "- DB 비밀번호 위치: `{SECRETS_PATH}` (root만 읽기)\n"
+    ));
+    content.push_str("\n## 서비스 명령\n\n");
+    content.push_str(&format!(
+        "- 웹서버 상태: `sudo systemctl status {web_service}`\n"
+    ));
+    content.push_str(&format!(
+        "- 웹서버 재시작: `sudo systemctl restart {web_service}`\n"
+    ));
+    content.push_str(&format!(
+        "- PHP-FPM 상태: `sudo systemctl status {fpm_service}`\n"
+    ));
+    content.push_str(&format!(
+        "- PHP-FPM 재시작: `sudo systemctl restart {fpm_service}`\n"
+    ));
+    content.push_str(&format!(
+        "- DB 상태: `sudo systemctl status {db_service}`\n"
+    ));
+    content.push_str(&format!(
+        "- DB 재시작: `sudo systemctl restart {db_service}`\n"
+    ));
+    if plan.redis_mode == "enable" {
+        content.push_str("- Redis 상태: `sudo systemctl status redis-server`\n");
+        content.push_str("- Redis 재시작: `sudo systemctl restart redis-server`\n");
+    }
+    if plan.mail_mode == "local-postfix" {
+        content.push_str("- Postfix 상태: `sudo systemctl status postfix`\n");
+        content.push_str("- Postfix 재시작: `sudo systemctl restart postfix`\n");
+    }
+    content.push_str("- SSL 자동갱신 타이머: `sudo systemctl status certbot.timer`\n");
+    content.push_str("- SSL 갱신 테스트: `sudo certbot renew --dry-run`\n");
+    content.push_str("\n## 설치 결과\n\n");
+    content.push_str(&format!(
+        "- 완료 단계: `{}`\n",
+        completed_steps.join("`, `")
+    ));
+    content.push_str("\n### 런타임\n\n");
+    content.push_str(&checks_markdown(&summary.runtime_checks));
+    content.push_str("\n### DB\n\n");
+    content.push_str(&checks_markdown(&summary.database_checks));
+    content.push_str("\n### 방화벽\n\n");
+    content.push_str(&checks_markdown(&summary.firewall_checks));
+    content.push_str("\n### 메일\n\n");
+    content.push_str(&checks_markdown(&summary.mail_checks));
+    content.push_str("\n### SSL\n\n");
+    content.push_str(&checks_markdown(&summary.certbot_checks));
+    content.push_str("\n### 앱 설치 준비\n\n");
+    content.push_str(&checks_markdown(&summary.app_checks));
+    content.push_str("\n## 주의\n\n");
+    content.push_str("- VPS 전체 복구는 제공자 스냅샷을 기준으로 처리합니다.\n");
+    content.push_str("- 설치기가 소유하지 않은 기존 서비스/파일은 자동 삭제하지 않습니다.\n");
+    content.push_str("- PDF가 필요하면 이 Markdown을 웹 UI에서 표시한 뒤 브라우저 인쇄/PDF 저장으로 내보내는 방식을 권장합니다.\n");
+    content
+}
+
+fn checks_markdown(checks: &[InstallCheck]) -> String {
+    if checks.is_empty() {
+        return "- 기록된 항목 없음\n".to_string();
+    }
+
+    checks
+        .iter()
+        .map(|check| format!("- `{}` [{}] {}\n", check.name, check.status, check.message))
+        .collect()
+}
+
 fn install_id(domain: &str) -> String {
     let seconds = match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => duration.as_secs(),
@@ -1776,7 +2852,7 @@ mod tests {
         assert_eq!(report.redis_mode, "enable");
         assert_eq!(report.security_profile, "standard");
         assert_eq!(report.ssh_policy, "audit-only");
-        assert_eq!(report.phase, "vhost-enabled");
+        assert_eq!(report.phase, "completed");
         assert!(fs_root.join("etc/g7-installer/config.toml").exists());
         let config = fs::read_to_string(fs_root.join("etc/g7-installer/config.toml"))?;
         assert!(config.contains("deployment_mode = \"public\""));
@@ -1804,6 +2880,20 @@ mod tests {
         );
         assert!(fs_root.join("etc/nginx/sites-available/g7.conf").exists());
         assert!(fs_root.join("etc/nginx/sites-enabled/g7.conf").exists());
+        assert!(
+            fs_root
+                .join("etc/nginx/conf.d/g7-runtime-tuning.conf")
+                .exists()
+        );
+        assert!(fs_root.join("etc/php/8.3/fpm/pool.d/g7-g7.conf").exists());
+        assert!(
+            fs_root
+                .join("etc/php/8.3/fpm/conf.d/99-g7-installer.ini")
+                .exists()
+        );
+        assert!(fs_root.join("etc/mysql/conf.d/g7-installer.cnf").exists());
+        assert!(fs_root.join("etc/g7-installer/secrets.toml").exists());
+        assert!(fs_root.join("var/log/g7-installer/setup-guide.md").exists());
         assert!(
             report
                 .owned_files
@@ -1857,7 +2947,19 @@ mod tests {
             report
                 .certbot_checks
                 .iter()
-                .any(|check| { check.name == "certbot-certificate" && check.status == "deferred" })
+                .any(|check| { check.name == "tls-certificate" && check.status == "pass" })
+        );
+        assert!(
+            report
+                .runtime_checks
+                .iter()
+                .any(|check| { check.name == "php-fpm-pool" && check.status == "pass" })
+        );
+        assert!(
+            report
+                .database_checks
+                .iter()
+                .any(|check| { check.name == "database-user-created" && check.status == "pass" })
         );
         assert!(
             report
@@ -1874,6 +2976,9 @@ mod tests {
         assert!(report_json.contains("\"network_checks\""));
         assert!(report_json.contains("\"mail_checks\""));
         assert!(report_json.contains("\"certbot_checks\""));
+        assert!(report_json.contains("\"runtime_checks\""));
+        assert!(report_json.contains("\"database_checks\""));
+        assert!(report_json.contains("\"setup_guide_path\""));
         assert!(report_json.contains("\"safety_checks\""));
         assert!(report_json.contains("\"vhost_checks\""));
 
@@ -2271,12 +3376,34 @@ mod tests {
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         if install_plan.web_server != "nginx" {
+            push_successful_runtime_database_tls_outputs(runner, install_plan);
             return;
         }
 
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
+        push_successful_runtime_database_tls_outputs(runner, install_plan);
+    }
+
+    fn push_successful_runtime_database_tls_outputs(
+        runner: &FakeCommandRunner,
+        install_plan: &super::plan::InstallPlan,
+    ) {
+        runner.push_output(CommandOutput::success(""));
+        if install_plan.web_server == "nginx" {
+            runner.push_output(CommandOutput::success(""));
+            runner.push_output(CommandOutput::success(""));
+        }
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
+
+        if install_plan.deployment_mode == "public" && install_plan.web_server == "nginx" {
+            runner.push_output(CommandOutput::success("cert issued\n"));
+            runner.push_output(CommandOutput::success(""));
+            runner.push_output(CommandOutput::success(""));
+            runner.push_output(CommandOutput::success("renew ok\n"));
+        }
     }
 
     fn write_temp_os_release() -> std::result::Result<PathBuf, Box<dyn std::error::Error>> {

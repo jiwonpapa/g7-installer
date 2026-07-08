@@ -6,8 +6,9 @@ use crate::account::{
     chmod_recursive, chown_recursive, create_login_user, set_login_password, user_exists,
 };
 use crate::apt::{apt_add_repository, apt_candidate_available, apt_install, apt_purge, apt_update};
-use crate::certbot::renew_dry_run;
+use crate::certbot::{certonly_webroot, renew_dry_run};
 use crate::command::{CommandError, CommandOutput, CommandRunner, RealCommandRunner};
+use crate::database::{DatabaseEngine, apply_sql};
 use crate::network::{
     dns_ipv4_records, dns_ipv6_records, http_host_smoke, public_ipv4, public_ipv6, tcp_connect,
 };
@@ -16,7 +17,7 @@ use crate::os::{OsRelease, OsReleaseError, read_os_release};
 use crate::package::{PackageStatus, package_status};
 use crate::port::{PortStatus, tcp_port_status};
 use crate::privilege::{Privilege, current_privilege};
-use crate::service::{ServiceActivity, disable_now, enable_now, is_active, reload};
+use crate::service::{ServiceActivity, disable_now, enable_now, is_active, reload, restart};
 use std::net::IpAddr;
 
 #[derive(Debug)]
@@ -122,6 +123,25 @@ impl<R: CommandRunner> SystemProbe<R> {
         renew_dry_run(&self.runner, cert_name).map_err(SystemProbeError::Command)
     }
 
+    pub fn certbot_certonly_webroot(
+        &self,
+        webroot: &str,
+        cert_name: &str,
+        domains: &[String],
+        email: &str,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        certonly_webroot(&self.runner, webroot, cert_name, domains, email)
+            .map_err(SystemProbeError::Command)
+    }
+
+    pub fn database_apply_sql(
+        &self,
+        engine: DatabaseEngine,
+        sql: &str,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        apply_sql(&self.runner, engine, sql).map_err(SystemProbeError::Command)
+    }
+
     pub fn current_privilege(&self) -> Result<Privilege, SystemProbeError> {
         current_privilege(&self.runner).map_err(SystemProbeError::Command)
     }
@@ -136,6 +156,10 @@ impl<R: CommandRunner> SystemProbe<R> {
 
     pub fn reload_service(&self, service: &str) -> Result<CommandOutput, SystemProbeError> {
         reload(&self.runner, service).map_err(SystemProbeError::Command)
+    }
+
+    pub fn restart_service(&self, service: &str) -> Result<CommandOutput, SystemProbeError> {
+        restart(&self.runner, service).map_err(SystemProbeError::Command)
     }
 
     pub fn nginx_config_test(&self) -> Result<CommandOutput, SystemProbeError> {
@@ -178,6 +202,42 @@ impl<R: CommandRunner> SystemProbe<R> {
         self.resolve_path(path).exists()
     }
 
+    pub fn total_memory_kib(&self) -> Result<Option<u64>, SystemProbeError> {
+        let path = self.resolve_path(Path::new("/proc/meminfo"));
+        let payload = match fs::read_to_string(&path) {
+            Ok(payload) => payload,
+            Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(err) => {
+                return Err(SystemProbeError::Filesystem {
+                    path: "/proc/meminfo".to_string(),
+                    message: err.to_string(),
+                });
+            }
+        };
+
+        Ok(payload.lines().find_map(parse_memtotal_line))
+    }
+
+    pub fn vcpu_count(&self) -> Result<Option<usize>, SystemProbeError> {
+        let path = self.resolve_path(Path::new("/proc/cpuinfo"));
+        let payload = match fs::read_to_string(&path) {
+            Ok(payload) => payload,
+            Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(err) => {
+                return Err(SystemProbeError::Filesystem {
+                    path: "/proc/cpuinfo".to_string(),
+                    message: err.to_string(),
+                });
+            }
+        };
+
+        let count = payload
+            .lines()
+            .filter(|line| line.trim_start().starts_with("processor"))
+            .count();
+        Ok((count > 0).then_some(count))
+    }
+
     pub fn directory_entries(&self, path: &Path) -> Result<Vec<PathBuf>, SystemProbeError> {
         let resolved = self.resolve_path(path);
         let entries = match fs::read_dir(&resolved) {
@@ -214,6 +274,12 @@ impl<R: CommandRunner> SystemProbe<R> {
             Err(_) => self.fs_root.join(path),
         }
     }
+}
+
+fn parse_memtotal_line(line: &str) -> Option<u64> {
+    let line = line.trim();
+    let value = line.strip_prefix("MemTotal:")?.trim();
+    value.split_whitespace().next()?.parse().ok()
 }
 
 #[derive(Debug, thiserror::Error)]

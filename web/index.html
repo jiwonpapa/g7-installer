@@ -33,7 +33,7 @@
       </header>
 
       <section class="system-banner">
-        <span>현재 버전은 apt 패키지 설치, 기본 서비스/포트 검증, Nginx 도메인 연결 설정, 사이트 프로비저닝 계획 생성까지 수행합니다. DB 계정 생성, 앱 배치, 인증서 발급 적용은 다음 단계입니다.</span>
+        <span>현재 버전은 apt 패키지 설치, Nginx 도메인 연결, PHP-FPM/DB 튜닝, DB 계정 생성, Nginx 기준 SSL 발급/갱신 검증, 설정 안내서 저장까지 수행합니다. 앱 소스 배치는 다음 배치입니다.</span>
       </section>
 
       <section class="app-workspace">
@@ -468,7 +468,7 @@
               <div>
                 <span class="step-eyebrow">5단계</span>
                 <h2>기본 서버 구성 실행</h2>
-                <p>apt 패키지를 설치하고 Nginx 도메인 연결 설정과 HTTP 응답까지 확인합니다.</p>
+                <p>apt 패키지, Nginx 도메인 연결, PHP-FPM/DB 튜닝, DB 계정, SSL, 설정 안내서를 순서대로 처리합니다.</p>
               </div>
               <button id="install-button" class="btn btn-error icon-button" type="button" data-icon="package-plus">기본 구성 시작</button>
             </div>
@@ -580,7 +580,7 @@
     <dialog id="install-confirm-dialog" class="modal">
       <div class="modal-box">
         <h3 class="text-lg font-semibold">기본 서버 구성을 시작할까요?</h3>
-        <p class="mt-2 text-sm text-base-content/60">서버 패키지 설치, Nginx 도메인 연결 설정 생성, HTTP 검증을 진행합니다. 실제 VPS는 시작 전 Lightsail 스냅샷을 권장합니다.</p>
+        <p class="mt-2 text-sm text-base-content/60">서버 패키지, Nginx 도메인 연결, PHP-FPM/DB 튜닝, DB 계정, SSL, 설정 안내서 생성을 진행합니다. 실제 VPS는 시작 전 Lightsail 스냅샷을 권장합니다.</p>
         <div id="install-confirm-summary" class="report-card mt-5"></div>
         <div class="modal-action">
           <form method="dialog" class="flex gap-2">

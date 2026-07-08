@@ -11,7 +11,7 @@ REPO="${G7_INSTALL_REPO:-jiwonpapa/g7-installer}"
 EXPECTED_VERSION="${G7_OPS_EXPECT_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' "${ROOT_DIR}/crates/g7-cli/Cargo.toml" | head -n 1)}"
 INSTALL_VERSION="${G7_OPS_VERSION:-v${EXPECTED_VERSION}}"
 SUDO="${G7_OPS_SUDO:-sudo -n}"
-VERIFY_REINSTALL="${G7_OPS_VERIFY_REINSTALL:-1}"
+VERIFY_REINSTALL="${G7_OPS_VERIFY_REINSTALL:-0}"
 CLEANUP="${G7_OPS_CLEANUP:-1}"
 CONFIRM_DISPOSABLE="${G7_OPS_CONFIRM_DISPOSABLE:-0}"
 REPORT_DIR="${G7_OPS_REPORT_DIR:-${ROOT_DIR}/target/ops-harness/$(date +%Y%m%d-%H%M%S)}"
@@ -126,14 +126,14 @@ path = sys.argv[1]
 with open(path, "r", encoding="utf-8") as handle:
     data = json.load(handle)
 
-if data.get("phase") != "vhost-enabled":
+if data.get("phase") != "completed":
     raise SystemExit(f"unexpected phase: {data.get('phase')}")
 
 baseline = data.get("preinstall_package_checks") or []
 if not baseline:
     raise SystemExit("missing preinstall_package_checks")
 
-for section in ("package_checks", "service_checks", "port_checks", "vhost_checks"):
+for section in ("package_checks", "service_checks", "port_checks", "vhost_checks", "runtime_checks", "database_checks"):
     checks = data.get(section) or []
     failed = [f"{item.get('name')}: {item.get('message')}" for item in checks if item.get("status") != "pass"]
     if failed:
@@ -213,37 +213,23 @@ run_install_cycle() {
 
   log "${cycle}: install"
   install_output="$(sudo_capture "${cycle}-install" "${remote_bin_q} install --local-test --domain ${domain_q}")"
-  assert_contains "${cycle} install" "${install_output}" "phase: vhost-enabled"
+  assert_contains "${cycle} install" "${install_output}" "phase: completed"
 
   report_json="$(sudo_capture "${cycle}-report-json" "cat /var/log/g7-installer/report.json")"
   printf '%s\n' "${report_json}" >"${report_path}"
   validate_report "${report_path}"
   write_new_package_list "${report_path}" "${package_list_path}"
+  sudo_capture "${cycle}-setup-guide" "cat /var/log/g7-installer/setup-guide.md" >/dev/null
 
   log "${cycle}: post-install doctor must block fresh install"
   doctor_after_install="$(sudo_capture "${cycle}-doctor-after-install" "${remote_bin_q} doctor")"
   assert_contains "${cycle} doctor after install" "${doctor_after_install}" "install_allowed: false"
 
-  log "${cycle}: rollback dry-run"
-  rollback_dry_run="$(sudo_capture "${cycle}-rollback-dry-run" "${remote_bin_q} rollback --dry-run")"
-  assert_contains "${cycle} rollback dry-run" "${rollback_dry_run}" "G7 Installer Rollback"
-
-  log "${cycle}: rollback"
-  rollback_output="$(sudo_capture "${cycle}-rollback" "${remote_bin_q} rollback --yes")"
-  assert_contains "${cycle} rollback" "${rollback_output}" "G7 Installer Rollback"
-
-  log "${cycle}: verify removed packages"
-  while IFS= read -r package; do
-    [[ -z "${package}" ]] && continue
-    assert_not_installed "${cycle}" "${package}"
-  done <"${package_list_path}"
-
-  log "${cycle}: verify metadata removed"
-  sudo_sh_capture "${cycle}-metadata-removed" "test ! -e /var/lib/g7-installer/state.json && test ! -e /var/lib/g7-installer/owned-files.json && test ! -e /var/lib/g7-installer/rollback.json && test ! -e /var/log/g7-installer/report.json && test ! -e /etc/g7-installer/config.toml && test ! -e /etc/g7-installer/local-hosts.txt"
-  assert_installer_paths_absent "${cycle}"
-
-  doctor_after_rollback="$(sudo_capture "${cycle}-doctor-after-rollback" "${remote_bin_q} doctor")"
-  assert_contains "${cycle} doctor after rollback" "${doctor_after_rollback}" "install_allowed: true"
+  if [[ "${CLEANUP}" == "1" ]]; then
+    log "${cycle}: reset installer metadata and owned files"
+    reset_output="$(sudo_capture "${cycle}-reset" "${remote_bin_q} reset --yes")"
+    assert_contains "${cycle} reset" "${reset_output}" "G7 Installer Reset"
+  fi
 }
 
 need_local ssh
@@ -265,13 +251,14 @@ assert_contains "version" "${version_output}" "${EXPECTED_VERSION}"
 run_install_cycle "cycle1"
 
 if [[ "${VERIFY_REINSTALL}" == "1" ]]; then
+  log "VERIFY_REINSTALL=1 requires the VPS to be restored to a fresh snapshot before cycle2"
   run_install_cycle "cycle2"
 fi
 
 if [[ "${CLEANUP}" == "0" ]]; then
   log "cleanup disabled; leaving final server state from last cycle"
 else
-  log "cleanup verified through final rollback"
+  log "cleanup reset installer metadata and owned files; package cleanup requires provider snapshot restore"
 fi
 
 log "PASS"

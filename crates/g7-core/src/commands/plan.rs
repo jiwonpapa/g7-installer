@@ -416,6 +416,174 @@ const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedMemorySizing {
+    pub tier_key: String,
+    pub tier_label: String,
+    pub total_memory_kib: u64,
+    pub vcpu_count: usize,
+    pub php_max_children: u16,
+    pub php_start_servers: u16,
+    pub php_min_spare_servers: u16,
+    pub php_max_spare_servers: u16,
+    pub php_memory_limit: String,
+    pub php_upload_limit: String,
+    pub opcache_memory: String,
+    pub db_buffer_pool: String,
+    pub db_max_connections: u16,
+    pub db_tmp_table_size: String,
+    pub redis_maxmemory: String,
+    pub nginx_worker_processes: u16,
+    pub nginx_worker_connections: u32,
+    pub nginx_worker_rlimit_nofile: u32,
+    pub nginx_keepalive_timeout: String,
+    pub nginx_fastcgi_buffers: String,
+    pub apache_max_request_workers: u16,
+    pub note: String,
+}
+
+pub fn resolve_memory_sizing(total_memory_kib: u64, vcpu_count: usize) -> ResolvedMemorySizing {
+    let total_mib = (total_memory_kib / 1024).max(1);
+    let vcpu_count = vcpu_count.max(1);
+    let preset = memory_preset_for_mib(total_mib);
+
+    if preset.key == "tier_gt32gb" {
+        return resolved_formula_sizing(preset, total_memory_kib, total_mib, vcpu_count);
+    }
+
+    let (php_start_servers, php_min_spare_servers, php_max_spare_servers) =
+        php_process_counts_for_preset(preset.key);
+    let nginx_worker_processes = nginx_worker_processes_for_preset(preset.key, vcpu_count);
+    let db_max_connections = preset.db_max_connections.parse::<u16>().unwrap_or(100);
+    let nginx_worker_connections = preset
+        .nginx_worker_connections
+        .parse::<u32>()
+        .unwrap_or(1024);
+    let nginx_worker_rlimit_nofile = preset
+        .nginx_worker_rlimit_nofile
+        .parse::<u32>()
+        .unwrap_or(4096);
+    let apache_max_request_workers = preset
+        .apache_max_request_workers
+        .parse::<u16>()
+        .unwrap_or(100);
+
+    ResolvedMemorySizing {
+        tier_key: preset.key.to_string(),
+        tier_label: preset.label.to_string(),
+        total_memory_kib,
+        vcpu_count,
+        php_max_children: preset.php_max_children.parse::<u16>().unwrap_or(8),
+        php_start_servers,
+        php_min_spare_servers,
+        php_max_spare_servers,
+        php_memory_limit: preset.php_memory_limit.to_string(),
+        php_upload_limit: preset.php_upload_limit.to_string(),
+        opcache_memory: preset.opcache_memory.to_string(),
+        db_buffer_pool: preset.db_buffer_pool.to_string(),
+        db_max_connections,
+        db_tmp_table_size: preset.db_tmp_table_size.to_string(),
+        redis_maxmemory: preset.redis_maxmemory.to_string(),
+        nginx_worker_processes,
+        nginx_worker_connections,
+        nginx_worker_rlimit_nofile,
+        nginx_keepalive_timeout: preset.nginx_keepalive_timeout.to_string(),
+        nginx_fastcgi_buffers: preset.nginx_fastcgi_buffers.to_string(),
+        apache_max_request_workers,
+        note: preset.note.to_string(),
+    }
+}
+
+fn memory_preset_for_mib(total_mib: u64) -> &'static MemorySizingPreset {
+    if total_mib <= 1536 {
+        &MEMORY_SIZING_PRESETS[0]
+    } else if total_mib <= 3072 {
+        &MEMORY_SIZING_PRESETS[1]
+    } else if total_mib <= 6144 {
+        &MEMORY_SIZING_PRESETS[2]
+    } else if total_mib <= 12288 {
+        &MEMORY_SIZING_PRESETS[3]
+    } else if total_mib <= 24576 {
+        &MEMORY_SIZING_PRESETS[4]
+    } else if total_mib <= 32768 {
+        &MEMORY_SIZING_PRESETS[5]
+    } else {
+        &MEMORY_SIZING_PRESETS[6]
+    }
+}
+
+fn php_process_counts_for_preset(key: &str) -> (u16, u16, u16) {
+    match key {
+        "tier_1gb" => (1, 1, 2),
+        "tier_2gb" => (2, 2, 4),
+        "tier_4gb" => (4, 4, 8),
+        "tier_8gb" => (6, 6, 12),
+        "tier_16gb" => (8, 8, 16),
+        "tier_32gb" => (12, 12, 24),
+        _ => (16, 16, 48),
+    }
+}
+
+fn nginx_worker_processes_for_preset(key: &str, vcpu_count: usize) -> u16 {
+    let cap = match key {
+        "tier_1gb" => 1,
+        "tier_2gb" | "tier_4gb" => 2,
+        "tier_8gb" | "tier_16gb" => 4,
+        "tier_32gb" => 8,
+        _ => 16,
+    };
+    vcpu_count.min(cap).max(1) as u16
+}
+
+fn resolved_formula_sizing(
+    preset: &'static MemorySizingPreset,
+    total_memory_kib: u64,
+    total_mib: u64,
+    vcpu_count: usize,
+) -> ResolvedMemorySizing {
+    let ram_gb = (total_mib / 1024).max(33);
+    let php_max_children = ((total_mib / 4) / 128)
+        .max(32)
+        .min((vcpu_count as u64 * 12).min(192)) as u16;
+    let php_start_servers = (php_max_children / 8).clamp(4, 16);
+    let php_spare = (php_max_children / 4).max(8);
+    let opcache_mib = ((total_mib * 2) / 100).clamp(768, 1024);
+    let db_buffer_pool_gb = ((ram_gb * 40) / 100).clamp(10, 24);
+    let db_max_connections = (ram_gb * 12).clamp(400, 800) as u16;
+    let db_tmp_table_mib = ((total_mib * 2) / 100).clamp(512, 1024);
+    let redis_mib = ((total_mib * 6) / 100).clamp(2048, 4096);
+    let nginx_worker_processes = vcpu_count.clamp(1, 16) as u16;
+    let nginx_worker_connections = (ram_gb * 512).clamp(16384, 32768) as u32;
+    let nginx_worker_rlimit_nofile =
+        (nginx_worker_processes as u32 * nginx_worker_connections * 2).clamp(65535, 131072);
+    let apache_max_request_workers = (vcpu_count as u16 * 64).clamp(400, 800);
+
+    ResolvedMemorySizing {
+        tier_key: preset.key.to_string(),
+        tier_label: preset.label.to_string(),
+        total_memory_kib,
+        vcpu_count,
+        php_max_children,
+        php_start_servers,
+        php_min_spare_servers: php_spare,
+        php_max_spare_servers: php_spare.saturating_mul(2).min(php_max_children),
+        php_memory_limit: "512M".to_string(),
+        php_upload_limit: "256M".to_string(),
+        opcache_memory: format!("{opcache_mib}M"),
+        db_buffer_pool: format!("{db_buffer_pool_gb}G"),
+        db_max_connections,
+        db_tmp_table_size: format!("{db_tmp_table_mib}M"),
+        redis_maxmemory: format!("{redis_mib}M"),
+        nginx_worker_processes,
+        nginx_worker_connections,
+        nginx_worker_rlimit_nofile,
+        nginx_keepalive_timeout: "30s".to_string(),
+        nginx_fastcgi_buffers: "64 32k".to_string(),
+        apache_max_request_workers,
+        note: preset.note.to_string(),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanOptions {
     pub local_test: bool,
     pub app_profile: String,
