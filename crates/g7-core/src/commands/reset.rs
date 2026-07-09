@@ -584,19 +584,36 @@ fn disable_services<R: CommandRunner>(
         }
 
         let output = probe.disable_service_now(service).map_err(command_error)?;
-        require_success(
-            "service-disable",
-            format!("systemctl disable --now {service}"),
-            output,
-        )?;
-        actions.push(ResetAction::new(
-            format!("service:{service}"),
-            "disabled",
-            "service disabled before reset",
-        ));
+        if output.status == 0 {
+            actions.push(ResetAction::new(
+                format!("service:{service}"),
+                "disabled",
+                "service disabled before reset",
+            ));
+        } else if service_disable_reports_missing(&output) {
+            actions.push(ResetAction::new(
+                format!("service:{service}"),
+                "missing",
+                "service unit was already absent",
+            ));
+        } else {
+            require_success(
+                "service-disable",
+                format!("systemctl disable --now {service}"),
+                output,
+            )?;
+        }
     }
 
     Ok(actions)
+}
+
+fn service_disable_reports_missing(output: &CommandOutput) -> bool {
+    let text = format!("{}\n{}", output.stdout, output.stderr).to_ascii_lowercase();
+    text.contains("does not exist")
+        || text.contains("not loaded")
+        || text.contains("not found")
+        || text.contains("could not be found")
 }
 
 fn reset_packages<R: CommandRunner>(
@@ -997,6 +1014,58 @@ mod tests {
                 .iter()
                 .any(|action| { action.name == "database" && action.status == "skipped" })
         );
+        assert!(!fs_root.join("var/log/g7-installer/report.json").exists());
+        assert!(
+            !fs_root
+                .join("var/lib/g7-installer/owned-files.json")
+                .exists()
+        );
+
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn reset_continues_when_service_unit_is_already_removed()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let fs_root = create_temp_fs_root()?;
+        fs::create_dir_all(fs_root.join("var/lib/g7-installer"))?;
+        fs::create_dir_all(fs_root.join("var/log/g7-installer"))?;
+        fs::write(
+            fs_root.join("var/log/g7-installer/report.json"),
+            r#"{
+                "service_checks": [
+                    {"name": "certbot.timer", "status": "pass", "message": "was active"}
+                ]
+            }"#,
+        )?;
+        let owned = OwnedFiles {
+            version: 1,
+            files: vec![
+                "/var/log/g7-installer/report.json".to_string(),
+                OWNED_FILES_PATH.to_string(),
+            ],
+        };
+        write_owned_files(&fs_root.join(strip_root(OWNED_FILES_PATH)), &owned)?;
+
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success("0\n"));
+        runner.push_output(CommandOutput {
+            status: 3,
+            stdout: "inactive\n".to_string(),
+            stderr: String::new(),
+        });
+        runner.push_output(CommandOutput::failure(
+            1,
+            "Failed to disable unit: Unit file certbot.timer does not exist.",
+        ));
+        let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
+        let report =
+            run_with_probe_and_paths(true, false, &probe, &ResetPaths::with_root(&fs_root))?;
+
+        assert!(report.actions.iter().any(|action| {
+            action.name == "service:certbot.timer" && action.status == "missing"
+        }));
         assert!(!fs_root.join("var/log/g7-installer/report.json").exists());
         assert!(
             !fs_root

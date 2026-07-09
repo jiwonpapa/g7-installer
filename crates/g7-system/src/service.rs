@@ -16,6 +16,7 @@ pub fn is_active<R: CommandRunner>(
 
     match (output.status, output.stdout.trim(), output.stderr.trim()) {
         (0, "active", _) => Ok(ServiceActivity::Active),
+        (4, _, _) => Ok(ServiceActivity::NotFound),
         (_, "inactive" | "failed" | "deactivating" | "activating", _) => {
             Ok(ServiceActivity::Inactive)
         }
@@ -71,6 +72,18 @@ mod tests {
         let activity = is_active(&runner, "nginx")?;
 
         assert_eq!(activity, ServiceActivity::Active);
+        Ok(())
+    }
+
+    #[test]
+    fn detects_status_four_as_missing_service()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::failure(4, ""));
+
+        let activity = is_active(&runner, "certbot.timer")?;
+
+        assert_eq!(activity, ServiceActivity::NotFound);
         Ok(())
     }
 
