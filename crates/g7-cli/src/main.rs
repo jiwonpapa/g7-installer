@@ -51,10 +51,10 @@ enum Command {
         /// App profile: gnuboard7, wordpress, or laravel.
         #[arg(long = "app", visible_alias = "app-package", default_value_t = plan::DEFAULT_APP_PROFILE.to_string())]
         app_profile: String,
-        /// Web server: nginx or apache.
+        /// Web server: nginx, apache, or frankenphp.
         #[arg(long, default_value_t = plan::DEFAULT_WEB_SERVER.to_string())]
         web_server: String,
-        /// PHP-FPM version. Default is 8.3. PHP 8.5 adds the Ondrej PHP PPA automatically.
+        /// PHP runtime version. Default is 8.3. PHP 8.5 adds the Ondrej PHP PPA automatically.
         #[arg(long, default_value_t = plan::DEFAULT_PHP_VERSION.to_string())]
         php_version: String,
         /// PHP apt source: auto, ubuntu, or ondrej.
@@ -120,10 +120,10 @@ enum Command {
         /// App profile: gnuboard7, wordpress, or laravel.
         #[arg(long = "app", visible_alias = "app-package", default_value_t = plan::DEFAULT_APP_PROFILE.to_string())]
         app_profile: String,
-        /// Web server: nginx or apache.
+        /// Web server: nginx, apache, or frankenphp.
         #[arg(long, default_value_t = plan::DEFAULT_WEB_SERVER.to_string())]
         web_server: String,
-        /// PHP-FPM version. Default is 8.3. PHP 8.5 adds the Ondrej PHP PPA automatically.
+        /// PHP runtime version. Default is 8.3. PHP 8.5 adds the Ondrej PHP PPA automatically.
         #[arg(long, default_value_t = plan::DEFAULT_PHP_VERSION.to_string())]
         php_version: String,
         /// PHP apt source: auto, ubuntu, or ondrej.

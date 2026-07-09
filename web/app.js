@@ -130,7 +130,7 @@ const installStageLabels = {
   packages: "패키지 설치/검증",
   site: "사이트 계정/웹루트",
   vhost: "웹서버 vhost/HTTP 검증",
-  runtime: "PHP-FPM/런타임 튜닝",
+  runtime: "PHP/런타임 튜닝",
   database: "DB 튜닝/계정 생성",
   ssl: "SSL 인증서/HTTPS 검증",
   app: "웹앱 파일 배치",
@@ -184,6 +184,15 @@ const checkLabel = {
   "php-runtime-probe": "PHP 진단 실행",
   "php-runtime-limits": "PHP 한도 설정",
   "php-fpm-pool-values": "PHP-FPM pool 값",
+  "frankenphp-binary": "FrankenPHP 바이너리",
+  "frankenphp-service": "FrankenPHP 서비스",
+  "g7-frankenphp": "FrankenPHP 서비스",
+  "frankenphp-vhost": "FrankenPHP vhost",
+  "frankenphp-runtime": "FrankenPHP 런타임",
+  "frankenphp-restart": "FrankenPHP 재시작",
+  "frankenphp-runtime-boundary": "FrankenPHP 공개 경계",
+  "frankenphp-edge-runtime-reload": "Nginx edge reload",
+  "frankenphp-https-vhost": "FrankenPHP HTTPS",
 };
 
 const errorLabel = {
@@ -218,6 +227,21 @@ const templates = {
     deployment_mode: "public",
     web_server: "apache",
     php_version: "8.3",
+    database: "mysql",
+    database_version: "apt-default",
+    redis: "enable",
+    mail_mode: "none",
+    app_package: "gnuboard7",
+    web_root_mode: "public-html",
+    www_mode: "redirect-to-root",
+    security_profile: "standard",
+    ssh_policy: "audit-only",
+  },
+  frankenphp: {
+    domain: null,
+    deployment_mode: "public",
+    web_server: "frankenphp",
+    php_version: "8.5",
     database: "mysql",
     database_version: "apt-default",
     redis: "enable",
@@ -1191,6 +1215,14 @@ function applyTemplate(templateName) {
   refreshFormState();
 }
 
+function syncFrankenPhpRuntime() {
+  const webServer = nodes.optionsForm.elements.web_server?.value;
+  const phpVersion = nodes.optionsForm.elements.php_version;
+  if (webServer === "frankenphp" && phpVersion && phpVersion.value !== "8.5") {
+    phpVersion.value = "8.5";
+  }
+}
+
 function refreshFormState(options = {}) {
   const preservePlan = Boolean(options.preservePlan);
   const shouldPersist = options.persist !== false;
@@ -1207,6 +1239,7 @@ function refreshFormState(options = {}) {
     renderPackageProgress([]);
     refreshInstallButtonState();
   }
+  syncFrankenPhpRuntime();
   const webRootIsCustom = nodes.webRootMode.value === "custom";
   nodes.customWebRoot.disabled = !webRootIsCustom;
   if (!webRootIsCustom) {
@@ -1268,7 +1301,17 @@ function planPlaceholderHtml(title, message) {
 }
 
 function runtimeLabel(value) {
-  return value === "apache" ? "Apache" : "Nginx";
+  if (value === "apache") {
+    return "Apache";
+  }
+  if (value === "frankenphp") {
+    return "FrankenPHP";
+  }
+  return "Nginx";
+}
+
+function webServiceName(value) {
+  return value === "apache" ? "apache2" : "nginx";
 }
 
 function phpSourceForVersion(version) {
@@ -1559,6 +1602,7 @@ function packagePurpose(name) {
   const exact = {
     nginx: "Nginx 웹서버가 도메인 요청을 앱으로 전달합니다.",
     apache2: "Apache 웹서버가 도메인 요청을 앱으로 전달합니다.",
+    "g7-frankenphp": "FrankenPHP가 로컬 앱서버로 PHP 요청을 처리합니다.",
     "mysql-server": "MySQL이 사이트 데이터를 저장합니다.",
     "mariadb-server": "MariaDB가 사이트 데이터를 저장합니다.",
     curl: "원격 파일 다운로드에 사용합니다.",
@@ -1583,6 +1627,9 @@ function packagePurpose(name) {
   }
   if (/^php\d+\.\d+-fpm$/.test(packageName)) {
     return "PHP-FPM이 PHP 앱 실행을 담당합니다.";
+  }
+  if (/^php\d+\.\d+-cli$/.test(packageName)) {
+    return "Composer와 Artisan 실행에 필요한 PHP CLI입니다.";
   }
   if (/^php\d+\.\d+-mysql$/.test(packageName)) {
     return "PHP에서 MySQL/MariaDB에 접속합니다.";
@@ -2094,7 +2141,7 @@ function renderInstallReport(report) {
     healthChecklistCard(report),
     listCard("완료된 작업", report.completed_steps),
     compactListCard("다음 단계", [
-      "7단계 세부 설정에서 웹서버, PHP-FPM, DB, SSL, 메일, 웹앱 카드를 항목별로 열어 확인합니다.",
+      "7단계 세부 설정에서 웹서버, PHP 런타임, DB, SSL, 메일, 웹앱 카드를 항목별로 열어 확인합니다.",
       "각 카드는 설정값, 관련 파일, 실행/재시작 명령, 검증 결과를 따로 보여줍니다.",
     ]),
     report.problem ? listCard("중단 원인", [report.problem]) : "",
@@ -2172,7 +2219,7 @@ function renderSavedReport(payload) {
     operationsGuideCard(report, link),
     healthChecklistCard(report),
     compactListCard("다음 단계", [
-      "7단계 세부 설정에서 웹서버, PHP-FPM, DB, SSL, 메일, 웹앱 카드를 항목별로 열어 확인합니다.",
+      "7단계 세부 설정에서 웹서버, PHP 런타임, DB, SSL, 메일, 웹앱 카드를 항목별로 열어 확인합니다.",
       "각 카드는 설정값, 관련 파일, 실행/재시작 명령, 검증 결과를 따로 보여줍니다.",
     ]),
     report.problem ? listCard("문제", [report.problem]) : "",
@@ -2257,7 +2304,7 @@ function completionStateRows(report = {}) {
       label: "서버 준비",
       status: completed ? "pass" : "fail",
       message: completed
-        ? "웹서버, PHP-FPM, DB, SSL, 앱 파일 배치가 완료되었습니다."
+        ? "웹서버, PHP 런타임, DB, SSL, 앱 파일 배치가 완료되었습니다."
         : "중단 단계가 있어 서버 준비가 끝나지 않았습니다.",
     },
     {
@@ -2332,6 +2379,10 @@ function reportSummaryText(report = {}) {
 }
 
 function setupGuideMarkdown(report = {}) {
+  const webService = webServiceName(report.web_server);
+  const runtimeRows = report.web_server === "frankenphp"
+    ? ["- FrankenPHP: sudo systemctl restart g7-frankenphp"]
+    : [`- PHP-FPM: sudo systemctl restart php${report.php_version || "8.3"}-fpm`];
   return [
     `# G7 Installer 설치 요약 - ${report.domain || "unknown"}`,
     "",
@@ -2346,8 +2397,8 @@ function setupGuideMarkdown(report = {}) {
     `- 복구 매니페스트: ${report.backup_manifest_path || "-"}`,
     "",
     "## 서비스 명령",
-    `- 웹서버: sudo systemctl reload ${report.web_server === "apache" ? "apache2" : "nginx"}`,
-    `- PHP-FPM: sudo systemctl restart php${report.php_version || "8.3"}-fpm`,
+    `- 웹서버: sudo systemctl reload ${webService}`,
+    ...runtimeRows,
     `- DB: sudo systemctl restart ${report.database === "mariadb" ? "mariadb" : "mysql"}`,
     "- SSL 갱신 확인: sudo certbot renew --dry-run --no-random-sleep-on-renew",
     "",
@@ -2389,15 +2440,18 @@ function downloadReport(format) {
 }
 
 function operationsGuideCard(report = {}, link = null) {
-  const webService = report.web_server === "apache" ? "apache2" : "nginx";
+  const webService = webServiceName(report.web_server);
   const fpmService = report.php_version ? `php${report.php_version}-fpm` : "php-fpm";
   const dbService = report.database === "mariadb" ? "mariadb" : "mysql";
   const appLink = link?.html || accessLink(report.domain || "example.com", report.phase).html;
+  const runtimeRow = report.web_server === "frankenphp"
+    ? ["FrankenPHP 재시작", "sudo systemctl restart g7-frankenphp"]
+    : ["PHP-FPM 재시작", `sudo systemctl restart ${fpmService}`];
 
   return reportSummaryCard("운영 접속/명령", [
     ["웹앱", appLink],
     ["웹서버 재시작", `sudo systemctl reload ${webService}`],
-    ["PHP-FPM 재시작", `sudo systemctl restart ${fpmService}`],
+    runtimeRow,
     ["DB 재시작", `sudo systemctl restart ${dbService}`],
     ["SSL 갱신 점검", `sudo certbot renew --dry-run --cert-name ${report.domain || "도메인"}`],
     ["설정 안내서", report.setup_guide_path || "-"],
@@ -2409,7 +2463,9 @@ function healthChecklistCard(report = {}) {
   const appPackage = report.app_package || report.app_profile;
   const rows = [
     "웹서버 vhost 설정 테스트와 reload 결과 확인",
-    "PHP-FPM pool 사용자, 업로드 용량, 쓰기 경로 권한 확인",
+    report.web_server === "frankenphp"
+      ? "FrankenPHP 서비스 상태, 127.0.0.1:7080 로컬 앱서버, 업로드 용량 확인"
+      : "PHP-FPM pool 사용자, 업로드 용량, 쓰기 경로 권한 확인",
     "DB 이름/계정/비밀번호 보관 위치 확인",
     "SSL 인증서 파일과 certbot.timer 갱신 상태 확인",
   ];
@@ -2536,7 +2592,8 @@ function renderProvisionPanel(report = currentReport()) {
 }
 
 function provisioningActions(report = {}) {
-  const webService = report.web_server === "apache" ? "apache2" : "nginx";
+  const isFranken = report.web_server === "frankenphp";
+  const webService = webServiceName(report.web_server);
   const webCheck = report.web_server === "apache" ? "sudo apache2ctl configtest" : "sudo nginx -t";
   const fpmService = report.php_version ? `php${report.php_version}-fpm` : "php-fpm";
   const dbService = report.database === "mariadb" ? "mariadb" : "mysql";
@@ -2548,12 +2605,15 @@ function provisioningActions(report = {}) {
   const phpVersion = report.php_version || "8.3";
   const webConfigPath = report.web_server === "apache" ? "/etc/apache2/sites-available/g7.conf" : "/etc/nginx/sites-available/g7.conf";
   const phpPoolPath = `/etc/php/${phpVersion}/fpm/pool.d/g7.conf`;
-  const phpIniPath = `/etc/php/${phpVersion}/fpm/php.ini`;
+  const phpSapi = isFranken ? "cli" : "fpm";
+  const phpIniPath = `/etc/php/${phpVersion}/${phpSapi}/php.ini`;
   const secretsPath = "/etc/g7-installer/secrets.toml";
 
   return [
     provisioningAction("webserver", "웹서버/vhost", report.vhost_checks, {
-      summary: "도메인 요청을 앱 문서 루트와 PHP-FPM으로 연결합니다.",
+      summary: isFranken
+        ? "도메인 요청을 Nginx edge에서 FrankenPHP 로컬 앱서버로 연결합니다."
+        : "도메인 요청을 앱 문서 루트와 PHP-FPM으로 연결합니다.",
       command: `${webCheck} && sudo systemctl reload ${webService}`,
       settings: [
         ["도메인", report.domain || "-"],
@@ -2563,38 +2623,43 @@ function provisioningActions(report = {}) {
         ["서비스", webService],
       ],
       files: [
-        configFile(webConfigPath, "도메인 vhost, 문서 루트, PHP-FPM 연결"),
+        configFile(webConfigPath, isFranken ? "도메인 vhost, 문서 루트, FrankenPHP proxy 연결" : "도메인 vhost, 문서 루트, PHP-FPM 연결"),
         configFile(report.web_server === "apache" ? "/etc/apache2/sites-enabled/g7.conf" : "/etc/nginx/sites-enabled/g7.conf", "활성화된 vhost 링크/엔트리"),
+        ...(isFranken ? [configFile("/etc/systemd/system/g7-frankenphp.service", "FrankenPHP 로컬 앱서버 systemd unit")] : []),
       ],
       preview: [
         `server_name ${serverNamesPreview(report.domain, report.www_mode)};`,
         `root ${report.app_document_root || "-"};`,
-        `php_socket /run/php/php${phpVersion}-fpm.sock`,
+        isFranken ? "proxy_pass http://127.0.0.1:7080" : `php_socket /run/php/php${phpVersion}-fpm.sock`,
         "security_headers nosniff / frame policy / referrer policy",
       ],
     }),
-    provisioningAction("php", "PHP-FPM / phpinfo 요약", report.runtime_checks, {
-      summary: "사이트 계정 PHP 풀, FPM ini 기준 PHP 정보, 필수 확장과 업로드 한도를 앱 설치 전에 확인합니다.",
-      command: `sudo systemctl restart ${fpmService} && env PHP_INI_SCAN_DIR=/etc/php/${phpVersion}/fpm/conf.d php${phpVersion} -c ${phpIniPath} -i`,
+    provisioningAction("php", isFranken ? "FrankenPHP / PHP 요약" : "PHP-FPM / phpinfo 요약", report.runtime_checks, {
+      summary: isFranken
+        ? "FrankenPHP 서비스, CLI ini 기준 PHP 정보, 필수 확장과 업로드 한도를 앱 설치 전에 확인합니다."
+        : "사이트 계정 PHP 풀, FPM ini 기준 PHP 정보, 필수 확장과 업로드 한도를 앱 설치 전에 확인합니다.",
+      command: isFranken
+        ? `sudo systemctl restart g7-frankenphp && env PHP_INI_SCAN_DIR=/etc/php/${phpVersion}/cli/conf.d php${phpVersion} -c ${phpIniPath} -i`
+        : `sudo systemctl restart ${fpmService} && env PHP_INI_SCAN_DIR=/etc/php/${phpVersion}/fpm/conf.d php${phpVersion} -c ${phpIniPath} -i`,
       settings: [
         ["PHP", phpRuntimeLabel(report.php_version, report.php_source)],
-        ["Pool 사용자", report.site_user || "-"],
-        ["Pool 설정", phpPoolPath],
+        [isFranken ? "서비스 사용자" : "Pool 사용자", report.site_user || "-"],
+        [isFranken ? "앱서버" : "Pool 설정", isFranken ? "127.0.0.1:7080" : phpPoolPath],
         ["기준 php.ini", phpIniPath],
-        ["추가 ini", `/etc/php/${phpVersion}/fpm/conf.d/99-g7-installer.ini`],
-        ["서비스", fpmService],
+        ["추가 ini", `/etc/php/${phpVersion}/${phpSapi}/conf.d/99-g7-installer.ini`],
+        ["서비스", isFranken ? "g7-frankenphp" : fpmService],
       ],
       files: [
-        configFile(phpPoolPath, "사이트 계정 전용 PHP-FPM pool"),
-        configFile(`/etc/php/${phpVersion}/fpm/conf.d/99-g7-installer.ini`, "업로드/메모리/opcache 주요 런타임 값"),
-        configFile(phpIniPath, "PHP-FPM 기준 php.ini"),
+        ...(isFranken ? [configFile("/etc/systemd/system/g7-frankenphp.service", "FrankenPHP 로컬 앱서버 unit")] : [configFile(phpPoolPath, "사이트 계정 전용 PHP-FPM pool")]),
+        configFile(`/etc/php/${phpVersion}/${phpSapi}/conf.d/99-g7-installer.ini`, "업로드/메모리/opcache 주요 런타임 값"),
+        configFile(phpIniPath, isFranken ? "PHP CLI 기준 php.ini" : "PHP-FPM 기준 php.ini"),
       ],
       preview: [
-        `[g7-${report.site_user || "site"}]`,
-        `user = ${report.site_user || "-"}`,
+        isFranken ? "ExecStart=/opt/g7-frankenphp/frankenphp php-server --listen 127.0.0.1:7080" : `[g7-${report.site_user || "site"}]`,
+        isFranken ? `User=${report.site_user || "-"}` : `user = ${report.site_user || "-"}`,
         "group = www-data",
-        "pm = dynamic",
-        "phpinfo-summary = FPM ini 기준 PHP_VERSION / loaded_ini / scan_dir",
+        isFranken ? "public endpoint = Nginx 80/443" : "pm = dynamic",
+        isFranken ? "phpinfo-summary = CLI ini 기준 PHP_VERSION / loaded_ini / scan_dir" : "phpinfo-summary = FPM ini 기준 PHP_VERSION / loaded_ini / scan_dir",
         "memory_limit / upload_max_filesize / post_max_size = 서버 RAM 기준 검증",
         "required_extensions = 앱 종류 + Redis 선택값 기준 검증",
       ],
@@ -3700,7 +3765,7 @@ function bindEvents() {
 
     try {
       markStage("preflight", "진행");
-      setAlert(nodes.installStatus, "info", "서버 세팅 진행 중", "패키지, 사이트 계정/웹루트, vhost, PHP-FPM, DB, SSL, 앱 파일 배치 순서로 검증합니다.");
+      setAlert(nodes.installStatus, "info", "서버 세팅 진행 중", "패키지, 사이트 계정/웹루트, vhost, PHP 런타임, DB, SSL, 앱 파일 배치 순서로 검증합니다.");
       setActivityStatus("서버 세팅 시작", "패키지 설치 전 사전 점검을 실행합니다.", 5);
       log("서버 세팅 시작");
       const report = await apiFetch("/api/install/prepare", {

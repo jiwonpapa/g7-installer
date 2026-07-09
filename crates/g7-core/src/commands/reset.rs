@@ -13,7 +13,8 @@ const LEGACY_INSTALLER_PATHS: [&str; 2] = ["/usr/local/bin/g7", "/tmp/g7"];
 const REPORT_PATH: &str = "/var/log/g7-installer/report.json";
 const CONFIG_PATH: &str = "/etc/g7-installer/config.toml";
 const BASELINE_NOT_INSTALLED: &str = "not-installed";
-const APP_SYSTEMD_UNITS: [&str; 5] = [
+const APP_SYSTEMD_UNITS: [&str; 6] = [
+    "g7-frankenphp.service",
     "g7-queue.service",
     "g7-scheduler.timer",
     "g7-reverb.service",
@@ -580,6 +581,8 @@ fn validate_reset_path(path: &str) -> Result<()> {
         "/etc/nginx/sites-enabled/g7.conf",
         "/etc/apache2/sites-available/g7.conf",
         "/etc/apache2/sites-enabled/g7.conf",
+        "/etc/systemd/system/g7-frankenphp.service",
+        "/opt/g7-frankenphp",
         "/etc/systemd/system/g7-queue.service",
         "/etc/systemd/system/g7-scheduler.service",
         "/etc/systemd/system/g7-scheduler.timer",

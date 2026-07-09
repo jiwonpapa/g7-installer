@@ -63,7 +63,7 @@ http://127.0.0.1:7717/?token=...
 > - 크기: 월 12 USD, 2GB 메모리, 2 vCPU, 60GB SSD, 3TB 전송
 > - 이름 예시: `g7installer`, `g7-prod-01`
 
-2GB는 기본 권장값입니다. `g7inst` 계획 화면은 1GB, 2GB, 4GB, 8GB, 16GB, 32GB와 32GB 초과 메모리 기준으로 PHP-FPM, DB, Redis, swap, Nginx worker, Apache `mpm_event` worker 값을 나눠 보여줍니다.
+2GB는 기본 권장값입니다. `g7inst` 계획 화면은 1GB, 2GB, 4GB, 8GB, 16GB, 32GB와 32GB 초과 메모리 기준으로 PHP-FPM/FrankenPHP, DB, Redis, swap, Nginx worker, Apache `mpm_event` worker 값을 나눠 보여줍니다.
 
 무료 크레딧, 무료 기간, 번들 가격은 AWS가 언제든 바꿀 수 있습니다. 실제 과금은 인스턴스 생성 화면과 결제 안내를 기준으로 확인합니다.
 
@@ -264,7 +264,7 @@ sudo cat /var/log/g7-installer/report.json
 sudo less /var/log/g7-installer/setup-guide.md
 ```
 
-리포트 단계가 `completed`이면 패키지, Nginx/Apache vhost, PHP-FPM/DB 튜닝, DB 계정, SSL 처리, 앱 설치, 설정 안내서 저장까지 끝난 상태입니다. 그누보드7/Laravel은 Composer, NPM, Artisan, queue, scheduler 서비스까지 구성하고, WordPress는 설치 화면으로 이어집니다. DNS가 맞지 않으면 SSL은 보류되고 리포트에 실패 항목이 남습니다.
+리포트 단계가 `completed`이면 패키지, Nginx/Apache/FrankenPHP vhost, PHP/DB 튜닝, DB 계정, SSL 처리, 앱 설치, 설정 안내서 저장까지 끝난 상태입니다. 그누보드7/Laravel은 Composer, NPM, Artisan, queue, scheduler 서비스까지 구성하고, WordPress는 설치 화면으로 이어집니다. DNS가 맞지 않으면 SSL은 보류되고 리포트에 실패 항목이 남습니다.
 
 ## 11. 다른 Ubuntu VPS에서 쓰기
 
@@ -306,7 +306,7 @@ AWS에서 outbound 25 제한이 있으면 해제 요청이 필요합니다.
 | SSH 터널 | 서버 내부 포트를 내 PC 브라우저로 안전하게 연결하는 방법 |
 | 접속 확인 주소 | 터미널에 출력되는 `http://127.0.0.1:7717/?token=...` 주소 |
 | 사이트 계정 | 웹파일 소유자이자 SFTP로 파일을 올릴 Linux 계정 |
-| PHP-FPM pool user | PHP를 실행하는 계정. 기본은 사이트 계정 |
+| PHP 런타임 사용자 | PHP-FPM pool 또는 FrankenPHP 서비스를 실행하는 계정. 기본은 사이트 계정 |
 | 시작 스크립트 | 서버 최초 생성 때 자동 실행되는 스크립트 |
 | UFW | Ubuntu 방화벽 |
 | fail2ban | 반복 로그인 공격 차단 도구 |

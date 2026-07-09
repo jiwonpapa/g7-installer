@@ -5,10 +5,10 @@
 //! represented in `plan.rs`, `state.json`, `owned-files.json`, and the report.
 //!
 //! Current phase rule: package installation, site account/web root creation,
-//! Nginx/Apache vhost setup, PHP-FPM/DB tuning, DB user creation, TLS vhost
-//! mutation, app source handoff, and setup reporting are implemented. Riskier
-//! shared-server mutations such as firewall changes remain deferred until their
-//! rollback surface is explicit.
+//! Nginx/Apache/FrankenPHP vhost setup, PHP runtime/DB tuning, DB user creation,
+//! TLS vhost mutation, app source handoff, and setup reporting are implemented.
+//! Riskier shared-server mutations such as firewall changes remain deferred
+//! until their rollback surface is explicit.
 
 use std::fs;
 use std::fs::OpenOptions;
@@ -64,6 +64,12 @@ const CERTBOT_HTTP01_SMOKE_CONTENT: &str = "g7-installer-certbot-http01-ok\n";
 const SWAP_FILE_PATH: &str = "/swapfile";
 const SWAP_UNIT_PATH: &str = "/etc/systemd/system/swapfile.swap";
 const SWAP_SYSCTL_PATH: &str = "/etc/sysctl.d/99-g7-installer-swap.conf";
+const FRANKENPHP_VERSION: &str = "v1.12.4";
+const FRANKENPHP_DIR: &str = "/opt/g7-frankenphp";
+const FRANKENPHP_BIN_PATH: &str = "/opt/g7-frankenphp/frankenphp";
+const FRANKENPHP_SERVICE_NAME: &str = "g7-frankenphp";
+const FRANKENPHP_SERVICE_PATH: &str = "/etc/systemd/system/g7-frankenphp.service";
+const FRANKENPHP_LISTEN: &str = "127.0.0.1:7080";
 const GNUBOARD7_DRIVER_SETTINGS_PATH: &str = "storage/app/settings/drivers.json";
 const GNUBOARD7_REQUIRED_FILES: &[&str] = &[
     "artisan",
@@ -443,7 +449,22 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     match apply_vhost_phase(probe, paths, &install_plan, &mut owned_file_list) {
         Ok(vhost_checks) => {
             if !vhost_checks.is_empty() {
+                let frankenphp_service_active = install_plan.web_server == "frankenphp"
+                    && vhost_checks
+                        .iter()
+                        .any(|check| check.name == "frankenphp-service" && check.status == "pass");
                 apply_summary.vhost_checks.extend(vhost_checks);
+                if frankenphp_service_active
+                    && !apply_summary
+                        .service_checks
+                        .iter()
+                        .any(|check| check.name == FRANKENPHP_SERVICE_NAME)
+                {
+                    apply_summary.service_checks.push(InstallCheck::pass(
+                        FRANKENPHP_SERVICE_NAME,
+                        format!("FrankenPHP app server is active on {FRANKENPHP_LISTEN}."),
+                    ));
+                }
                 completed_steps.push("vhost-written".to_string());
                 completed_steps.push("vhost-enabled".to_string());
                 completed_steps.push(format!("{}-config-tested", web_service_name(&install_plan)));
@@ -487,6 +508,20 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
                 "webserver-vhost",
                 format!("Web server vhost setup failed: {err}"),
             )];
+            if install_plan.web_server == "frankenphp"
+                && owned_file_list
+                    .iter()
+                    .any(|path| path == FRANKENPHP_SERVICE_PATH)
+                && !apply_summary
+                    .service_checks
+                    .iter()
+                    .any(|check| check.name == FRANKENPHP_SERVICE_NAME)
+            {
+                apply_summary.service_checks.push(InstallCheck::manual(
+                    FRANKENPHP_SERVICE_NAME,
+                    "FrankenPHP unit was created before vhost setup failed; rollback/reset may disable it.",
+                ));
+            }
             state.set_phase(InstallerPhase::VhostFailed);
             state.completed_steps = completed_steps.clone();
             owned_files.files = owned_file_list.clone();
@@ -531,7 +566,11 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
                 )?;
                 return Err(Error::InstallVerificationFailed { checks: message });
             }
-            completed_steps.push("php-fpm-config-written".to_string());
+            completed_steps.push(if install_plan.web_server == "frankenphp" {
+                "frankenphp-runtime-config-written".to_string()
+            } else {
+                "php-fpm-config-written".to_string()
+            });
             completed_steps.push("php-runtime-config-written".to_string());
             completed_steps.push("php-runtime-diagnostics-passed".to_string());
             completed_steps.push(format!(
@@ -1253,6 +1292,47 @@ fn apply_vhost_phase<R: CommandRunner>(
                 "Apache was reloaded after vhost enable.",
             ));
         }
+        "frankenphp" => {
+            checks.extend(install_frankenphp_app_server(probe, paths, plan, owned)?);
+            write_new_file(
+                paths,
+                g7_system::nginx::G7_SITE_AVAILABLE,
+                &nginx_frankenphp_vhost_content(plan),
+                owned,
+            )?;
+            create_owned_symlink(
+                paths,
+                g7_system::nginx::G7_SITE_AVAILABLE,
+                g7_system::nginx::G7_SITE_ENABLED,
+                owned,
+            )?;
+            checks.push(InstallCheck::pass(
+                "frankenphp-vhost",
+                format!(
+                    "Wrote Nginx edge vhost {} and proxy to FrankenPHP at {}.",
+                    g7_system::nginx::G7_SITE_AVAILABLE,
+                    FRANKENPHP_LISTEN
+                ),
+            ));
+
+            let output = probe
+                .nginx_config_test()
+                .map_err(|err| command_error("nginx-configtest", "nginx -t", err))?;
+            require_success("nginx-configtest", "nginx -t", output)?;
+            checks.push(InstallCheck::pass(
+                "nginx-configtest",
+                "nginx -t completed successfully for FrankenPHP edge vhost.",
+            ));
+
+            let output = probe
+                .reload_service(g7_system::nginx::SERVICE_NAME)
+                .map_err(|err| command_error("nginx-reload", "systemctl reload nginx", err))?;
+            require_success("nginx-reload", "systemctl reload nginx", output)?;
+            checks.push(InstallCheck::pass(
+                "nginx-reload",
+                "Nginx was reloaded after FrankenPHP edge vhost enable.",
+            ));
+        }
         _ => return Ok(Vec::new()),
     }
 
@@ -1271,6 +1351,124 @@ fn apply_vhost_phase<R: CommandRunner>(
             return Err(command_error(
                 "http-smoke",
                 format!("curl -H 'Host: {smoke_host}' http://127.0.0.1/"),
+                err,
+            ));
+        }
+    }
+
+    Ok(checks)
+}
+
+fn install_frankenphp_app_server<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+    owned: &mut Vec<String>,
+) -> Result<Vec<InstallCheck>> {
+    let mut checks = Vec::new();
+    create_owned_dir_if_absent(paths, FRANKENPHP_DIR, owned)?;
+    if paths.resolve(FRANKENPHP_BIN_PATH).exists() {
+        return Err(Error::InstallVerificationFailed {
+            checks: format!(
+                "{FRANKENPHP_BIN_PATH} already exists. Remove it through installer reset or start from a fresh server."
+            ),
+        });
+    }
+
+    let arch_output = probe
+        .runner()
+        .run(&CommandSpec::new("uname").arg("-m"))
+        .map_err(|err| command_error("frankenphp-arch", "uname -m", err))?;
+    require_success("frankenphp-arch", "uname -m", arch_output.clone())?;
+    let arch = arch_output.stdout.trim();
+    let Some(url) = frankenphp_download_url(arch) else {
+        return Err(Error::InstallVerificationFailed {
+            checks: format!("FrankenPHP binary is not mapped for CPU architecture `{arch}`."),
+        });
+    };
+
+    let output = probe
+        .download_file(url, FRANKENPHP_BIN_PATH)
+        .map_err(|err| {
+            command_error(
+                "frankenphp-download",
+                format!("curl -fsSL -o {FRANKENPHP_BIN_PATH} {url}"),
+                err,
+            )
+        })?;
+    require_success(
+        "frankenphp-download",
+        format!("curl -fsSL -o {FRANKENPHP_BIN_PATH} {url}"),
+        output,
+    )?;
+    owned.push(FRANKENPHP_BIN_PATH.to_string());
+    let output = probe
+        .chmod_path("0755", FRANKENPHP_BIN_PATH)
+        .map_err(|err| {
+            command_error(
+                "frankenphp-chmod",
+                format!("chmod 0755 {FRANKENPHP_BIN_PATH}"),
+                err,
+            )
+        })?;
+    require_success(
+        "frankenphp-chmod",
+        format!("chmod 0755 {FRANKENPHP_BIN_PATH}"),
+        output,
+    )?;
+    checks.push(InstallCheck::pass(
+        "frankenphp-binary",
+        format!("Downloaded FrankenPHP {FRANKENPHP_VERSION} binary for {arch}."),
+    ));
+
+    write_new_file(
+        paths,
+        FRANKENPHP_SERVICE_PATH,
+        &frankenphp_service_content(plan),
+        owned,
+    )?;
+    let output = probe
+        .systemd_daemon_reload()
+        .map_err(|err| command_error("frankenphp-daemon-reload", "systemctl daemon-reload", err))?;
+    require_success(
+        "frankenphp-daemon-reload",
+        "systemctl daemon-reload",
+        output,
+    )?;
+    let output = probe
+        .enable_service_now(FRANKENPHP_SERVICE_NAME)
+        .map_err(|err| {
+            command_error(
+                "frankenphp-service-enable",
+                format!("systemctl enable --now {FRANKENPHP_SERVICE_NAME}"),
+                err,
+            )
+        })?;
+    require_success(
+        "frankenphp-service-enable",
+        format!("systemctl enable --now {FRANKENPHP_SERVICE_NAME}"),
+        output,
+    )?;
+    match probe.service_activity(FRANKENPHP_SERVICE_NAME) {
+        Ok(ServiceActivity::Active) => checks.push(InstallCheck::pass(
+            "frankenphp-service",
+            format!(
+                "{} is active on {}.",
+                FRANKENPHP_SERVICE_NAME, FRANKENPHP_LISTEN
+            ),
+        )),
+        Ok(activity) => {
+            return Err(Error::InstallVerificationFailed {
+                checks: format!(
+                    "{} service is not active: {:?}",
+                    FRANKENPHP_SERVICE_NAME, activity
+                ),
+            });
+        }
+        Err(err) => {
+            return Err(command_error(
+                "frankenphp-service-verify",
+                format!("systemctl is-active {FRANKENPHP_SERVICE_NAME}"),
                 err,
             ));
         }
@@ -1368,7 +1566,6 @@ fn apply_runtime_phase<R: CommandRunner>(
 ) -> Result<Vec<InstallCheck>> {
     let mut checks = Vec::new();
     let sizing = detected_memory_sizing(probe);
-    let pool_path = php_pool_path(plan);
     let ini_path = php_ini_override_path(plan);
     let nginx_tuning_path = "/etc/nginx/conf.d/g7-runtime-tuning.conf";
 
@@ -1385,20 +1582,36 @@ fn apply_runtime_phase<R: CommandRunner>(
         ),
     ));
 
-    write_new_file(paths, &pool_path, &php_pool_content(plan, &sizing), owned)?;
-    checks.push(InstallCheck::pass(
-        "php-fpm-pool",
-        format!(
-            "Created PHP-FPM pool config at {pool_path}; max_children={}, memory_limit={}.",
-            sizing.php_max_children, sizing.php_memory_limit
-        ),
-    ));
-
     write_new_file(paths, &ini_path, &php_ini_override_content(&sizing), owned)?;
     checks.push(InstallCheck::pass(
         "php-runtime-ini",
         format!("Created PHP runtime override at {ini_path}."),
     ));
+
+    if plan.web_server == "frankenphp" {
+        write_existing_file(
+            paths,
+            g7_system::nginx::G7_SITE_AVAILABLE,
+            &nginx_frankenphp_vhost_content(plan),
+        )?;
+        checks.push(InstallCheck::pass(
+            "frankenphp-runtime",
+            format!(
+                "FrankenPHP runs PHP requests on {} behind the Nginx edge vhost.",
+                FRANKENPHP_LISTEN
+            ),
+        ));
+    } else {
+        let pool_path = php_pool_path(plan);
+        write_new_file(paths, &pool_path, &php_pool_content(plan, &sizing), owned)?;
+        checks.push(InstallCheck::pass(
+            "php-fpm-pool",
+            format!(
+                "Created PHP-FPM pool config at {pool_path}; max_children={}, memory_limit={}.",
+                sizing.php_max_children, sizing.php_memory_limit
+            ),
+        ));
+    }
 
     if plan.web_server == "nginx" {
         write_new_file(
@@ -1429,7 +1642,7 @@ fn apply_runtime_phase<R: CommandRunner>(
                 sizing.nginx_worker_rlimit_nofile
             ),
         });
-    } else {
+    } else if plan.web_server == "apache" {
         write_existing_file(
             paths,
             g7_system::apache::G7_SITE_AVAILABLE,
@@ -1452,25 +1665,46 @@ fn apply_runtime_phase<R: CommandRunner>(
         });
     }
 
-    let fpm_service = format!("php{}-fpm", plan.php_version);
-    let output = probe.reload_service(&fpm_service).map_err(|err| {
-        command_error(
+    if plan.web_server == "frankenphp" {
+        let output = probe
+            .restart_service(FRANKENPHP_SERVICE_NAME)
+            .map_err(|err| {
+                command_error(
+                    "frankenphp-restart",
+                    format!("systemctl restart {FRANKENPHP_SERVICE_NAME}"),
+                    err,
+                )
+            })?;
+        require_success(
+            "frankenphp-restart",
+            format!("systemctl restart {FRANKENPHP_SERVICE_NAME}"),
+            output,
+        )?;
+        checks.push(InstallCheck::pass(
+            "frankenphp-restart",
+            format!("Restarted {FRANKENPHP_SERVICE_NAME}."),
+        ));
+    } else {
+        let fpm_service = format!("php{}-fpm", plan.php_version);
+        let output = probe.reload_service(&fpm_service).map_err(|err| {
+            command_error(
+                "php-fpm-reload",
+                format!("systemctl reload {fpm_service}"),
+                err,
+            )
+        })?;
+        require_success(
             "php-fpm-reload",
             format!("systemctl reload {fpm_service}"),
-            err,
-        )
-    })?;
-    require_success(
-        "php-fpm-reload",
-        format!("systemctl reload {fpm_service}"),
-        output,
-    )?;
-    checks.push(InstallCheck::pass(
-        "php-fpm-reload",
-        format!("Reloaded {fpm_service}."),
-    ));
+            output,
+        )?;
+        checks.push(InstallCheck::pass(
+            "php-fpm-reload",
+            format!("Reloaded {fpm_service}."),
+        ));
+    }
 
-    if plan.web_server == "nginx" {
+    if matches!(plan.web_server.as_str(), "nginx" | "frankenphp") {
         let output = probe
             .nginx_config_test()
             .map_err(|err| command_error("nginx-configtest", "nginx -t", err))?;
@@ -1480,8 +1714,16 @@ fn apply_runtime_phase<R: CommandRunner>(
             .map_err(|err| command_error("nginx-reload", "systemctl reload nginx", err))?;
         require_success("nginx-reload", "systemctl reload nginx", output)?;
         checks.push(InstallCheck::pass(
-            "nginx-runtime-reload",
-            "Validated and reloaded Nginx after runtime tuning.",
+            if plan.web_server == "frankenphp" {
+                "frankenphp-edge-runtime-reload"
+            } else {
+                "nginx-runtime-reload"
+            },
+            if plan.web_server == "frankenphp" {
+                "Validated and reloaded Nginx edge after FrankenPHP runtime tuning."
+            } else {
+                "Validated and reloaded Nginx after runtime tuning."
+            },
         ));
     } else {
         let output = probe
@@ -1538,7 +1780,12 @@ fn php_runtime_diagnostic_checks<R: CommandRunner>(
     checks.push(InstallCheck::pass(
         "phpinfo-summary",
         format!(
-            "FPM ini 기준 PHP 정보를 파싱했습니다: PHP {}, SAPI={}, ini={}, scan_dir={}.",
+            "{} 기준 PHP 정보를 파싱했습니다: PHP {}, SAPI={}, ini={}, scan_dir={}.",
+            if plan.web_server == "frankenphp" {
+                "CLI ini"
+            } else {
+                "FPM ini"
+            },
             fact(&facts, "php_version"),
             fact(&facts, "sapi"),
             fact(&facts, "loaded_ini"),
@@ -1607,19 +1854,34 @@ fn php_runtime_diagnostic_checks<R: CommandRunner>(
         });
     }
 
-    checks.push(php_fpm_pool_value_check(paths, plan, sizing));
+    if plan.web_server == "frankenphp" {
+        checks.push(InstallCheck::pass(
+            "frankenphp-runtime-boundary",
+            format!(
+                "FrankenPHP app server listens on {}; Nginx edge owns public 80/443.",
+                FRANKENPHP_LISTEN
+            ),
+        ));
+    } else {
+        checks.push(php_fpm_pool_value_check(paths, plan, sizing));
+    }
     checks
 }
 
 fn php_runtime_probe_command(plan: &plan::InstallPlan) -> CommandSpec {
+    let sapi = if plan.web_server == "frankenphp" {
+        "cli"
+    } else {
+        "fpm"
+    };
     CommandSpec::new("env")
         .arg(format!(
-            "PHP_INI_SCAN_DIR=/etc/php/{}/fpm/conf.d",
-            plan.php_version
+            "PHP_INI_SCAN_DIR=/etc/php/{}/{sapi}/conf.d",
+            plan.php_version,
         ))
         .arg(format!("php{}", plan.php_version))
         .arg("-c")
-        .arg(format!("/etc/php/{}/fpm/php.ini", plan.php_version))
+        .arg(format!("/etc/php/{}/{sapi}/php.ini", plan.php_version))
         .arg("-r")
         .arg(php_runtime_probe_script())
 }
@@ -2055,12 +2317,13 @@ fn apply_tls_phase<R: CommandRunner>(
         )
     };
 
-    let vhost_check = if plan.web_server == "nginx" {
-        write_existing_file(
-            paths,
-            g7_system::nginx::G7_SITE_AVAILABLE,
-            &nginx_tls_vhost_content(plan, &php_fpm_site_socket(plan)),
-        )?;
+    let vhost_check = if matches!(plan.web_server.as_str(), "nginx" | "frankenphp") {
+        let vhost_content = if plan.web_server == "frankenphp" {
+            nginx_frankenphp_tls_vhost_content(plan)
+        } else {
+            nginx_tls_vhost_content(plan, &php_fpm_site_socket(plan))
+        };
+        write_existing_file(paths, g7_system::nginx::G7_SITE_AVAILABLE, &vhost_content)?;
 
         let output = probe
             .nginx_config_test()
@@ -2073,7 +2336,11 @@ fn apply_tls_phase<R: CommandRunner>(
         require_success("nginx-reload", "systemctl reload nginx", output)?;
 
         InstallCheck::pass(
-            "nginx-https-vhost",
+            if plan.web_server == "frankenphp" {
+                "frankenphp-https-vhost"
+            } else {
+                "nginx-https-vhost"
+            },
             format!(
                 "Rewrote {} with HTTPS server blocks for {}.",
                 g7_system::nginx::G7_SITE_AVAILABLE,
@@ -3327,8 +3594,13 @@ fn laravel_env_content(
 ) -> Result<String> {
     let app_key = random_laravel_app_key()?;
     let redis_enabled = plan.redis_mode == "enable";
+    let db_host = if plan.web_server == "frankenphp" {
+        "127.0.0.1"
+    } else {
+        "localhost"
+    };
     let mut env = format!(
-        "APP_NAME=\"{}\"\nAPP_ENV=production\nAPP_KEY=base64:{app_key}\nAPP_DEBUG=false\nAPP_URL={app_url}\n\nDB_CONNECTION=mysql\nDB_HOST=localhost\nDB_PORT=3306\nDB_DATABASE={}\nDB_USERNAME={}\nDB_PASSWORD=\"{}\"\n\nCACHE_STORE={}\nCACHE_DRIVER={}\nSESSION_DRIVER={}\nQUEUE_CONNECTION={}\nREDIS_CLIENT=phpredis\nREDIS_HOST=127.0.0.1\nREDIS_PORT=6379\nREDIS_PASSWORD=null\n\n",
+        "APP_NAME=\"{}\"\nAPP_ENV=production\nAPP_KEY=base64:{app_key}\nAPP_DEBUG=false\nAPP_URL={app_url}\n\nDB_CONNECTION=mysql\nDB_HOST={db_host}\nDB_READ_HOST={db_host}\nDB_PORT=3306\nDB_DATABASE={}\nDB_USERNAME={}\nDB_PASSWORD=\"{}\"\n\nCACHE_STORE={}\nCACHE_DRIVER={}\nSESSION_DRIVER={}\nQUEUE_CONNECTION={}\nREDIS_CLIENT=phpredis\nREDIS_HOST=127.0.0.1\nREDIS_PORT=6379\nREDIS_PASSWORD=null\n\n",
         plan.app_profile_label,
         plan.database_name,
         plan.database_user,
@@ -3395,7 +3667,7 @@ fn mail_env_content(plan: &plan::InstallPlan) -> String {
 
 fn placeholder_app_content(plan: &plan::InstallPlan) -> String {
     format!(
-        "<?php\nheader('Content-Type: text/html; charset=utf-8');\n?><!doctype html><html lang=\"ko\"><meta charset=\"utf-8\"><title>{label} 준비됨</title><body><h1>{label} 설치 준비됨</h1><p>도메인, PHP-FPM, DB, SSL 설정이 완료되었습니다.</p><p>앱 소스 URL을 지정한 뒤 다시 설치하거나 수동 배포를 진행하세요.</p></body></html>\n",
+        "<?php\nheader('Content-Type: text/html; charset=utf-8');\n?><!doctype html><html lang=\"ko\"><meta charset=\"utf-8\"><title>{label} 준비됨</title><body><h1>{label} 설치 준비됨</h1><p>도메인, PHP 런타임, DB, SSL 설정이 완료되었습니다.</p><p>앱 소스 URL을 지정한 뒤 다시 설치하거나 수동 배포를 진행하세요.</p></body></html>\n",
         label = plan.app_profile_label
     )
 }
@@ -3578,9 +3850,14 @@ fn php_pool_path(plan: &plan::InstallPlan) -> String {
 }
 
 fn php_ini_override_path(plan: &plan::InstallPlan) -> String {
+    let sapi = if plan.web_server == "frankenphp" {
+        "cli"
+    } else {
+        "fpm"
+    };
     format!(
-        "/etc/php/{}/fpm/conf.d/99-g7-installer.ini",
-        plan.php_version
+        "/etc/php/{}/{sapi}/conf.d/99-g7-installer.ini",
+        plan.php_version,
     )
 }
 
@@ -3724,6 +4001,20 @@ fn nginx_vhost_content(plan: &plan::InstallPlan) -> String {
     nginx_vhost_content_with_socket(plan, &php_socket)
 }
 
+fn nginx_frankenphp_vhost_content(plan: &plan::InstallPlan) -> String {
+    let app_hosts = nginx_app_hosts(plan);
+    let redirect_blocks = nginx_redirect_blocks(plan);
+    let reverb_proxy = nginx_reverb_proxy_block(plan);
+    let certbot_http01_location = nginx_certbot_http01_challenge_location();
+    let static_cache_locations = nginx_static_cache_locations();
+    let proxy = nginx_frankenphp_proxy_location();
+
+    format!(
+        "{redirect_blocks}server {{\n    listen 80;\n    listen [::]:80;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    access_log /var/log/nginx/g7-access.log g7_timing;\n    error_log /var/log/nginx/g7-error.log;\n\n{certbot_http01_location}{static_cache_locations}{reverb_proxy}{proxy}\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
+        root = plan.app_document_root,
+    )
+}
+
 fn nginx_vhost_content_with_socket(plan: &plan::InstallPlan, php_socket: &str) -> String {
     let app_hosts = nginx_app_hosts(plan);
     let redirect_blocks = nginx_redirect_blocks(plan);
@@ -3743,6 +4034,10 @@ fn nginx_static_cache_locations() -> &'static str {
 
 fn nginx_certbot_http01_challenge_location() -> &'static str {
     "    location ^~ /.well-known/acme-challenge/ {\n        default_type \"text/plain\";\n        try_files $uri =404;\n    }\n"
+}
+
+fn nginx_frankenphp_proxy_location() -> &'static str {
+    "    location / {\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_set_header X-Forwarded-Host $host;\n        proxy_set_header X-Forwarded-Port $server_port;\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection \"upgrade\";\n        proxy_read_timeout 120s;\n        proxy_send_timeout 120s;\n        proxy_pass http://127.0.0.1:7080;\n    }\n"
 }
 
 fn nginx_app_hosts(plan: &plan::InstallPlan) -> String {
@@ -3855,6 +4150,22 @@ fn nginx_tls_vhost_content(plan: &plan::InstallPlan, php_socket: &str) -> String
     )
 }
 
+fn nginx_frankenphp_tls_vhost_content(plan: &plan::InstallPlan) -> String {
+    let http_hosts = certificate_hosts(plan).join(" ");
+    let cert_name = &plan.domain;
+    let app_hosts = nginx_app_hosts(plan);
+    let canonical_redirect = nginx_https_canonical_redirect(plan);
+    let reverb_proxy = nginx_reverb_proxy_block(plan);
+    let certbot_http01_location = nginx_certbot_http01_challenge_location();
+    let static_cache_locations = nginx_static_cache_locations();
+    let proxy = nginx_frankenphp_proxy_location();
+
+    format!(
+        "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {http_hosts};\n    root {root};\n\n{certbot_http01_location}\n    location / {{\n        return 301 https://$host$request_uri;\n    }}\n}}\n\n{canonical_redirect}server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    ssl_certificate /etc/letsencrypt/live/{cert_name}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{cert_name}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_prefer_server_ciphers off;\n\n    access_log /var/log/nginx/g7-access.log g7_timing;\n    error_log /var/log/nginx/g7-error.log;\n\n    add_header X-Content-Type-Options nosniff always;\n    add_header X-Frame-Options SAMEORIGIN always;\n    add_header Referrer-Policy strict-origin-when-cross-origin always;\n\n{certbot_http01_location}{static_cache_locations}{reverb_proxy}{proxy}\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
+        root = plan.app_document_root,
+    )
+}
+
 fn apache_tls_vhost_content(plan: &plan::InstallPlan, php_socket: &str) -> String {
     let http_hosts = certificate_hosts(plan).join(" ");
     let cert_name = &plan.domain;
@@ -3948,11 +4259,33 @@ fn primary_http_host(plan: &plan::InstallPlan) -> String {
     }
 }
 
+fn frankenphp_download_url(arch: &str) -> Option<&'static str> {
+    match arch.trim() {
+        "x86_64" | "amd64" => Some(
+            "https://github.com/php/frankenphp/releases/download/v1.12.4/frankenphp-linux-x86_64",
+        ),
+        "aarch64" | "arm64" => Some(
+            "https://github.com/php/frankenphp/releases/download/v1.12.4/frankenphp-linux-aarch64",
+        ),
+        _ => None,
+    }
+}
+
+fn frankenphp_service_content(plan: &plan::InstallPlan) -> String {
+    format!(
+        "[Unit]\nDescription=G7 FrankenPHP app server\nAfter=network-online.target mysql.service mariadb.service redis-server.service\nWants=network-online.target\n\n[Service]\nType=simple\nUser={site_user}\nGroup=www-data\nWorkingDirectory={web_root}\nEnvironment=APP_ENV=production\nEnvironment=DB_HOST=127.0.0.1\nEnvironment=DB_READ_HOST=127.0.0.1\nExecStart={bin} php-server --listen {listen} --root {root} --access-log\nRestart=always\nRestartSec=3\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=full\nReadWritePaths={web_root} /tmp\nLimitNOFILE=65535\n\n[Install]\nWantedBy=multi-user.target\n",
+        site_user = plan.site_user,
+        web_root = plan.web_root,
+        bin = FRANKENPHP_BIN_PATH,
+        listen = FRANKENPHP_LISTEN,
+        root = plan.app_document_root,
+    )
+}
+
 fn web_service_name(plan: &plan::InstallPlan) -> &'static str {
-    if plan.web_server == "apache" {
-        g7_system::apache::SERVICE_NAME
-    } else {
-        g7_system::nginx::SERVICE_NAME
+    match plan.web_server.as_str() {
+        "apache" => g7_system::apache::SERVICE_NAME,
+        _ => g7_system::nginx::SERVICE_NAME,
     }
 }
 
@@ -4893,11 +5226,7 @@ fn setup_guide_content(
     summary: &ApplySummary,
     completed_steps: &[String],
 ) -> String {
-    let web_service = if plan.web_server == "apache" {
-        "apache2"
-    } else {
-        "nginx"
-    };
+    let web_service = web_service_name(plan);
     let fpm_service = format!("php{}-fpm", plan.php_version);
     let db_service = database_service_name(plan);
     let access_url = app_access_url(plan, summary);
@@ -4942,11 +5271,22 @@ fn setup_guide_content(
             g7_system::nginx::G7_SITE_ENABLED
         ));
         content.push_str("- Nginx runtime: `/etc/nginx/conf.d/g7-runtime-tuning.conf`\n");
-    } else {
+    } else if plan.web_server == "apache" {
         content.push_str("- Apache vhost: `/etc/apache2/sites-available/g7.conf`\n");
         content.push_str("- Apache enabled: `/etc/apache2/sites-enabled/g7.conf`\n");
+    } else {
+        content.push_str("- Nginx edge vhost: `/etc/nginx/sites-available/g7.conf`\n");
+        content.push_str("- Nginx edge enabled: `/etc/nginx/sites-enabled/g7.conf`\n");
+        content.push_str(&format!(
+            "- FrankenPHP binary: `{FRANKENPHP_BIN_PATH}` ({FRANKENPHP_VERSION})\n"
+        ));
+        content.push_str(&format!(
+            "- FrankenPHP service: `{FRANKENPHP_SERVICE_PATH}` listening `{FRANKENPHP_LISTEN}`\n"
+        ));
     }
-    content.push_str(&format!("- PHP-FPM pool: `{}`\n", php_pool_path(plan)));
+    if plan.web_server != "frankenphp" {
+        content.push_str(&format!("- PHP-FPM pool: `{}`\n", php_pool_path(plan)));
+    }
     content.push_str(&format!(
         "- PHP override: `{}`\n",
         php_ini_override_path(plan)
@@ -4978,12 +5318,21 @@ fn setup_guide_content(
     content.push_str(&format!(
         "- 웹서버 재시작: `sudo systemctl restart {web_service}`\n"
     ));
-    content.push_str(&format!(
-        "- PHP-FPM 상태: `sudo systemctl status {fpm_service}`\n"
-    ));
-    content.push_str(&format!(
-        "- PHP-FPM 재시작: `sudo systemctl restart {fpm_service}`\n"
-    ));
+    if plan.web_server == "frankenphp" {
+        content.push_str(&format!(
+            "- FrankenPHP 상태: `sudo systemctl status {FRANKENPHP_SERVICE_NAME}`\n"
+        ));
+        content.push_str(&format!(
+            "- FrankenPHP 재시작: `sudo systemctl restart {FRANKENPHP_SERVICE_NAME}`\n"
+        ));
+    } else {
+        content.push_str(&format!(
+            "- PHP-FPM 상태: `sudo systemctl status {fpm_service}`\n"
+        ));
+        content.push_str(&format!(
+            "- PHP-FPM 재시작: `sudo systemctl restart {fpm_service}`\n"
+        ));
+    }
     content.push_str(&format!(
         "- DB 상태: `sudo systemctl status {db_service}`\n"
     ));
@@ -5391,6 +5740,97 @@ mod tests {
         assert!(report_json.contains("\"setup_guide_path\""));
         assert!(report_json.contains("\"safety_checks\""));
         assert!(report_json.contains("\"vhost_checks\""));
+
+        fs::remove_file(os_release_path)?;
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn install_configures_frankenphp_edge_runtime()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let os_release_path = write_temp_os_release()?;
+        let fs_root = create_temp_fs_root()?;
+        let options = super::plan::PlanOptions {
+            web_server: "frankenphp".to_string(),
+            ..super::plan::PlanOptions::default()
+        };
+        let probe =
+            clean_root_probe_for_options(&os_release_path, &fs_root, "example.com", &options)?;
+        let paths = InstallPaths::with_root(&fs_root);
+
+        let report = run_with_probe_and_paths("example.com".to_string(), options, &probe, &paths)?;
+
+        assert_eq!(report.web_server, "frankenphp");
+        assert_eq!(report.php_version, "8.5");
+        assert_eq!(report.php_source, "ondrej");
+        assert!(
+            report
+                .owned_files
+                .contains(&"/opt/g7-frankenphp/frankenphp".to_string())
+        );
+        assert!(
+            report
+                .owned_files
+                .contains(&"/etc/systemd/system/g7-frankenphp.service".to_string())
+        );
+        assert!(
+            !report
+                .package_checks
+                .iter()
+                .any(|check| check.name == "php8.5-fpm")
+        );
+        assert!(
+            report
+                .vhost_checks
+                .iter()
+                .any(|check| check.name == "frankenphp-service" && check.status == "pass")
+        );
+        assert!(
+            report
+                .service_checks
+                .iter()
+                .any(|check| check.name == "g7-frankenphp" && check.status == "pass")
+        );
+        assert!(report.runtime_checks.iter().any(|check| {
+            check.name == "frankenphp-runtime-boundary" && check.message.contains("127.0.0.1:7080")
+        }));
+        assert!(
+            report
+                .certbot_checks
+                .iter()
+                .any(|check| check.name == "frankenphp-https-vhost" && check.status == "pass")
+        );
+
+        let unit = fs::read_to_string(fs_root.join("etc/systemd/system/g7-frankenphp.service"))?;
+        assert!(unit.contains("User=g7"));
+        assert!(unit.contains("--listen 127.0.0.1:7080"));
+        assert!(unit.contains("--root /home/g7/public_html/public"));
+        let vhost = fs::read_to_string(fs_root.join("etc/nginx/sites-available/g7.conf"))?;
+        assert!(vhost.contains("proxy_pass http://127.0.0.1:7080;"));
+        assert!(!vhost.contains("fastcgi_pass"));
+        let app_env = fs::read_to_string(fs_root.join("home/g7/public_html/.env"))?;
+        assert!(app_env.contains("DB_HOST=127.0.0.1"));
+        assert!(app_env.contains("DB_READ_HOST=127.0.0.1"));
+        let setup_guide = fs::read_to_string(fs_root.join("var/log/g7-installer/setup-guide.md"))?;
+        assert!(setup_guide.contains("FrankenPHP service"));
+        assert!(setup_guide.contains("sudo systemctl restart g7-frankenphp"));
+
+        let recorded = probe.runner().recorded();
+        assert!(recorded.iter().any(|spec| {
+            spec.display().contains("frankenphp-linux-x86_64")
+                && spec.display().contains("/opt/g7-frankenphp/frankenphp")
+        }));
+        assert!(
+            recorded
+                .iter()
+                .any(|spec| spec.display() == "systemctl enable --now g7-frankenphp")
+        );
+        assert!(
+            recorded
+                .iter()
+                .all(|spec| !spec.display().contains("php8.5-fpm"))
+        );
 
         fs::remove_file(os_release_path)?;
         fs::remove_dir_all(fs_root)?;
@@ -5919,6 +6359,19 @@ mod tests {
             push_successful_runtime_database_tls_outputs(runner, install_plan);
             return;
         }
+        if install_plan.web_server == "frankenphp" {
+            runner.push_output(CommandOutput::success("x86_64\n"));
+            runner.push_output(CommandOutput::success("downloaded\n"));
+            runner.push_output(CommandOutput::success(""));
+            runner.push_output(CommandOutput::success(""));
+            runner.push_output(CommandOutput::success(""));
+            runner.push_output(CommandOutput::success("active\n"));
+            runner.push_output(CommandOutput::success(""));
+            runner.push_output(CommandOutput::success(""));
+            runner.push_output(CommandOutput::success(""));
+            push_successful_runtime_database_tls_outputs(runner, install_plan);
+            return;
+        }
 
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
@@ -5931,7 +6384,10 @@ mod tests {
         install_plan: &super::plan::InstallPlan,
     ) {
         runner.push_output(CommandOutput::success(""));
-        if matches!(install_plan.web_server.as_str(), "nginx" | "apache") {
+        if matches!(
+            install_plan.web_server.as_str(),
+            "nginx" | "apache" | "frankenphp"
+        ) {
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success(""));
         }
@@ -5961,6 +6417,18 @@ mod tests {
             for _module in super::apache_tls_modules() {
                 runner.push_output(CommandOutput::success(""));
             }
+            runner.push_output(CommandOutput::success(""));
+            runner.push_output(CommandOutput::success(""));
+            runner.push_output(CommandOutput::success("renew ok\n"));
+        } else if install_plan.deployment_mode == "public"
+            && install_plan.web_server == "frankenphp"
+        {
+            runner.push_output(CommandOutput::success(""));
+            runner.push_output(CommandOutput::success(""));
+            for _host in super::certificate_hosts(install_plan) {
+                runner.push_output(CommandOutput::success(""));
+            }
+            runner.push_output(CommandOutput::success("cert issued\n"));
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success("renew ok\n"));

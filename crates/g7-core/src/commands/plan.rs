@@ -33,7 +33,7 @@ pub const DEFAULT_SMTP_ENCRYPTION: &str = "starttls";
 pub const DEFAULT_SECURITY_PROFILE: &str = "standard";
 pub const DEFAULT_SSH_POLICY: &str = "audit-only";
 
-const SUPPORTED_WEB_SERVERS: [&str; 2] = ["nginx", "apache"];
+const SUPPORTED_WEB_SERVERS: [&str; 3] = ["nginx", "apache", "frankenphp"];
 const SUPPORTED_DATABASE_ENGINES: [&str; 2] = ["mysql", "mariadb"];
 const SUPPORTED_WEB_ROOT_MODES: [&str; 4] = ["public-html", "www", "system", "custom"];
 const SUPPORTED_WWW_MODES: [&str; 4] = ["redirect-to-root", "redirect-to-www", "include", "none"];
@@ -661,7 +661,10 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
     let app_profile = resolve_app_profile(&options.app_profile)?;
     let web_server =
         normalize_supported_option("web-server", options.web_server, &SUPPORTED_WEB_SERVERS)?;
-    let php_version = normalize_php_version(options.php_version)?;
+    let mut php_version = normalize_php_version(options.php_version)?;
+    if web_server == "frankenphp" {
+        php_version = g7_system::php::NEXT_FPM_VERSION.to_string();
+    }
     let database_engine = normalize_supported_option(
         "database",
         options.database_engine,
@@ -933,13 +936,14 @@ struct PackageInput<'a> {
 }
 
 fn packages(input: PackageInput<'_>) -> Vec<PlanPackage> {
-    let mut packages = vec![
+    let mut packages = vec![PlanPackage {
+        name: web_server_package(input.web_server).to_string(),
+        description: web_server_package_description(input.web_server),
+    }];
+
+    packages.extend([
         PlanPackage {
-            name: web_server_package(input.web_server).to_string(),
-            description: "도메인 요청을 PHP 앱으로 전달하는 웹서버입니다.",
-        },
-        PlanPackage {
-            name: format!("php{}-fpm php{}-cli", input.php_version, input.php_version),
+            name: php_runtime_packages(input.web_server, input.php_version),
             description: "선택한 앱을 실행하고 PHP 설정을 진단하는 런타임입니다.",
         },
         PlanPackage {
@@ -975,7 +979,7 @@ fn packages(input: PackageInput<'_>) -> Vec<PlanPackage> {
             name: "curl unzip ca-certificates".to_string(),
             description: "앱 소스 다운로드, 압축 해제, HTTPS 검증에 필요한 도구입니다.",
         },
-    ];
+    ]);
 
     if matches!(input.app_profile.id, "gnuboard7" | "laravel") {
         packages.push(PlanPackage {
@@ -996,10 +1000,12 @@ fn packages(input: PackageInput<'_>) -> Vec<PlanPackage> {
             name: "certbot".to_string(),
             description: "Let's Encrypt SSL 인증서를 발급하고 갱신합니다.",
         });
-        packages.push(PlanPackage {
-            name: certbot_web_plugin_package(input.web_server).to_string(),
-            description: "웹서버와 Certbot 인증서 발급을 연결합니다.",
-        });
+        if let Some(package) = certbot_web_plugin_package(input.web_server) {
+            packages.push(PlanPackage {
+                name: package.to_string(),
+                description: "웹서버와 Certbot 인증서 발급을 연결합니다.",
+            });
+        }
     }
 
     if input.redis_mode == "enable" {
@@ -1081,6 +1087,17 @@ fn files(
         web_server_enabled_file(web_server),
     ];
 
+    if web_server == "frankenphp" {
+        files.push(PlanFile::new(
+            "/opt/g7-frankenphp/frankenphp",
+            "download FrankenPHP app-server binary",
+        ));
+        files.push(PlanFile::new(
+            "/etc/systemd/system/g7-frankenphp.service",
+            "create FrankenPHP app-server service",
+        ));
+    }
+
     for service in app_profile.services {
         files.push(PlanFile::new(
             format!("/etc/systemd/system/{service}"),
@@ -1127,14 +1144,22 @@ fn services(
             action: "enable and reload",
         },
         PlanService {
-            name: format!("php{php_version}-fpm"),
-            action: "enable and restart",
-        },
-        PlanService {
             name: database_service(database_engine).to_string(),
             action: "bind locally, create app database/user, enable and start",
         },
     ];
+
+    if web_server == "frankenphp" {
+        services.push(PlanService {
+            name: "g7-frankenphp".to_string(),
+            action: "create as localhost app server and restart",
+        });
+    } else {
+        services.push(PlanService {
+            name: format!("php{php_version}-fpm"),
+            action: "enable and restart",
+        });
+    }
 
     for service in app_profile.services {
         services.push(PlanService {
@@ -1573,8 +1598,8 @@ fn provisioning_sections(input: ProvisioningInput<'_>) -> Vec<ProvisioningSectio
                 ProvisioningSetting::new("document_root", input.app_document_root),
                 ProvisioningSetting::new("site_root", input.web_root),
                 ProvisioningSetting::new(
-                    "php_socket",
-                    format!("/run/php/php{}-fpm.sock", input.php_version),
+                    "php_endpoint",
+                    php_endpoint(input.web_server, input.php_version),
                 ),
                 ProvisioningSetting::new("rewrite_policy", rewrite_policy(input.app_profile)),
                 ProvisioningSetting::new("selected_runtime", web_runtime_model(input.web_server)),
@@ -1637,7 +1662,7 @@ fn provisioning_sections(input: ProvisioningInput<'_>) -> Vec<ProvisioningSectio
             name: "php-runtime",
             title: "PHP 런타임 설정",
             summary: format!(
-                "PHP {} FPM pool, php.ini, opcache를 앱과 서버 사양 기준으로 조정합니다.",
+                "PHP {} 런타임, php.ini, opcache를 앱과 서버 사양 기준으로 조정합니다.",
                 input.php_version
             ),
             settings: vec![
@@ -1833,18 +1858,26 @@ fn provisioning_sections(input: ProvisioningInput<'_>) -> Vec<ProvisioningSectio
 }
 
 fn runtime_label(web_server: &str) -> &'static str {
-    if web_server == "apache" {
-        "Apache"
-    } else {
-        "Nginx"
+    match web_server {
+        "apache" => "Apache",
+        "frankenphp" => "FrankenPHP",
+        _ => "Nginx",
     }
 }
 
 fn web_runtime_model(web_server: &str) -> &'static str {
-    if web_server == "apache" {
-        "Apache mpm_event/worker + proxy_fcgi + PHP-FPM"
+    match web_server {
+        "apache" => "Apache mpm_event/worker + proxy_fcgi + PHP-FPM",
+        "frankenphp" => "Nginx edge proxy + FrankenPHP localhost app server",
+        _ => "Nginx event worker + FastCGI PHP-FPM",
+    }
+}
+
+fn php_endpoint(web_server: &str, php_version: &str) -> String {
+    if web_server == "frankenphp" {
+        "FrankenPHP localhost app server 127.0.0.1:7080".to_string()
     } else {
-        "Nginx event worker + FastCGI PHP-FPM"
+        format!("/run/php/php{php_version}-fpm.sock")
     }
 }
 
@@ -1903,15 +1936,15 @@ fn php_version_tuple(version: &str) -> (u16, u16) {
 }
 
 fn stop_conditions(web_server: &str, web_root: &str, local_test: bool) -> Vec<PlanStopCondition> {
-    let other_web_server = if web_server == "nginx" {
-        "Apache is running."
-    } else {
-        "Nginx is running."
+    let other_web_server = match web_server {
+        "apache" => "Nginx is running.",
+        "frankenphp" => "Apache is running.",
+        _ => "Apache is running.",
     };
-    let selected_web_config = if web_server == "nginx" {
-        "Nginx site configs already exist."
-    } else {
-        "Apache site configs already exist."
+    let selected_web_config = match web_server {
+        "apache" => "Apache site configs already exist.",
+        "frankenphp" => "Nginx site configs already exist.",
+        _ => "Nginx site configs already exist.",
     };
 
     let port_stop_condition = if local_test {
@@ -1952,26 +1985,43 @@ fn stop_conditions(web_server: &str, web_root: &str, local_test: bool) -> Vec<Pl
 }
 
 fn web_server_package(web_server: &str) -> &'static str {
-    if web_server == "apache" {
-        "apache2"
+    match web_server {
+        "apache" => "apache2",
+        "frankenphp" => "nginx",
+        _ => "nginx",
+    }
+}
+
+fn web_server_package_description(web_server: &str) -> &'static str {
+    match web_server {
+        "frankenphp" => {
+            "SSL, 정적 파일, 도메인 요청을 FrankenPHP 앱서버로 넘기는 Nginx edge입니다."
+        }
+        _ => "도메인 요청을 PHP 앱으로 전달하는 웹서버입니다.",
+    }
+}
+
+fn php_runtime_packages(web_server: &str, php_version: &str) -> String {
+    if web_server == "frankenphp" {
+        format!("php{php_version}-cli")
     } else {
-        "nginx"
+        format!("php{php_version}-fpm php{php_version}-cli")
     }
 }
 
 fn web_server_service(web_server: &str) -> &'static str {
-    if web_server == "apache" {
-        "apache2"
-    } else {
-        "nginx"
+    match web_server {
+        "apache" => "apache2",
+        "frankenphp" => "nginx",
+        _ => "nginx",
     }
 }
 
-fn certbot_web_plugin_package(web_server: &str) -> &'static str {
-    if web_server == "apache" {
-        "python3-certbot-apache"
-    } else {
-        "python3-certbot-nginx"
+fn certbot_web_plugin_package(web_server: &str) -> Option<&'static str> {
+    match web_server {
+        "apache" => Some("python3-certbot-apache"),
+        "nginx" => Some("python3-certbot-nginx"),
+        _ => None,
     }
 }
 
@@ -1992,18 +2042,16 @@ fn database_service(database_engine: &str) -> &'static str {
 }
 
 fn web_server_available_file(web_server: &str) -> PlanFile {
-    if web_server == "apache" {
-        PlanFile::new("/etc/apache2/sites-available/g7.conf", "create")
-    } else {
-        PlanFile::new("/etc/nginx/sites-available/g7.conf", "create")
+    match web_server {
+        "apache" => PlanFile::new("/etc/apache2/sites-available/g7.conf", "create"),
+        _ => PlanFile::new("/etc/nginx/sites-available/g7.conf", "create"),
     }
 }
 
 fn web_server_enabled_file(web_server: &str) -> PlanFile {
-    if web_server == "apache" {
-        PlanFile::new("/etc/apache2/sites-enabled/g7.conf", "create symlink")
-    } else {
-        PlanFile::new("/etc/nginx/sites-enabled/g7.conf", "create symlink")
+    match web_server {
+        "apache" => PlanFile::new("/etc/apache2/sites-enabled/g7.conf", "create symlink"),
+        _ => PlanFile::new("/etc/nginx/sites-enabled/g7.conf", "create symlink"),
     }
 }
 
@@ -2607,6 +2655,58 @@ mod tests {
                 .any(|service| service.name == "apache2")
         );
         assert!(plan.services.iter().any(|service| service.name == "mysql"));
+        Ok(())
+    }
+
+    #[test]
+    fn plan_supports_frankenphp_edge_runtime() -> std::result::Result<(), Box<dyn std::error::Error>>
+    {
+        let options = PlanOptions {
+            web_server: "frankenphp".to_string(),
+            ..PlanOptions::default()
+        };
+        let plan = build_with_options("example.com".to_string(), options)?;
+
+        assert_eq!(plan.web_server, "frankenphp");
+        assert_eq!(plan.php_version, "8.5");
+        assert_eq!(plan.php_source, "ondrej");
+        assert!(plan.packages.iter().any(|package| package.name == "nginx"));
+        assert!(
+            plan.packages
+                .iter()
+                .any(|package| package.name.contains("php8.5-cli"))
+        );
+        assert!(
+            plan.packages
+                .iter()
+                .all(|package| !package.name.contains("php8.5-fpm"))
+        );
+        assert!(
+            plan.services
+                .iter()
+                .any(|service| service.name == "g7-frankenphp")
+        );
+        assert!(
+            plan.services
+                .iter()
+                .all(|service| service.name != "php8.5-fpm")
+        );
+        assert!(
+            plan.files
+                .iter()
+                .any(|file| file.path == "/opt/g7-frankenphp/frankenphp")
+        );
+        let web = plan
+            .provisioning
+            .iter()
+            .find(|section| section.name == "web-server")
+            .expect("web server section");
+        assert!(web.settings.iter().any(
+            |setting| setting.key == "selected_runtime" && setting.value.contains("FrankenPHP")
+        ));
+        assert!(web.settings.iter().any(
+            |setting| setting.key == "php_endpoint" && setting.value.contains("127.0.0.1:7080")
+        ));
         Ok(())
     }
 

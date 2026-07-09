@@ -1137,6 +1137,17 @@ fn provision_webserver(report: &serde_json::Value) -> Vec<InstallApiCheck> {
             run_command_check("apache-configtest", "apache2ctl", &["configtest"], None),
             run_command_check("apache-reload", "systemctl", &["reload", "apache2"], None),
         ]
+    } else if web_server == "frankenphp" {
+        vec![
+            run_command_check("nginx-configtest", "nginx", &["-t"], None),
+            run_command_check("nginx-reload", "systemctl", &["reload", "nginx"], None),
+            run_command_check(
+                "frankenphp-active",
+                "systemctl",
+                &["is-active", "--quiet", "g7-frankenphp"],
+                None,
+            ),
+        ]
     } else {
         vec![
             run_command_check("nginx-configtest", "nginx", &["-t"], None),
@@ -1146,6 +1157,22 @@ fn provision_webserver(report: &serde_json::Value) -> Vec<InstallApiCheck> {
 }
 
 fn provision_php(report: &serde_json::Value) -> Vec<InstallApiCheck> {
+    if report_string(report, "web_server").as_deref() == Some("frankenphp") {
+        return vec![
+            run_command_check(
+                "frankenphp-restart",
+                "systemctl",
+                &["restart", "g7-frankenphp"],
+                None,
+            ),
+            run_command_check(
+                "frankenphp-active",
+                "systemctl",
+                &["is-active", "--quiet", "g7-frankenphp"],
+                None,
+            ),
+        ];
+    }
     let version = report_string(report, "php_version").unwrap_or_else(|| "8.3".to_string());
     let service = format!("php{version}-fpm");
     vec![

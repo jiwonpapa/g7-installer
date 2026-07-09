@@ -26,9 +26,10 @@ const SAFE_ROLLBACK_PHASES: [&str; 4] = [
     InstallerPhase::VhostFailed.as_str(),
 ];
 const SAFE_BASELINE_STATUS: &str = "not-installed";
-const APP_MUTATION_STEPS: [&str; 8] = [
+const APP_MUTATION_STEPS: [&str; 9] = [
     "web-root-populated",
     "php-fpm-config-written",
+    "frankenphp-runtime-config-written",
     "database-created",
     "database-user-created",
     "redis-config-written",
@@ -361,6 +362,9 @@ fn service_owner_packages(service: &str, report: &serde_json::Value) -> Vec<Stri
 
     if service == "nginx" || (service == "apache2" && web_server == "apache") {
         return vec![service.to_string()];
+    }
+    if service == "g7-frankenphp" {
+        return Vec::new();
     }
     if service == format!("php{php_version}-fpm") {
         return vec![service.to_string()];
