@@ -8,11 +8,18 @@ use g7_state::owned_files::{OWNED_FILES_PATH, read_owned_files};
 use g7_system::SystemProbe;
 use g7_system::command::{CommandOutput, CommandRunner};
 use g7_system::database::DatabaseEngine;
+use g7_system::package::PackageStatus;
 
 const LEGACY_INSTALLER_PATHS: [&str; 2] = ["/usr/local/bin/g7", "/tmp/g7"];
 const REPORT_PATH: &str = "/var/log/g7-installer/report.json";
 const CONFIG_PATH: &str = "/etc/g7-installer/config.toml";
 const BASELINE_NOT_INSTALLED: &str = "not-installed";
+const PHP_SOURCE_ONDREJ: &str = "ondrej";
+const ONDREJ_PHP_SOURCE_PATHS: [&str; 3] = [
+    "/etc/apt/sources.list.d/ondrej-ubuntu-php-noble.sources",
+    "/etc/apt/sources.list.d/ondrej-ubuntu-php-noble.list",
+    "/etc/apt/sources.list.d/ondrej-php.list",
+];
 const APP_SYSTEMD_UNITS: [&str; 6] = [
     "g7-frankenphp.service",
     "g7-queue.service",
@@ -94,9 +101,10 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     require_root(probe)?;
     let metadata = reset_metadata(paths)?;
     let mut actions = Vec::new();
+    let preserve_certbot = should_preserve_certbot(paths, &metadata);
 
     if let Some(domain) = metadata.domain.as_deref().filter(|domain| {
-        metadata.certbot_issued
+        preserve_certbot
             || paths
                 .resolve(&format!("/etc/letsencrypt/live/{domain}"))
                 .exists()
@@ -178,7 +186,10 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         }
     }
 
-    let (removed, missing) = remove_reset_files(paths, dry_run)?;
+    let packages = metadata.packages_to_purge.clone();
+    actions.extend(reset_packages(probe, &packages, dry_run, preserve_certbot)?);
+
+    let (removed, missing) = remove_reset_files(paths, &metadata, dry_run)?;
 
     if !dry_run
         && removed
@@ -200,27 +211,6 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         ));
     }
 
-    let packages = metadata.packages_to_purge;
-    if dry_run {
-        actions.extend(packages.iter().map(|package| {
-            ResetAction::new(
-                format!("package:{package}"),
-                "would-purge",
-                "설치기가 설치한 패키지를 제거할 예정입니다.",
-            )
-        }));
-    } else if !packages.is_empty() {
-        let output = probe.apt_purge(&packages).map_err(command_error)?;
-        require_success("package-purge", "apt-get purge", output)?;
-        actions.extend(packages.iter().map(|package| {
-            ResetAction::new(
-                format!("package:{package}"),
-                "purged",
-                "설치기가 설치한 패키지를 제거했습니다.",
-            )
-        }));
-    }
-
     Ok(ResetReport {
         dry_run,
         actions,
@@ -240,7 +230,8 @@ pub fn run_metadata_only_with_probe_and_paths<R: CommandRunner>(
     }
 
     require_root(probe)?;
-    let (removed, missing) = remove_reset_files(paths, dry_run)?;
+    let metadata = reset_metadata(paths)?;
+    let (removed, missing) = remove_reset_files(paths, &metadata, dry_run)?;
 
     Ok(ResetReport {
         dry_run,
@@ -250,8 +241,12 @@ pub fn run_metadata_only_with_probe_and_paths<R: CommandRunner>(
     })
 }
 
-fn remove_reset_files(paths: &ResetPaths, dry_run: bool) -> Result<(Vec<String>, Vec<String>)> {
-    let mut files = reset_file_list(paths)?;
+fn remove_reset_files(
+    paths: &ResetPaths,
+    metadata: &ResetMetadata,
+    dry_run: bool,
+) -> Result<(Vec<String>, Vec<String>)> {
+    let mut files = reset_file_list(paths, metadata)?;
     files.sort_by_key(|path| std::cmp::Reverse(path_depth(path)));
 
     let mut removed = Vec::new();
@@ -295,7 +290,7 @@ fn remove_reset_files(paths: &ResetPaths, dry_run: bool) -> Result<(Vec<String>,
     Ok((removed, missing))
 }
 
-fn reset_file_list(paths: &ResetPaths) -> Result<Vec<String>> {
+fn reset_file_list(paths: &ResetPaths, metadata: &ResetMetadata) -> Result<Vec<String>> {
     let metadata_path = paths.resolve(OWNED_FILES_PATH);
     let mut files = match read_owned_files(&metadata_path) {
         Ok(owned) => owned.files,
@@ -314,6 +309,14 @@ fn reset_file_list(paths: &ResetPaths) -> Result<Vec<String>> {
         }
     }
 
+    if metadata.php_source.as_deref() == Some(PHP_SOURCE_ONDREJ) {
+        for path in ONDREJ_PHP_SOURCE_PATHS {
+            if !files.iter().any(|owned| owned == path) {
+                files.push(path.to_string());
+            }
+        }
+    }
+
     Ok(files)
 }
 
@@ -324,6 +327,7 @@ struct ResetMetadata {
     database_engine: Option<String>,
     database_name: Option<String>,
     database_user: Option<String>,
+    php_source: Option<String>,
     packages_to_purge: Vec<String>,
     services: Vec<String>,
     certbot_issued: bool,
@@ -399,6 +403,10 @@ fn fill_metadata_from_report(metadata: &mut ResetMetadata, report: &serde_json::
         .database_user
         .take()
         .or_else(|| report_string(report, "database_user"));
+    metadata.php_source = metadata
+        .php_source
+        .take()
+        .or_else(|| report_string(report, "php_source"));
     metadata.packages_to_purge.extend(
         report_checks(report, "preinstall_package_checks")
             .into_iter()
@@ -438,6 +446,10 @@ fn fill_metadata_from_config(metadata: &mut ResetMetadata, config: &str) {
         .database_user
         .take()
         .or_else(|| config_string(config, "database_user"));
+    metadata.php_source = metadata
+        .php_source
+        .take()
+        .or_else(|| config_string(config, "php_source"));
 }
 
 fn reset_services(paths: &ResetPaths, metadata: &ResetMetadata) -> Vec<String> {
@@ -453,6 +465,15 @@ fn reset_services(paths: &ResetPaths, metadata: &ResetMetadata) -> Vec<String> {
     }
 
     unique_names(services.iter().map(String::as_str))
+}
+
+fn should_preserve_certbot(paths: &ResetPaths, metadata: &ResetMetadata) -> bool {
+    metadata.certbot_issued
+        || metadata.domain.as_deref().is_some_and(|domain| {
+            paths
+                .resolve(&format!("/etc/letsencrypt/live/{domain}"))
+                .exists()
+        })
 }
 
 fn disable_services<R: CommandRunner>(
@@ -490,6 +511,74 @@ fn disable_services<R: CommandRunner>(
     }
 
     Ok(actions)
+}
+
+fn reset_packages<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    packages: &[String],
+    dry_run: bool,
+    preserve_certbot: bool,
+) -> Result<Vec<ResetAction>> {
+    let mut actions = Vec::new();
+    let mut purge_packages = Vec::new();
+
+    for package in packages {
+        if preserve_certbot && is_certbot_package(package) {
+            actions.push(ResetAction::new(
+                format!("package:{package}"),
+                if dry_run {
+                    "would-preserve"
+                } else {
+                    "preserved"
+                },
+                "인증서 보존을 위해 certbot 계열 패키지는 apt purge 대상에서 제외했습니다.",
+            ));
+            continue;
+        }
+
+        if dry_run {
+            actions.push(ResetAction::new(
+                format!("package:{package}"),
+                "would-purge",
+                "설치기가 설치한 패키지를 제거할 예정입니다.",
+            ));
+            continue;
+        }
+
+        match probe.package_status(package).map_err(command_error)? {
+            PackageStatus::Installed => purge_packages.push(package.clone()),
+            PackageStatus::NotInstalled => actions.push(ResetAction::new(
+                format!("package:{package}"),
+                "skipped",
+                "현재 dpkg 설치 상태가 아니어서 apt purge 대상에서 제외했습니다.",
+            )),
+            PackageStatus::Unknown => actions.push(ResetAction::new(
+                format!("package:{package}"),
+                "skipped",
+                "dpkg 상태가 명확하지 않아 전체 리셋 실패를 막기 위해 apt purge 대상에서 제외했습니다.",
+            )),
+        }
+    }
+
+    if purge_packages.is_empty() {
+        return Ok(actions);
+    }
+
+    let output = probe.apt_purge(&purge_packages).map_err(command_error)?;
+    require_success("package-purge", "apt-get purge", output)?;
+    actions.extend(purge_packages.iter().map(|package| {
+        ResetAction::new(
+            format!("package:{package}"),
+            "purged",
+            "설치기가 설치한 패키지를 제거했습니다.",
+        )
+    }));
+
+    Ok(actions)
+}
+
+fn is_certbot_package(package: &str) -> bool {
+    package == "certbot" || package == "letsencrypt" || package.starts_with("python3-certbot")
 }
 
 fn database_reset_message(database_name: Option<&str>, database_user: Option<&str>) -> String {
@@ -581,6 +670,9 @@ fn validate_reset_path(path: &str) -> Result<()> {
         "/etc/nginx/sites-enabled/g7.conf",
         "/etc/apache2/sites-available/g7.conf",
         "/etc/apache2/sites-enabled/g7.conf",
+        "/etc/apt/sources.list.d/ondrej-ubuntu-php-noble.sources",
+        "/etc/apt/sources.list.d/ondrej-ubuntu-php-noble.list",
+        "/etc/apt/sources.list.d/ondrej-php.list",
         "/etc/systemd/system/g7-frankenphp.service",
         "/opt/g7-frankenphp",
         "/etc/systemd/system/g7-queue.service",
@@ -785,6 +877,7 @@ mod tests {
         fs::create_dir_all(fs_root.join("var/lib/g7-installer"))?;
         fs::create_dir_all(fs_root.join("var/log/g7-installer"))?;
         fs::create_dir_all(fs_root.join("etc/systemd/system"))?;
+        fs::create_dir_all(fs_root.join("etc/apt/sources.list.d"))?;
         fs::create_dir_all(fs_root.join("etc/nginx/conf.d"))?;
         fs::create_dir_all(fs_root.join("etc/php/8.3/fpm/pool.d"))?;
         fs::create_dir_all(fs_root.join("etc/mysql/conf.d"))?;
@@ -797,9 +890,12 @@ mod tests {
                 "database": "mysql",
                 "database_name": "g7_example",
                 "database_user": "g7_user",
+                "php_source": "ondrej",
                 "preinstall_package_checks": [
                     {"name": "nginx", "status": "not-installed", "message": "fresh"},
                     {"name": "php8.3-fpm", "status": "not-installed", "message": "fresh"},
+                    {"name": "certbot", "status": "not-installed", "message": "fresh"},
+                    {"name": "python3-certbot-nginx", "status": "not-installed", "message": "fresh"},
                     {"name": "curl", "status": "installed", "message": "preexisting"}
                 ],
                 "service_checks": [
@@ -813,6 +909,10 @@ mod tests {
         )?;
         fs::write(fs_root.join("etc/systemd/system/g7-queue.service"), "unit")?;
         fs::write(
+            fs_root.join("etc/apt/sources.list.d/ondrej-ubuntu-php-noble.sources"),
+            "source",
+        )?;
+        fs::write(
             fs_root.join("etc/nginx/conf.d/g7-runtime-tuning.conf"),
             "nginx",
         )?;
@@ -823,6 +923,7 @@ mod tests {
             version: 1,
             files: vec![
                 "/etc/systemd/system/g7-queue.service".to_string(),
+                "/etc/apt/sources.list.d/ondrej-ubuntu-php-noble.sources".to_string(),
                 "/etc/nginx/conf.d/g7-runtime-tuning.conf".to_string(),
                 "/etc/php/8.3/fpm/pool.d/g7-g7.conf".to_string(),
                 "/etc/mysql/conf.d/g7-installer.cnf".to_string(),
@@ -844,6 +945,8 @@ mod tests {
         runner.push_output(CommandOutput::success("active\n"));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success("0\n"));
+        runner.push_output(CommandOutput::success("install ok installed"));
+        runner.push_output(CommandOutput::success("install ok installed"));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
@@ -874,8 +977,22 @@ mod tests {
                 .any(|action| { action.name == "package:nginx" && action.status == "purged" })
         );
         assert!(
+            report
+                .actions
+                .iter()
+                .any(|action| { action.name == "package:certbot" && action.status == "preserved" })
+        );
+        assert!(report.actions.iter().any(|action| {
+            action.name == "package:python3-certbot-nginx" && action.status == "preserved"
+        }));
+        assert!(
             !fs_root
                 .join("etc/nginx/conf.d/g7-runtime-tuning.conf")
+                .exists()
+        );
+        assert!(
+            !fs_root
+                .join("etc/apt/sources.list.d/ondrej-ubuntu-php-noble.sources")
                 .exists()
         );
         assert!(!fs_root.join("home/g7/public_html").exists());
@@ -902,8 +1019,106 @@ mod tests {
                 && spec.args.contains(&OsString::from("purge"))
                 && spec.args.contains(&OsString::from("nginx"))
                 && spec.args.contains(&OsString::from("php8.3-fpm"))
+                && !spec.args.contains(&OsString::from("certbot"))
+                && !spec.args.contains(&OsString::from("python3-certbot-nginx"))
                 && !spec.args.contains(&OsString::from("curl"))
         }));
+
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn reset_skips_missing_package_names_before_purge()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let fs_root = create_temp_fs_root()?;
+        fs::create_dir_all(fs_root.join("var/log/g7-installer"))?;
+        fs::write(
+            fs_root.join("var/log/g7-installer/report.json"),
+            r#"{
+                "preinstall_package_checks": [
+                    {"name": "nginx", "status": "not-installed", "message": "fresh"},
+                    {"name": "g7-frankenphp", "status": "not-installed", "message": "not an apt package"}
+                ]
+            }"#,
+        )?;
+
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success("0\n"));
+        runner.push_output(CommandOutput::failure(1, "dpkg-query: no packages found"));
+        runner.push_output(CommandOutput::success("install ok installed"));
+        runner.push_output(CommandOutput::success(""));
+        let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
+        let report =
+            run_with_probe_and_paths(true, false, &probe, &ResetPaths::with_root(&fs_root))?;
+
+        assert!(
+            report
+                .actions
+                .iter()
+                .any(|action| { action.name == "package:nginx" && action.status == "purged" })
+        );
+        assert!(report.actions.iter().any(|action| {
+            action.name == "package:g7-frankenphp" && action.status == "skipped"
+        }));
+        let recorded = probe.runner().recorded();
+        let purge = recorded
+            .iter()
+            .find(|spec| {
+                spec.program == "env"
+                    && spec.args.contains(&OsString::from("apt-get"))
+                    && spec.args.contains(&OsString::from("purge"))
+            })
+            .expect("apt purge command");
+        assert!(purge.args.contains(&OsString::from("nginx")));
+        assert!(!purge.args.contains(&OsString::from("g7-frankenphp")));
+
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn reset_keeps_metadata_when_package_purge_fails()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let fs_root = create_temp_fs_root()?;
+        fs::create_dir_all(fs_root.join("var/lib/g7-installer"))?;
+        fs::create_dir_all(fs_root.join("var/log/g7-installer"))?;
+        fs::create_dir_all(fs_root.join("var/www/g7"))?;
+        let report_path = fs_root.join("var/log/g7-installer/report.json");
+        fs::write(
+            &report_path,
+            r#"{
+                "preinstall_package_checks": [
+                    {"name": "nginx", "status": "not-installed", "message": "fresh"}
+                ]
+            }"#,
+        )?;
+        let owned = OwnedFiles {
+            version: 1,
+            files: vec![
+                "/var/www/g7".to_string(),
+                "/var/log/g7-installer/report.json".to_string(),
+                OWNED_FILES_PATH.to_string(),
+            ],
+        };
+        write_owned_files(&fs_root.join(strip_root(OWNED_FILES_PATH)), &owned)?;
+
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success("0\n"));
+        runner.push_output(CommandOutput::success("install ok installed"));
+        runner.push_output(CommandOutput::failure(100, "apt purge failed"));
+        let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
+        let result =
+            run_with_probe_and_paths(true, false, &probe, &ResetPaths::with_root(&fs_root));
+
+        assert!(result.is_err());
+        assert!(report_path.exists());
+        assert!(
+            fs_root
+                .join("var/lib/g7-installer/owned-files.json")
+                .exists()
+        );
+        assert!(fs_root.join("var/www/g7").exists());
 
         fs::remove_dir_all(fs_root)?;
         Ok(())
