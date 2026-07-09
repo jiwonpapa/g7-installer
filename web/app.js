@@ -349,6 +349,43 @@ function setOperationLocked(locked) {
   });
 }
 
+function navigationGuardActive() {
+  return state.installRunning || state.operationLocked;
+}
+
+function guardedOperationName() {
+  if (state.currentOperation === "rollback") {
+    return "패키지 되돌리기";
+  }
+  if (state.currentOperation === "reset") {
+    return "초기화";
+  }
+  if (state.currentOperation === "install") {
+    return "서버 설치";
+  }
+  return "서버 작업";
+}
+
+function warnNavigationBlocked() {
+  const message = `${guardedOperationName()} 진행 중에는 새로고침, 뒤로가기, 단계 이동을 하지 마세요. 서버 작업이 끝난 뒤 결과 화면으로 이동합니다.`;
+  setAlert(nodes.installStatus, "warning", "진행 중 이동 차단", message);
+  log(message);
+}
+
+function setInstallRunning(running) {
+  state.installRunning = running;
+
+  if (running) {
+    state.currentOperation = "install";
+    setOperationLocked(true);
+  } else if (state.currentOperation === "install") {
+    state.currentOperation = null;
+    setOperationLocked(false);
+  }
+
+  saveWizardState();
+}
+
 function showOperationOverlay(title, message, options = {}) {
   if (!nodes.operationOverlay) {
     return;
@@ -790,7 +827,9 @@ function saveWizardState() {
         doctorPassed: state.doctorPassed,
         planReady: state.planReady,
         reportReady: state.reportReady,
+        installRunning: state.installRunning,
         installCompleted: state.installCompleted,
+        currentOperation: state.currentOperation,
       },
     }));
   } catch (_error) {
@@ -893,12 +932,14 @@ function applyTheme(theme) {
 }
 
 function showStep(nextStep, options = {}) {
-  if (state.operationLocked && !options.force) {
-    log("진행 중인 서버 작업이 끝난 뒤 이동할 수 있습니다.");
+  let step = normalizedStep(nextStep);
+
+  if (navigationGuardActive() && !options.force && step !== state.activeStep) {
+    writeStepHistory(state.activeStep, false);
+    warnNavigationBlocked();
     return;
   }
 
-  let step = normalizedStep(nextStep);
   const shouldPushHistory = options.pushHistory !== false;
   const recoveryMode = Boolean(
     state.reportReady
@@ -3533,7 +3574,12 @@ function restoreWizardState() {
     setDoctorPassed(Boolean(saved.flags.doctorPassed || state.doctorPassed));
     setPlanReady(Boolean(saved.flags.planReady || state.planReady));
     setReportReady(Boolean(saved.flags.reportReady || state.reportReady));
+    state.installRunning = Boolean(saved.flags.installRunning);
     state.installCompleted = Boolean(saved.flags.installCompleted || state.installCompleted);
+    state.currentOperation = saved.flags.currentOperation || state.currentOperation;
+    if (state.installRunning) {
+      setOperationLocked(true);
+    }
     refreshInstallButtonState();
   }
 }
@@ -3545,6 +3591,30 @@ async function syncServerState() {
   }
 
   await refreshRecoveryStatus();
+
+  try {
+    const currentStatus = await apiFetch("/api/status");
+    if (currentStatus?.install_running) {
+      setInstallRunning(true);
+      state.installCompleted = false;
+      setReportReady(false);
+      refreshInstallButtonState();
+      setAlert(
+        nodes.installStatus,
+        "warning",
+        "서버 설치 진행 중",
+        "브라우저가 다시 열렸지만 서버 작업은 계속 진행 중입니다. 완료될 때까지 이 화면을 유지하세요.",
+      );
+      showStep("install", { force: true });
+      return;
+    }
+
+    if (state.installRunning) {
+      setInstallRunning(false);
+    }
+  } catch (error) {
+    log(formatError(error));
+  }
 
   try {
     const reportPayload = await apiFetch("/api/report");
@@ -3742,7 +3812,22 @@ function bindHelpTooltips() {
 }
 
 function bindEvents() {
+  window.addEventListener("beforeunload", (event) => {
+    if (!navigationGuardActive()) {
+      return;
+    }
+
+    event.preventDefault();
+    event.returnValue = "";
+  });
+
   window.addEventListener("popstate", (event) => {
+    if (navigationGuardActive()) {
+      writeStepHistory(state.activeStep, false);
+      warnNavigationBlocked();
+      return;
+    }
+
     showStep(event.state?.step || stepFromLocation(), { pushHistory: false });
   });
 
@@ -3855,8 +3940,7 @@ function bindEvents() {
       return;
     }
 
-    state.currentOperation = "install";
-    state.installRunning = true;
+    setInstallRunning(true);
     state.installCompleted = false;
     setReportReady(false);
     refreshInstallButtonState();
@@ -3877,7 +3961,7 @@ function bindEvents() {
       renderInstallReport(report);
       await refreshRecoveryStatus();
       setAlert(nodes.installStatus, "success", "서버 세팅 완료", "결과 리포트에서 웹서버, PHP, DB, SSL, 앱 경로와 재시작 명령을 확인하세요.");
-      showStep("report");
+      showStep("report", { force: true });
       log(`서버 세팅 완료: ${report.phase}`);
     } catch (error) {
       stopPackageTicker();
@@ -3892,11 +3976,10 @@ function bindEvents() {
       setAlert(nodes.installStatus, "error", "기본 서버 구성 실패", formatError(error));
       setReportReady(true);
       await refreshRecoveryStatus();
-      showStep("report");
+      showStep("report", { force: true });
       log(formatError(error));
     } finally {
-      state.currentOperation = null;
-      state.installRunning = false;
+      setInstallRunning(false);
       refreshInstallButtonState(state.installCompleted ? null : "다시 시도");
       if (installButton && !state.installCompleted) {
         installButton.disabled = false;

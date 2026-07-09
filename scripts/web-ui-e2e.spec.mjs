@@ -155,6 +155,14 @@ async function startServer() {
       });
       return;
     }
+    if (pathname === "/api/status") {
+      json(response, {
+        installed: false,
+        install_running: false,
+        components: [],
+      });
+      return;
+    }
     if (pathname === "/api/report") {
       json(response, {
         exists: true,

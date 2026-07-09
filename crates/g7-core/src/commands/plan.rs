@@ -1087,13 +1087,6 @@ fn files(
         web_server_enabled_file(web_server),
     ];
 
-    if matches!(web_server, "nginx" | "frankenphp") {
-        files.push(PlanFile::new(
-            "/etc/nginx/conf.d/g7-runtime-tuning.conf",
-            "create Nginx runtime tuning and g7_timing log format before vhost validation",
-        ));
-    }
-
     if web_server == "frankenphp" {
         files.push(PlanFile::new(
             "/opt/g7-frankenphp/frankenphp",
@@ -2484,11 +2477,6 @@ mod tests {
                 .iter()
                 .any(|file| file.path == "/home/g7/public_html")
         );
-        assert!(
-            plan.files
-                .iter()
-                .any(|file| file.path == "/etc/nginx/conf.d/g7-runtime-tuning.conf")
-        );
         assert!(plan.services.iter().any(|service| service.name == "nginx"));
         assert!(plan.services.iter().any(|service| service.name == "mysql"));
         assert!(plan.ports.iter().any(|port| port.port == 443));
@@ -2708,11 +2696,6 @@ mod tests {
             plan.files
                 .iter()
                 .any(|file| file.path == "/opt/g7-frankenphp/frankenphp")
-        );
-        assert!(
-            plan.files
-                .iter()
-                .any(|file| file.path == "/etc/nginx/conf.d/g7-runtime-tuning.conf")
         );
         let web = plan
             .provisioning

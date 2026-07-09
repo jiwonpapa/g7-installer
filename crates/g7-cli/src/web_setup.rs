@@ -383,6 +383,7 @@ struct RollbackApiAction {
 #[derive(Debug, Serialize)]
 struct StatusApiReport {
     installed: bool,
+    install_running: bool,
     components: Vec<ComponentApiStatus>,
 }
 
@@ -1029,6 +1030,7 @@ async fn api_status(
 
     Ok(Json(StatusApiReport {
         installed: current.installed,
+        install_running: state.install_running.load(Ordering::SeqCst),
         components: current
             .components
             .into_iter()
