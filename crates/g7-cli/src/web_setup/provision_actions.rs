@@ -534,3 +534,126 @@ pub(super) fn report_string(report: &serde_json::Value, key: &str) -> Option<Str
         .and_then(|value| value.as_str())
         .map(str::to_string)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_path(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "g7inst-provision-{name}-{}-{nonce}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn unsupported_provision_action_is_rejected() {
+        let error = run_provision_action("unknown", &serde_json::json!({}))
+            .expect_err("unknown provision action should fail");
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert!(
+            error
+                .hint
+                .as_deref()
+                .unwrap_or_default()
+                .contains("webserver")
+        );
+    }
+
+    #[test]
+    fn ssl_action_does_not_issue_new_certificate_when_lineage_is_missing() {
+        let report = serde_json::json!({ "domain": "missing-cert.example" });
+        let result = run_provision_action("ssl", &report).expect("ssl action should report checks");
+
+        assert_eq!(result.status, "fail");
+        assert!(
+            result
+                .checks
+                .iter()
+                .any(|check| check.name == "certbot-rate-limit-guard" && check.status == "manual")
+        );
+        assert!(
+            result
+                .checks
+                .iter()
+                .any(|check| check.name == "certbot-fullchain" && check.status == "fail")
+        );
+    }
+
+    #[test]
+    fn file_and_dir_checks_report_actual_paths() {
+        let root = temp_path("paths");
+        let file_path = root.join("file.txt");
+        let dir_path = root.join("dir");
+        fs::create_dir_all(&dir_path).expect("temp dir should be created");
+        fs::write(&file_path, "ok").expect("temp file should be written");
+
+        let file = file_check("sample-file", file_path.to_str().expect("utf8 temp path"));
+        let dir = dir_check("sample-dir", dir_path.to_str().expect("utf8 temp path"));
+        let missing = file_check(
+            "missing-file",
+            root.join("missing.txt").to_str().expect("utf8 temp path"),
+        );
+
+        assert_eq!(file.status, "pass");
+        assert_eq!(dir.status, "pass");
+        assert_eq!(missing.status, "fail");
+
+        fs::remove_dir_all(root).expect("temp dir should be removed");
+    }
+
+    #[test]
+    fn ckeditor_upload_limit_check_classifies_default_and_larger_limits() {
+        let root = temp_path("ckeditor");
+        fs::create_dir_all(&root).expect("temp dir should be created");
+        let setting = root.join("setting.json");
+
+        fs::write(&setting, r#"{"imageMaxSizeMb":2}"#).expect("setting should be written");
+        let default_limit = g7_ckeditor_upload_limit_check(setting.to_str().expect("utf8 path"));
+        assert_eq!(default_limit.status, "manual");
+        assert!(default_limit.message.contains("2MB"));
+
+        fs::write(&setting, r#"{"imageMaxSizeMb":"16"}"#).expect("setting should be rewritten");
+        let larger_limit = g7_ckeditor_upload_limit_check(setting.to_str().expect("utf8 path"));
+        assert_eq!(larger_limit.status, "pass");
+        assert!(larger_limit.message.contains("16MB"));
+
+        let missing = g7_ckeditor_upload_limit_check(
+            root.join("missing.json").to_str().expect("utf8 temp path"),
+        );
+        assert_eq!(missing.status, "manual");
+
+        fs::remove_dir_all(root).expect("temp dir should be removed");
+    }
+
+    #[test]
+    fn report_string_only_returns_string_values() {
+        let report = serde_json::json!({
+            "domain": "example.com",
+            "port": 443
+        });
+
+        assert_eq!(
+            report_string(&report, "domain"),
+            Some("example.com".to_string())
+        );
+        assert_eq!(report_string(&report, "port"), None);
+        assert_eq!(report_string(&report, "missing"), None);
+    }
+
+    #[test]
+    fn command_output_is_trimmed_to_short_log_line() {
+        let long = "x".repeat(500);
+        let trimmed = trim_command_output(long.as_bytes());
+
+        assert_eq!(trimmed.chars().count(), 403);
+        assert!(trimmed.ends_with("..."));
+    }
+}

@@ -8,11 +8,12 @@ Date: 2026-07-08
 - Full regression gate exists: `scripts/quality-gate.sh`.
 - Quick gate covers shell syntax, web static smoke, setup auth smoke, JS syntax, `cargo fmt --check`, `cargo test -p g7-core --lib`, and `cargo test -p g7-cli --bin g7inst`.
 - Full gate runs the quick gate first, then full `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo doc --no-deps`, `cargo llvm-cov --fail-under-lines 75`, and web CSS build. Set `G7_WEB_E2E=1` to also run the browser wizard E2E locally.
-- Current measured line coverage is 79.30%.
-- Web controller line coverage is 81.72%.
+- Current measured line coverage is 77.94% in the latest local `scripts/quality-gate.sh` run.
+- `web_setup/provision_actions.rs` line coverage is 39.48% after adding command-free provision action tests; privileged command-path coverage remains delegated to the disposable VPS harness.
 - Release assets are Linux musl binaries for x86_64 and aarch64 plus `checksums.txt`.
-- `scripts/ops-harness.sh` verifies a disposable Ubuntu 24.04 server through fresh doctor, install, report validation, setup-guide capture, optional app smoke, reset dry-run, and full installer reset. The reset path removes installer-created services, account, DB/user, packages, owned files, and metadata for a fresh reinstall attempt while preserving Let's Encrypt certificates to avoid duplicate issuance limits.
-- Ops harness defaults to `G7_OPS_CERTBOT_SCOPE=skip`, which runs `--local-test` and never issues a production Let's Encrypt certificate. Use `G7_OPS_CERTBOT_SCOPE=staging` only with a real DNS domain. Production Let's Encrypt requires both `G7_OPS_CERTBOT_SCOPE=production` and `G7_OPS_ALLOW_PRODUCTION_LE=1`.
+- `scripts/ops-harness.sh` verifies a disposable Ubuntu 24.04 server through independently selectable steps: fresh doctor, plan, install, report contract, setup-guide capture, optional app smoke, reset dry-run, full installer reset, and doctor after reset. The reset path removes installer-created services, account, DB/user, packages, owned files, and metadata for a fresh reinstall attempt while preserving Let's Encrypt certificates to avoid duplicate issuance limits.
+- Ops harness requires `G7_OPS_DOMAIN=<real-domain>` and defaults to `G7_OPS_CERTBOT_SCOPE=staging`, so current server validation follows the public-domain path. `G7_OPS_CERTBOT_SCOPE=skip` runs `--local-test` and is blocked unless `G7_OPS_ALLOW_LOCAL_TEST=1` is explicitly set for legacy local VM checks. Production Let's Encrypt requires both `G7_OPS_CERTBOT_SCOPE=production` and `G7_OPS_ALLOW_PRODUCTION_LE=1`.
+- Ops harness defaults to `G7_OPS_STEPS=fresh-doctor,plan,install,report-contract,setup-guide,app-smoke,post-install-doctor,reset-dry-run,reset,fresh-doctor-after-reset`. Use a comma-separated subset to rerun only one surface, for example `G7_OPS_STEPS=fresh-doctor,plan`, `G7_OPS_STEPS=report-contract,app-smoke`, or `G7_OPS_STEPS=reset-dry-run,reset,fresh-doctor-after-reset`.
 - GitHub Actions workflow is present at `.github/workflows/quality-gate.yml`.
 - Browser-driven wizard E2E exists at `scripts/web-ui-e2e.spec.mjs` and covers route rendering, report downloads, plan auto-review, and provision cards against mocked controller APIs.
 
@@ -23,7 +24,7 @@ Date: 2026-07-08
 - Package rollback verification used `ssh` inside a file-fed loop. Without `ssh -n`, the first SSH call could consume the remaining package list from stdin.
 - Browser-driven web UI E2E uses mocked controller APIs locally. Full root-capable install E2E remains covered by `scripts/ops-harness.sh` on a disposable Ubuntu VPS.
 - CLI print-path coverage is still weaker than core command coverage.
-- `install.rs`, `web_setup.rs`, and `plan.rs` are now physically split with `include!` as a low-risk first cut. The next architectural pass should replace transitional includes with real Rust submodules and narrower public boundaries.
+- App provision action coverage is still newer than the core install coverage and should stay focused on safe, command-free checks plus mocked command paths.
 
 ## Improvements Applied
 
@@ -44,6 +45,11 @@ Date: 2026-07-08
 - Full quality gate now runs the quick gate first.
 - Ops harness separates Let's Encrypt scope, reset dry-run, and optional app smoke. Production LE issuance is opt-in only.
 - `install.rs`, `web_setup.rs`, and `plan.rs` were physically split into focused files as a behavior-preserving first cut.
+- Transitional `include!` splitting was replaced with real Rust submodules and narrower public boundaries.
+- App install logic is now split under `commands/install/apps/` by app/runtime responsibility.
+- Web controller and install tests were moved into `web_setup/tests.rs` and `install/tests.rs` so production module files stay smaller.
+- Ops harness now supports `G7_OPS_STEPS` so staging LE, reset dry-run, fresh doctor, install report contract, and app smoke can run as separate disposable-VPS checks.
+- Ops harness no longer falls back to `.local` or `--local-test` by default. Real-domain staging is the default proof path; legacy local VM smoke needs `G7_OPS_ALLOW_LOCAL_TEST=1` or `G7_SMOKE_ALLOW_LOCAL_TEST=1`.
 - Ops harness checks:
   - disposable-server confirmation guard
   - Ubuntu 24.04 host check
@@ -57,6 +63,15 @@ Date: 2026-07-08
   - post-install `doctor` must report `install_allowed: false`
   - optional `reset --yes` cleans installer-created resources and owned files
   - optional second install cycle can run after reset; external VPS backup/snapshot restore is separate from installer rollback and may add cost/time
+
+Example disposable VPS runs:
+
+```bash
+G7_OPS_CONFIRM_DISPOSABLE=1 G7_OPS_DOMAIN=example.com G7_OPS_STEPS=fresh-doctor,plan scripts/ops-harness.sh
+G7_OPS_CONFIRM_DISPOSABLE=1 G7_OPS_DOMAIN=example.com G7_OPS_CERTBOT_SCOPE=staging G7_OPS_STEPS=install,report-contract scripts/ops-harness.sh
+G7_OPS_CONFIRM_DISPOSABLE=1 G7_OPS_DOMAIN=example.com G7_OPS_APP_SMOKE=1 G7_OPS_STEPS=report-contract,app-smoke scripts/ops-harness.sh
+G7_OPS_CONFIRM_DISPOSABLE=1 G7_OPS_DOMAIN=example.com G7_OPS_STEPS=reset-dry-run,reset,fresh-doctor-after-reset scripts/ops-harness.sh
+```
 
 ## Required Manual Follow-Up
 

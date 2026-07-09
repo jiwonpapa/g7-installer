@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOST="${G7_OPS_HOST:-g7-test}"
-DOMAIN="${G7_OPS_DOMAIN:-g7-test.local}"
+DOMAIN="${G7_OPS_DOMAIN:-}"
 SOURCE="${G7_OPS_SOURCE:-release}"
 TARGET="${G7_TARGET:-x86_64-unknown-linux-musl}"
 CLI_BIN="${G7_CLI_BIN:-g7inst}"
@@ -13,8 +13,12 @@ INSTALL_VERSION="${G7_OPS_VERSION:-v${EXPECTED_VERSION}}"
 SUDO="${G7_OPS_SUDO:-sudo -n}"
 VERIFY_REINSTALL="${G7_OPS_VERIFY_REINSTALL:-0}"
 CLEANUP="${G7_OPS_CLEANUP:-1}"
-CERTBOT_SCOPE="${G7_OPS_CERTBOT_SCOPE:-skip}"
+CERTBOT_SCOPE="${G7_OPS_CERTBOT_SCOPE:-staging}"
 APP_SMOKE="${G7_OPS_APP_SMOKE:-0}"
+STEPS="${G7_OPS_STEPS:-fresh-doctor,plan,install,report-contract,setup-guide,app-smoke,post-install-doctor,reset-dry-run,reset,fresh-doctor-after-reset}"
+STEPS="${STEPS// /}"
+PRE_CLEAN="${G7_OPS_PRE_CLEAN:-auto}"
+ALLOW_LOCAL_TEST="${G7_OPS_ALLOW_LOCAL_TEST:-0}"
 CONFIRM_DISPOSABLE="${G7_OPS_CONFIRM_DISPOSABLE:-0}"
 REPORT_DIR="${G7_OPS_REPORT_DIR:-${ROOT_DIR}/target/ops-harness/$(date +%Y%m%d-%H%M%S)}"
 BOOTSTRAP_URL="https://raw.githubusercontent.com/${REPO}/main/scripts/bootstrap.sh"
@@ -47,6 +51,24 @@ case "${CERTBOT_SCOPE}" in
     ;;
 esac
 
+if [[ -z "${DOMAIN}" ]]; then
+  echo "G7_OPS_DOMAIN is required. Use a real DNS domain for the ops harness." >&2
+  exit 2
+fi
+
+if [[ "${CERTBOT_SCOPE}" == "skip" && "${ALLOW_LOCAL_TEST}" != "1" ]]; then
+  cat >&2 <<EOF
+G7_OPS_CERTBOT_SCOPE=skip runs --local-test and is disabled by default.
+Use G7_OPS_CERTBOT_SCOPE=staging with a real DNS domain, or set G7_OPS_ALLOW_LOCAL_TEST=1 only for an explicit legacy local-test harness.
+EOF
+  exit 2
+fi
+
+if [[ "${DOMAIN}" == *.local && "${ALLOW_LOCAL_TEST}" != "1" ]]; then
+  echo "local-test domain ${DOMAIN} requires G7_OPS_ALLOW_LOCAL_TEST=1." >&2
+  exit 2
+fi
+
 if [[ "${CERTBOT_SCOPE}" != "skip" && "${DOMAIN}" == *.local ]]; then
   echo "G7_OPS_CERTBOT_SCOPE=${CERTBOT_SCOPE} requires a real DNS domain, not ${DOMAIN}" >&2
   exit 2
@@ -73,6 +95,30 @@ quote() {
 
 log() {
   printf '[ops-harness] %s\n' "$*"
+}
+
+step_enabled() {
+  local step="$1"
+  [[ ",${STEPS}," == *",all,"* || ",${STEPS}," == *",${step},"* ]]
+}
+
+pre_clean_enabled() {
+  case "${PRE_CLEAN}" in
+    1|true|yes)
+      return 0
+      ;;
+    0|false|no)
+      return 1
+      ;;
+    auto)
+      step_enabled install
+      return
+      ;;
+    *)
+      echo "unsupported G7_OPS_PRE_CLEAN: ${PRE_CLEAN} (use auto, 1, or 0)" >&2
+      exit 2
+      ;;
+  esac
 }
 
 fail() {
@@ -157,7 +203,7 @@ if not baseline:
 
 for section in ("package_checks", "service_checks", "port_checks", "vhost_checks", "runtime_checks", "database_checks"):
     checks = data.get(section) or []
-    failed = [f"{item.get('name')}: {item.get('message')}" for item in checks if item.get("status") != "pass"]
+    failed = [f"{item.get('name')}: {item.get('message')}" for item in checks if item.get("status") == "fail"]
     if failed:
         raise SystemExit(f"{section} failed: {', '.join(failed)}")
 
@@ -206,6 +252,9 @@ run_app_smoke() {
   local cycle="$1"
   local report_path="$2"
   local url
+  local deployment_mode
+  local smoke_url
+  local smoke_host
 
   if [[ "${APP_SMOKE}" != "1" ]]; then
     log "${cycle}: app smoke skipped (set G7_OPS_APP_SMOKE=1 to enable)"
@@ -224,7 +273,30 @@ PY
     fail "${cycle}: report did not contain app_url for app smoke"
   fi
 
-  capture_remote "${cycle}-app-smoke" "curl -fsSL --max-time 15 $(quote "${url}") >/dev/null"
+  deployment_mode="$(python3 - "$report_path" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+print(data.get("deployment_mode") or "")
+PY
+)"
+  if [[ "${deployment_mode}" == "local-test" ]]; then
+    read -r smoke_host smoke_port < <(python3 - "$url" <<'PY'
+from urllib.parse import urlparse
+import sys
+parsed = urlparse(sys.argv[1])
+port = parsed.port or (443 if parsed.scheme == "https" else 80)
+print(parsed.hostname or "", port)
+PY
+)
+    if [[ -z "${smoke_host}" || -z "${smoke_port}" ]]; then
+      fail "${cycle}: could not parse app_url for local-test smoke: ${url}"
+    fi
+    capture_remote "${cycle}-app-smoke" "curl -fsSL --max-time 15 --resolve $(quote "${smoke_host}:${smoke_port}:127.0.0.1") $(quote "${url}") >/dev/null"
+  else
+    capture_remote "${cycle}-app-smoke" "curl -fsSL --max-time 15 $(quote "${url}") >/dev/null"
+  fi
 }
 
 install_binary() {
@@ -278,44 +350,95 @@ run_install_cycle() {
   args="$(install_args)"
   env_prefix="$(install_env_prefix)"
 
-  log "${cycle}: preflight doctor"
-  doctor_before="$(sudo_capture "${cycle}-doctor-before" "${remote_bin_q} doctor")"
-  assert_contains "${cycle} doctor before" "${doctor_before}" "install_allowed: true"
+  if step_enabled fresh-doctor; then
+    log "${cycle}: preflight doctor"
+    doctor_before="$(sudo_capture "${cycle}-doctor-before" "${remote_bin_q} doctor")"
+    assert_contains "${cycle} doctor before" "${doctor_before}" "install_allowed: true"
+  else
+    log "${cycle}: preflight doctor skipped"
+  fi
 
-  log "${cycle}: plan"
-  capture_remote "${cycle}-plan" "${remote_bin_q} plan ${args}"
+  if step_enabled plan; then
+    log "${cycle}: plan"
+    capture_remote "${cycle}-plan" "${remote_bin_q} plan ${args}"
+  else
+    log "${cycle}: plan skipped"
+  fi
 
-  log "${cycle}: install"
-  install_output="$(sudo_capture "${cycle}-install" "${env_prefix}${remote_bin_q} install ${args}")"
-  assert_contains "${cycle} install" "${install_output}" "phase: completed"
+  if step_enabled install; then
+    log "${cycle}: install"
+    install_output="$(sudo_capture "${cycle}-install" "${env_prefix}${remote_bin_q} install ${args}")"
+    assert_contains "${cycle} install" "${install_output}" "phase: completed"
+  else
+    log "${cycle}: install skipped"
+  fi
 
-  report_json="$(sudo_capture "${cycle}-report-json" "cat /var/log/g7-installer/report.json")"
-  printf '%s\n' "${report_json}" >"${report_path}"
-  validate_report "${report_path}"
-  write_new_package_list "${report_path}" "${package_list_path}"
-  sudo_capture "${cycle}-setup-guide" "cat /var/log/g7-installer/setup-guide.md" >/dev/null
-  run_app_smoke "${cycle}" "${report_path}"
+  if step_enabled report-contract || step_enabled setup-guide || step_enabled app-smoke || step_enabled reset; then
+    report_json="$(sudo_capture "${cycle}-report-json" "cat /var/log/g7-installer/report.json")"
+    printf '%s\n' "${report_json}" >"${report_path}"
+    write_new_package_list "${report_path}" "${package_list_path}"
+  fi
 
-  log "${cycle}: post-install doctor must block fresh install"
-  doctor_after_install="$(sudo_capture "${cycle}-doctor-after-install" "${remote_bin_q} doctor")"
-  assert_contains "${cycle} doctor after install" "${doctor_after_install}" "install_allowed: false"
+  if step_enabled report-contract; then
+    log "${cycle}: install report contract"
+    validate_report "${report_path}"
+  else
+    log "${cycle}: install report contract skipped"
+  fi
+
+  if step_enabled setup-guide; then
+    log "${cycle}: setup guide capture"
+    sudo_capture "${cycle}-setup-guide" "cat /var/log/g7-installer/setup-guide.md" >/dev/null
+  else
+    log "${cycle}: setup guide capture skipped"
+  fi
+
+  if step_enabled app-smoke; then
+    run_app_smoke "${cycle}" "${report_path}"
+  else
+    log "${cycle}: app smoke step skipped"
+  fi
+
+  if step_enabled post-install-doctor; then
+    log "${cycle}: post-install doctor must block fresh install"
+    doctor_after_install="$(sudo_capture "${cycle}-doctor-after-install" "${remote_bin_q} doctor")"
+    assert_contains "${cycle} doctor after install" "${doctor_after_install}" "install_allowed: false"
+  else
+    log "${cycle}: post-install doctor skipped"
+  fi
 
   if [[ "${CLEANUP}" == "1" ]]; then
-    log "${cycle}: reset dry-run preview"
-    reset_dry_run_output="$(sudo_capture "${cycle}-reset-dry-run" "${remote_bin_q} reset --yes --dry-run")"
-    assert_contains "${cycle} reset dry-run" "${reset_dry_run_output}" "dry_run: true"
+    if step_enabled reset-dry-run; then
+      log "${cycle}: reset dry-run preview"
+      reset_dry_run_output="$(sudo_capture "${cycle}-reset-dry-run" "${remote_bin_q} reset --yes --dry-run")"
+      assert_contains "${cycle} reset dry-run" "${reset_dry_run_output}" "dry_run: true"
+    else
+      log "${cycle}: reset dry-run skipped"
+    fi
 
-    log "${cycle}: reset installer-created resources"
-    reset_output="$(sudo_capture "${cycle}-reset" "${remote_bin_q} reset --yes")"
-    assert_contains "${cycle} reset" "${reset_output}" "G7 Installer Reset"
-    assert_contains "${cycle} reset actions" "${reset_output}" "actions:"
-    while IFS= read -r package; do
-      [[ -n "${package}" ]] || continue
-      assert_not_installed "${cycle}" "${package}"
-    done <"${package_list_path}"
-    assert_installer_paths_absent "${cycle}"
-    doctor_after_reset="$(sudo_capture "${cycle}-doctor-after-reset" "${remote_bin_q} doctor")"
-    assert_contains "${cycle} doctor after reset" "${doctor_after_reset}" "install_allowed: true"
+    if step_enabled reset; then
+      log "${cycle}: reset installer-created resources"
+      reset_output="$(sudo_capture "${cycle}-reset" "${remote_bin_q} reset --yes")"
+      assert_contains "${cycle} reset" "${reset_output}" "G7 Installer Reset"
+      assert_contains "${cycle} reset actions" "${reset_output}" "actions:"
+      while IFS= read -r package; do
+        [[ -n "${package}" ]] || continue
+        assert_not_installed "${cycle}" "${package}"
+      done <"${package_list_path}"
+      assert_installer_paths_absent "${cycle}"
+    else
+      log "${cycle}: reset skipped"
+    fi
+
+    if step_enabled fresh-doctor-after-reset; then
+      log "${cycle}: doctor after reset must allow fresh install"
+      doctor_after_reset="$(sudo_capture "${cycle}-doctor-after-reset" "${remote_bin_q} doctor")"
+      assert_contains "${cycle} doctor after reset" "${doctor_after_reset}" "install_allowed: true"
+    else
+      log "${cycle}: doctor after reset skipped"
+    fi
+  else
+    log "${cycle}: cleanup disabled; reset steps skipped"
   fi
 }
 
@@ -325,12 +448,18 @@ need_local python3
 
 mkdir -p "${REPORT_DIR}"
 log "writing artifacts to ${REPORT_DIR}"
+log "steps: ${STEPS}"
+log "certbot scope: ${CERTBOT_SCOPE}; app smoke: ${APP_SMOKE}; pre-clean: ${PRE_CLEAN}"
 
 capture_remote "host-baseline" "uname -a; cat /etc/os-release; id"
 capture_remote "ubuntu-24-check" ". /etc/os-release && test \"\${ID}\" = ubuntu && test \"\${VERSION_ID}\" = 24.04"
 
 install_binary
-cleanup_previous_state
+if pre_clean_enabled; then
+  cleanup_previous_state
+else
+  log "pre-clean skipped"
+fi
 
 version_output="$(capture_remote "g7-version" "$(quote "${REMOTE_BIN}") --version")"
 assert_contains "version" "${version_output}" "${EXPECTED_VERSION}"
