@@ -113,7 +113,7 @@ const stepRoutes = {
   provision: "/setup/provision",
 };
 const routeToStep = Object.fromEntries(Object.entries(stepRoutes).map(([step, route]) => [route, step]));
-const wizardStorageKey = "g7inst-wizard-state-v1";
+const wizardStorageKey = "g7inst-wizard-state-v2";
 const promoDismissStorageKey = "g7inst-promo-dismissed-v1";
 const installStageOrder = [
   "preflight",
@@ -212,14 +212,14 @@ const templates = {
     domain: null,
     deployment_mode: "public",
     web_server: "nginx",
-    php_version: "8.3",
+    php_version: "8.5",
     database: "mysql",
-    database_version: "apt-default",
+    database_version: "mysql-8.4",
     redis: "enable",
-    mail_mode: "none",
+    mail_mode: "local-postfix",
     app_package: "gnuboard7",
     web_root_mode: "public-html",
-    www_mode: "redirect-to-root",
+    www_mode: "redirect-to-www",
     security_profile: "standard",
     ssh_policy: "audit-only",
   },
@@ -227,14 +227,14 @@ const templates = {
     domain: null,
     deployment_mode: "public",
     web_server: "apache",
-    php_version: "8.3",
+    php_version: "8.5",
     database: "mysql",
-    database_version: "apt-default",
+    database_version: "mysql-8.4",
     redis: "enable",
-    mail_mode: "none",
+    mail_mode: "local-postfix",
     app_package: "gnuboard7",
     web_root_mode: "public-html",
-    www_mode: "redirect-to-root",
+    www_mode: "redirect-to-www",
     security_profile: "standard",
     ssh_policy: "audit-only",
   },
@@ -244,12 +244,12 @@ const templates = {
     web_server: "frankenphp",
     php_version: "8.5",
     database: "mysql",
-    database_version: "apt-default",
+    database_version: "mysql-8.4",
     redis: "enable",
-    mail_mode: "none",
+    mail_mode: "local-postfix",
     app_package: "gnuboard7",
     web_root_mode: "public-html",
-    www_mode: "redirect-to-root",
+    www_mode: "redirect-to-www",
     security_profile: "standard",
     ssh_policy: "audit-only",
   },
@@ -1305,6 +1305,9 @@ function refreshFormState(options = {}) {
     nodes.databaseVersion.value = "apt-default";
     nodes.databaseVersion.disabled = true;
   } else {
+    if (nodes.databaseVersion.value === "apt-default") {
+      nodes.databaseVersion.value = "mysql-8.4";
+    }
     nodes.databaseVersion.disabled = false;
   }
 
@@ -2481,7 +2484,7 @@ function setupGuideMarkdown(report = {}) {
   const webService = webServiceName(report.web_server);
   const runtimeRows = report.web_server === "frankenphp"
     ? ["- FrankenPHP: sudo systemctl restart g7-frankenphp"]
-    : [`- PHP-FPM: sudo systemctl restart php${report.php_version || "8.3"}-fpm`];
+    : [`- PHP-FPM: sudo systemctl restart php${report.php_version || "8.5"}-fpm`];
   return [
     `# G7 Installer 설치 요약 - ${report.domain || "unknown"}`,
     "",
@@ -2701,7 +2704,7 @@ function provisioningActions(report = {}) {
   const selectedApp = report.app_profile || report.app_package;
   const mailSkipped = report.mail_mode === "none";
   const certName = report.domain || "example.com";
-  const phpVersion = report.php_version || "8.3";
+  const phpVersion = report.php_version || "8.5";
   const webConfigPath = report.web_server === "apache" ? "/etc/apache2/sites-available/g7.conf" : "/etc/nginx/sites-available/g7.conf";
   const phpPoolPath = `/etc/php/${phpVersion}/fpm/pool.d/g7.conf`;
   const phpSapi = isFranken ? "cli" : "fpm";

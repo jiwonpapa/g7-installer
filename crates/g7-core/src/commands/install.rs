@@ -5445,7 +5445,8 @@ mod tests {
         assert_eq!(report.domain, "example.com");
         assert_eq!(report.deployment_mode, "public");
         assert_eq!(report.web_server, "nginx");
-        assert_eq!(report.php_version, "8.3");
+        assert_eq!(report.php_version, "8.5");
+        assert_eq!(report.php_source, g7_system::php::PHP_SOURCE_ONDREJ);
         assert_eq!(report.database_engine, "mysql");
         assert_eq!(report.site_user, "g7");
         assert_eq!(report.web_root_mode, "public-html");
@@ -5458,13 +5459,14 @@ mod tests {
         let config = fs::read_to_string(fs_root.join("etc/g7-installer/config.toml"))?;
         assert!(config.contains("deployment_mode = \"public\""));
         assert!(config.contains("web_server = \"nginx\""));
-        assert!(config.contains("php_version = \"8.3\""));
+        assert!(config.contains("php_version = \"8.5\""));
         assert!(config.contains("database = \"mysql\""));
         assert!(config.contains("database_password_policy = \"generate-random-store-root-only\""));
         assert!(config.contains("site_user = \"g7\""));
         assert!(config.contains("web_root = \"/home/g7/public_html\""));
-        assert!(config.contains("www_mode = \"redirect-to-root\""));
+        assert!(config.contains("www_mode = \"redirect-to-www\""));
         assert!(config.contains("redis = \"enable\""));
+        assert!(config.contains("mail_mode = \"local-postfix\""));
         assert!(config.contains("security_profile = \"standard\""));
         assert!(config.contains("ssh_policy = \"audit-only\""));
         assert!(fs_root.join("var/lib/g7-installer/rollback.json").exists());
@@ -5496,13 +5498,13 @@ mod tests {
             fs::read_to_string(fs_root.join("etc/nginx/conf.d/g7-runtime-tuning.conf"))?;
         assert!(nginx_runtime.contains("log_format g7_timing"));
         assert!(nginx_runtime.contains("gzip_comp_level 5"));
-        assert!(fs_root.join("etc/php/8.3/fpm/pool.d/g7-g7.conf").exists());
-        let php_pool = fs::read_to_string(fs_root.join("etc/php/8.3/fpm/pool.d/g7-g7.conf"))?;
+        assert!(fs_root.join("etc/php/8.5/fpm/pool.d/g7-g7.conf").exists());
+        let php_pool = fs::read_to_string(fs_root.join("etc/php/8.5/fpm/pool.d/g7-g7.conf"))?;
         assert!(php_pool.contains("request_slowlog_timeout = 2s"));
-        assert!(php_pool.contains("slowlog = /var/log/php8.3-fpm-g7-slow.log"));
+        assert!(php_pool.contains("slowlog = /var/log/php8.5-fpm-g7-slow.log"));
         assert!(
             fs_root
-                .join("etc/php/8.3/fpm/conf.d/99-g7-installer.ini")
+                .join("etc/php/8.5/fpm/conf.d/99-g7-installer.ini")
                 .exists()
         );
         assert!(fs_root.join("swapfile").exists());
@@ -5549,7 +5551,7 @@ mod tests {
         assert!(app_env.contains("SESSION_DRIVER=redis"));
         assert!(app_env.contains("QUEUE_CONNECTION=redis"));
         assert!(app_env.contains("BROADCAST_CONNECTION=reverb"));
-        assert!(app_env.contains("VITE_REVERB_HOST=example.com"));
+        assert!(app_env.contains("VITE_REVERB_HOST=www.example.com"));
         assert!(app_env.contains("VITE_REVERB_PORT=443"));
         let driver_settings = fs::read_to_string(
             fs_root.join("home/g7/public_html/storage/app/settings/drivers.json"),
@@ -5641,7 +5643,7 @@ mod tests {
             report
                 .mail_checks
                 .iter()
-                .any(|check| { check.name == "mail-delivery" && check.status == "skipped" })
+                .any(|check| { check.name == "local-postfix" && check.status == "pass" })
         );
         assert!(
             report
@@ -5947,7 +5949,7 @@ mod tests {
         let report = run_with_probe_and_paths("example.com".to_string(), options, &probe, &paths)?;
 
         assert_eq!(report.web_server, "apache");
-        assert_eq!(report.app_url, "https://example.com/install");
+        assert_eq!(report.app_url, "https://www.example.com/install");
         assert!(fs_root.join("etc/apache2/sites-available/g7.conf").exists());
         assert!(fs_root.join("etc/apache2/sites-enabled/g7.conf").exists());
         let apache_vhost = fs::read_to_string(fs_root.join("etc/apache2/sites-available/g7.conf"))?;
@@ -6048,7 +6050,7 @@ mod tests {
         let report = run_with_probe_and_paths("example.com".to_string(), options, &probe, &paths)?;
 
         assert_eq!(report.app_profile, "laravel");
-        assert_eq!(report.app_url, "https://example.com/");
+        assert_eq!(report.app_url, "https://www.example.com/");
         assert!(fs_root.join("home/g7/public_html/.env").exists());
         assert!(
             fs_root

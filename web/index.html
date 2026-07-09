@@ -317,12 +317,12 @@
                       PHP 실행기
                       <span class="help-wrap">
                     <button class="help-circle" type="button" aria-label="PHP 실행기 도움말">?</button>
-                    <span class="help-text">Ubuntu 24.04 기본값은 PHP 8.3입니다. PHP 8.5를 선택하면 Ondrej PHP PPA를 자동 추가한 뒤 설치합니다.</span>
+                    <span class="help-text">기본 설치는 PHP 8.5입니다. Ubuntu 기본 apt에 없으면 Ondrej PHP PPA를 자동 추가한 뒤 설치합니다.</span>
                   </span>
                     </span>
                     <select name="php_version" class="select select-bordered w-full">
                       <option value="8.3">PHP 8.3 (Ubuntu 기본)</option>
-                      <option value="8.5">PHP 8.5 (Ondrej PPA 자동 추가)</option>
+                      <option value="8.5" selected>PHP 8.5 (Ondrej PPA 자동 추가)</option>
                     </select>
                   </label>
                   <label class="field">
@@ -343,13 +343,13 @@
                       DB 버전
                       <span class="help-wrap">
                     <button class="help-circle" type="button" aria-label="DB 버전 도움말">?</button>
-                    <span class="help-text">기본값은 Ubuntu apt 후보 버전을 사용합니다. 특정 버전 고정은 apt 소스가 준비된 서버에서만 안전합니다.</span>
+                    <span class="help-text">기본 선택은 MySQL 8.4 LTS입니다. MariaDB를 선택하면 배포판 apt 기본값을 사용합니다.</span>
                   </span>
                     </span>
                     <select name="database_version" id="database-version" class="select select-bordered w-full">
                       <option value="apt-default">Ubuntu apt 기본값</option>
                       <option value="mysql-8.0">MySQL 8.0 계열</option>
-                      <option value="mysql-8.4">MySQL 8.4 LTS 계열</option>
+                      <option value="mysql-8.4" selected>MySQL 8.4 LTS 계열</option>
                     </select>
                   </label>
                   <label class="field">
@@ -382,12 +382,12 @@
                       www 처리
                       <span class="help-wrap">
                     <button class="help-circle" type="button" aria-label="www 처리 도움말">?</button>
-                    <span class="help-text">www.example.com 접속을 example.com으로 보낼지, 반대로 보낼지 정합니다.</span>
+                    <span class="help-text">기본은 example.com 접속을 www.example.com으로 보내 www 주소로 통일합니다.</span>
                   </span>
                     </span>
                     <select name="www_mode" class="select select-bordered w-full">
                       <option value="redirect-to-root">www 없이 통일</option>
-                      <option value="redirect-to-www">www로 통일</option>
+                      <option value="redirect-to-www" selected>www로 통일</option>
                       <option value="include">둘 다 허용</option>
                       <option value="none">설정 안 함</option>
                     </select>
@@ -410,13 +410,13 @@
                       메일 발송
                       <span class="help-wrap">
                     <button class="help-circle" type="button" aria-label="메일 발송 도움말">?</button>
-                    <span class="help-text">회원 인증/알림 메일 발송 전용 설정입니다. 수신 메일 서버는 기본 설치 범위가 아닙니다.</span>
+                    <span class="help-text">회원 인증/알림 메일 발송 전용 설정입니다. 기본은 서버 Postfix 발송이며, 수신 메일 서버는 설치하지 않습니다.</span>
                   </span>
                     </span>
                     <select name="mail_mode" id="mail-mode" class="select select-bordered w-full">
                       <option value="none">메일 발송 안 함</option>
                       <option value="smtp-relay">외부 SMTP로 발송</option>
-                      <option value="local-postfix">서버 Postfix로 발송</option>
+                      <option value="local-postfix" selected>서버 Postfix로 발송</option>
                     </select>
                   </label>
                   <label class="field">

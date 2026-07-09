@@ -54,7 +54,7 @@ enum Command {
         /// Web server: nginx, apache, or frankenphp.
         #[arg(long, default_value_t = plan::DEFAULT_WEB_SERVER.to_string())]
         web_server: String,
-        /// PHP runtime version. Default is 8.3. PHP 8.5 adds the Ondrej PHP PPA automatically.
+        /// PHP runtime version. Default is 8.5. PHP 8.3 uses Ubuntu apt; PHP 8.5 adds the Ondrej PHP PPA automatically.
         #[arg(long, default_value_t = plan::DEFAULT_PHP_VERSION.to_string())]
         php_version: String,
         /// PHP apt source: auto, ubuntu, or ondrej.
@@ -123,7 +123,7 @@ enum Command {
         /// Web server: nginx, apache, or frankenphp.
         #[arg(long, default_value_t = plan::DEFAULT_WEB_SERVER.to_string())]
         web_server: String,
-        /// PHP runtime version. Default is 8.3. PHP 8.5 adds the Ondrej PHP PPA automatically.
+        /// PHP runtime version. Default is 8.5. PHP 8.3 uses Ubuntu apt; PHP 8.5 adds the Ondrej PHP PPA automatically.
         #[arg(long, default_value_t = plan::DEFAULT_PHP_VERSION.to_string())]
         php_version: String,
         /// PHP apt source: auto, ubuntu, or ondrej.
@@ -742,7 +742,7 @@ mod tests {
         assert!(output.contains("- 3306/tcp: Localhost-only SQL database."));
         assert!(output.contains("deployment_mode: public"));
         assert!(output.contains("web_server: nginx"));
-        assert!(output.contains("php_version: 8.3"));
+        assert!(output.contains("php_version: 8.5"));
         assert!(output.contains("database: mysql"));
         assert!(output.contains("redis: enable"));
         assert!(output.contains("rollback: true"));

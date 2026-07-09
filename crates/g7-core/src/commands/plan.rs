@@ -16,7 +16,7 @@ use g7_state::owned_files::OWNED_FILES_PATH;
 use g7_state::state::STATE_PATH;
 use g7_system::php::{
     DEFAULT_FPM_VERSION, PHP_SOURCE_AUTO, PHP_SOURCE_ONDREJ, PHP_SOURCE_UBUNTU,
-    SUPPORTED_FPM_VERSIONS, SUPPORTED_PHP_SOURCES,
+    SUPPORTED_FPM_VERSIONS, SUPPORTED_PHP_SOURCES, UBUNTU_FPM_VERSION,
 };
 
 pub const DEFAULT_PHP_VERSION: &str = DEFAULT_FPM_VERSION;
@@ -25,9 +25,9 @@ pub const DEFAULT_WEB_SERVER: &str = "nginx";
 pub const DEFAULT_DATABASE_ENGINE: &str = "mysql";
 pub const DEFAULT_SITE_USER: &str = "g7";
 pub const DEFAULT_WEB_ROOT_MODE: &str = "public-html";
-pub const DEFAULT_WWW_MODE: &str = "redirect-to-root";
+pub const DEFAULT_WWW_MODE: &str = "redirect-to-www";
 pub const DEFAULT_REDIS_MODE: &str = "enable";
-pub const DEFAULT_MAIL_MODE: &str = "none";
+pub const DEFAULT_MAIL_MODE: &str = "local-postfix";
 pub const DEFAULT_SMTP_PORT: u16 = 587;
 pub const DEFAULT_SMTP_ENCRYPTION: &str = "starttls";
 pub const DEFAULT_SECURITY_PROFILE: &str = "standard";
@@ -2103,7 +2103,7 @@ fn normalize_php_version(version: String) -> Result<String> {
 fn normalize_php_source(php_version: &str, source: String) -> Result<String> {
     let source = normalize_supported_option("php-source", source, &SUPPORTED_PHP_SOURCES)?;
     let source = if source == PHP_SOURCE_AUTO {
-        if php_version == DEFAULT_PHP_VERSION {
+        if php_version == UBUNTU_FPM_VERSION {
             PHP_SOURCE_UBUNTU
         } else {
             PHP_SOURCE_ONDREJ
@@ -2112,12 +2112,12 @@ fn normalize_php_source(php_version: &str, source: String) -> Result<String> {
         source.as_str()
     };
 
-    if source == PHP_SOURCE_UBUNTU && php_version != DEFAULT_PHP_VERSION {
+    if source == PHP_SOURCE_UBUNTU && php_version != UBUNTU_FPM_VERSION {
         return Err(Error::InvalidOption {
             field: "php-source",
             value: format!("{source}+php{php_version}"),
             supported: format!(
-                "Ubuntu 24.04 기본 apt는 PHP {DEFAULT_PHP_VERSION} 기준입니다. PHP {php_version}은 php-source=ondrej로 Ondrej PHP PPA를 추가해야 합니다."
+                "Ubuntu 24.04 기본 apt는 PHP {UBUNTU_FPM_VERSION} 기준입니다. PHP {php_version}은 php-source=ondrej로 Ondrej PHP PPA를 추가해야 합니다."
             ),
         });
     }
@@ -2440,16 +2440,17 @@ mod tests {
         assert_eq!(plan.domain, "example.com");
         assert_eq!(plan.deployment_mode, "public");
         assert_eq!(plan.web_server, "nginx");
-        assert_eq!(plan.php_version, "8.3");
+        assert_eq!(plan.php_version, "8.5");
+        assert_eq!(plan.php_source, "ondrej");
         assert_eq!(plan.database_engine, "mysql");
         assert_eq!(plan.site_user, "g7");
         assert_eq!(plan.web_root_mode, "public-html");
         assert_eq!(plan.web_root, "/home/g7/public_html");
         assert_eq!(plan.security_profile, "standard");
         assert_eq!(plan.ssh_policy, "audit-only");
-        assert_eq!(plan.www_mode, "redirect-to-root");
+        assert_eq!(plan.www_mode, "redirect-to-www");
         assert_eq!(plan.redis_mode, "enable");
-        assert_eq!(plan.mail_mode, "none");
+        assert_eq!(plan.mail_mode, "local-postfix");
         assert_eq!(plan.mode, "dry-run");
         assert!(!plan.changes_made);
         Ok(())

@@ -257,7 +257,9 @@ http://127.0.0.1:7717/?token=...
 
 `사이트 계정 비밀번호`는 새로 정합니다. 설치기가 만들 `g7` 같은 사이트 계정의 SFTP/파일관리 비밀번호이며, sudo 권한은 주지 않습니다. 기본 웹루트는 `/home/계정/public_html`이고 소유권은 `계정:www-data`로 맞춥니다.
 
-PHP는 Ubuntu 24.04 기본 apt의 8.3을 기본값으로 둡니다. PHP 8.5를 선택하면 설치기가 `ppa:ondrej/php` apt 소스를 자동 추가하고 다시 `apt update`를 실행한 뒤 `php8.5-fpm`을 설치합니다.
+PHP 기본값은 8.5입니다. 설치기가 `ppa:ondrej/php` apt 소스를 자동 추가하고 다시 `apt update`를 실행한 뒤 `php8.5-fpm`을 설치합니다. PHP 8.3을 선택하면 Ubuntu 24.04 기본 apt 소스를 사용합니다.
+
+웹 UI 기본 조합은 `Nginx / PHP 8.5 / MySQL 8.4 LTS / www로 통일 / Redis 사용 / 서버 Postfix 발송 / 그누보드7`입니다.
 
 기본 서버 구성 후 확인:
 

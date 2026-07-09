@@ -1174,7 +1174,7 @@ fn provision_php(report: &serde_json::Value) -> Vec<InstallApiCheck> {
             ),
         ];
     }
-    let version = report_string(report, "php_version").unwrap_or_else(|| "8.3".to_string());
+    let version = report_string(report, "php_version").unwrap_or_else(|| "8.5".to_string());
     let service = format!("php{version}-fpm");
     vec![
         run_command_check("php-fpm-restart", "systemctl", &["restart", &service], None),
@@ -2439,10 +2439,10 @@ mod tests {
             domain: domain.to_string(),
             local_test: true,
             web_server: "nginx".to_string(),
-            php_version: "8.3".to_string(),
+            php_version: "8.5".to_string(),
             php_source: "auto".to_string(),
             database: "mysql".to_string(),
-            database_version: "apt-default".to_string(),
+            database_version: "mysql-8.4".to_string(),
             database_name: Some("g7_example_com".to_string()),
             database_user: Some("g7_app".to_string()),
             database_password: Some("0808dong!!".to_string()),
@@ -2453,9 +2453,9 @@ mod tests {
             site_password_confirm: Some("0808dong!!".to_string()),
             web_root_mode: "public-html".to_string(),
             web_root: Some("  ".to_string()),
-            www_mode: "redirect-to-root".to_string(),
+            www_mode: "redirect-to-www".to_string(),
             redis: "enable".to_string(),
-            mail_mode: "none".to_string(),
+            mail_mode: "local-postfix".to_string(),
             smtp_host: Some("  ".to_string()),
             smtp_port: 587,
             smtp_from: Some("  ".to_string()),
@@ -2985,7 +2985,7 @@ mod tests {
         assert_eq!(payload["domain"], "g7-test.local");
         assert_eq!(payload["deployment_mode"], "local-test");
         assert_eq!(payload["web_server"], "nginx");
-        assert_eq!(payload["database_version"], "apt-default");
+        assert_eq!(payload["database_version"], "mysql-8.4");
         assert_eq!(payload["app_package"], "gnuboard7");
         assert!(payload["packages"].as_array().expect("packages").len() > 5);
         Ok(())
@@ -3090,10 +3090,10 @@ mod tests {
             "example.com".to_string(),
             options_from_request(setup_request("example.com")),
         )?;
-        let api = super::plan_to_api(install_plan, "apt-default".to_string());
+        let api = super::plan_to_api(install_plan, "mysql-8.4".to_string());
 
         assert_eq!(api.domain, "example.com");
-        assert_eq!(api.database_version, "apt-default");
+        assert_eq!(api.database_version, "mysql-8.4");
         assert_eq!(api.app_package, "gnuboard7");
         assert_eq!(api.app_document_root, "/home/g7/public_html/public");
         assert_eq!(api.web_root, "/home/g7/public_html");
