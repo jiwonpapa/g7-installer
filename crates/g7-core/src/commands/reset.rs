@@ -11,6 +11,13 @@ use g7_system::database::DatabaseEngine;
 use g7_system::package::PackageStatus;
 
 const LEGACY_INSTALLER_PATHS: [&str; 2] = ["/usr/local/bin/g7", "/tmp/g7"];
+const SWAP_FILE_PATH: &str = "/swapfile";
+const SWAP_UNIT_PATH: &str = "/etc/systemd/system/swapfile.swap";
+const SWAP_SYSCTL_PATH: &str = "/etc/sysctl.d/99-g7-installer-swap.conf";
+const MANAGED_SWAP_MARKERS: [(&str, &str); 2] = [
+    (SWAP_UNIT_PATH, "G7 Installer managed swapfile"),
+    (SWAP_SYSCTL_PATH, "Managed by g7inst."),
+];
 const REPORT_PATH: &str = "/var/log/g7-installer/report.json";
 const CONFIG_PATH: &str = "/etc/g7-installer/config.toml";
 const BASELINE_NOT_INSTALLED: &str = "not-installed";
@@ -248,12 +255,19 @@ fn remove_reset_files(
 ) -> Result<(Vec<String>, Vec<String>)> {
     let mut files = reset_file_list(paths, metadata)?;
     files.sort_by_key(|path| std::cmp::Reverse(path_depth(path)));
+    let allow_swapfile_reset = files.iter().any(|path| path == SWAP_UNIT_PATH)
+        || managed_marker_file_exists(paths, SWAP_UNIT_PATH, "G7 Installer managed swapfile");
 
     let mut removed = Vec::new();
     let mut missing = Vec::new();
 
     for path in files {
         validate_reset_path(&path)?;
+        if path == SWAP_FILE_PATH && !allow_swapfile_reset {
+            return Err(Error::UnsafeResetPath {
+                path: path.to_string(),
+            });
+        }
         let target = paths.resolve(&path);
 
         let metadata = match fs::symlink_metadata(&target) {
@@ -317,7 +331,25 @@ fn reset_file_list(paths: &ResetPaths, metadata: &ResetMetadata) -> Result<Vec<S
         }
     }
 
+    for (path, marker) in MANAGED_SWAP_MARKERS {
+        if managed_marker_file_exists(paths, path, marker)
+            && !files.iter().any(|owned| owned == path)
+        {
+            files.push(path.to_string());
+        }
+    }
+    if files.iter().any(|path| path == SWAP_UNIT_PATH)
+        && paths.resolve(SWAP_FILE_PATH).exists()
+        && !files.iter().any(|owned| owned == SWAP_FILE_PATH)
+    {
+        files.push(SWAP_FILE_PATH.to_string());
+    }
+
     Ok(files)
+}
+
+fn managed_marker_file_exists(paths: &ResetPaths, path: &str, marker: &str) -> bool {
+    fs::read_to_string(paths.resolve(path)).is_ok_and(|content| content.contains(marker))
 }
 
 #[derive(Debug, Clone, Default)]
@@ -454,6 +486,10 @@ fn fill_metadata_from_config(metadata: &mut ResetMetadata, config: &str) {
 
 fn reset_services(paths: &ResetPaths, metadata: &ResetMetadata) -> Vec<String> {
     let mut services = metadata.services.clone();
+
+    if paths.resolve(SWAP_UNIT_PATH).exists() {
+        services.push("swapfile.swap".to_string());
+    }
 
     for unit in APP_SYSTEMD_UNITS {
         if paths
@@ -673,6 +709,9 @@ fn validate_reset_path(path: &str) -> Result<()> {
         "/etc/apt/sources.list.d/ondrej-ubuntu-php-noble.sources",
         "/etc/apt/sources.list.d/ondrej-ubuntu-php-noble.list",
         "/etc/apt/sources.list.d/ondrej-php.list",
+        SWAP_FILE_PATH,
+        SWAP_UNIT_PATH,
+        SWAP_SYSCTL_PATH,
         "/etc/systemd/system/g7-frankenphp.service",
         "/opt/g7-frankenphp",
         "/etc/systemd/system/g7-queue.service",
@@ -877,6 +916,7 @@ mod tests {
         fs::create_dir_all(fs_root.join("var/lib/g7-installer"))?;
         fs::create_dir_all(fs_root.join("var/log/g7-installer"))?;
         fs::create_dir_all(fs_root.join("etc/systemd/system"))?;
+        fs::create_dir_all(fs_root.join("etc/sysctl.d"))?;
         fs::create_dir_all(fs_root.join("etc/apt/sources.list.d"))?;
         fs::create_dir_all(fs_root.join("etc/nginx/conf.d"))?;
         fs::create_dir_all(fs_root.join("etc/php/8.3/fpm/pool.d"))?;
@@ -908,6 +948,15 @@ mod tests {
             }"#,
         )?;
         fs::write(fs_root.join("etc/systemd/system/g7-queue.service"), "unit")?;
+        fs::write(
+            fs_root.join("etc/systemd/system/swapfile.swap"),
+            "[Unit]\nDescription=G7 Installer managed swapfile\n",
+        )?;
+        fs::write(
+            fs_root.join("etc/sysctl.d/99-g7-installer-swap.conf"),
+            "# Managed by g7inst.\nvm.swappiness = 10\n",
+        )?;
+        fs::write(fs_root.join("swapfile"), "swap")?;
         fs::write(
             fs_root.join("etc/apt/sources.list.d/ondrej-ubuntu-php-noble.sources"),
             "source",
@@ -944,6 +993,8 @@ mod tests {
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success("active\n"));
         runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success("0\n"));
         runner.push_output(CommandOutput::success("install ok installed"));
         runner.push_output(CommandOutput::success("install ok installed"));
@@ -969,6 +1020,9 @@ mod tests {
         );
         assert!(report.actions.iter().any(|action| {
             action.name == "certificate:example.com" && action.status == "preserved"
+        }));
+        assert!(report.actions.iter().any(|action| {
+            action.name == "service:swapfile.swap" && action.status == "disabled"
         }));
         assert!(
             report
@@ -996,6 +1050,13 @@ mod tests {
                 .exists()
         );
         assert!(!fs_root.join("home/g7/public_html").exists());
+        assert!(!fs_root.join("etc/systemd/system/swapfile.swap").exists());
+        assert!(
+            !fs_root
+                .join("etc/sysctl.d/99-g7-installer-swap.conf")
+                .exists()
+        );
+        assert!(!fs_root.join("swapfile").exists());
 
         let recorded = probe.runner().recorded();
         assert_eq!(recorded[0].program, OsString::from("id"));

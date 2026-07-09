@@ -3781,8 +3781,20 @@ fn apply_swap_configuration<R: CommandRunner>(
     owned: &mut Vec<String>,
 ) -> Result<Vec<InstallCheck>> {
     let mut checks = Vec::new();
-    write_new_file(paths, SWAP_UNIT_PATH, &swap_unit_content(), owned)?;
-    write_new_file(paths, SWAP_SYSCTL_PATH, swap_sysctl_content(), owned)?;
+    write_managed_marker_file(
+        paths,
+        SWAP_UNIT_PATH,
+        &swap_unit_content(),
+        "G7 Installer managed swapfile",
+        owned,
+    )?;
+    write_managed_marker_file(
+        paths,
+        SWAP_SYSCTL_PATH,
+        swap_sysctl_content(),
+        "Managed by g7inst.",
+        owned,
+    )?;
 
     if paths.resolve("/") != Path::new("/") {
         let swap_path = paths.resolve(SWAP_FILE_PATH);
@@ -4854,6 +4866,34 @@ fn write_new_file(
     Ok(())
 }
 
+fn write_managed_marker_file(
+    paths: &InstallPaths,
+    path: &str,
+    content: &str,
+    marker: &str,
+    owned: &mut Vec<String>,
+) -> Result<()> {
+    let target = paths.resolve(path);
+    if target.exists() {
+        let existing = fs::read_to_string(&target).map_err(|source| Error::FileWriteFailed {
+            path: path.to_string(),
+            source,
+        })?;
+        if !existing.contains(marker) {
+            return Err(Error::InstallVerificationFailed {
+                checks: format!("{path} already exists and is not marked as g7inst-managed"),
+            });
+        }
+        write_existing_file(paths, path, content)?;
+        if !owned.iter().any(|owned_path| owned_path == path) {
+            owned.push(path.to_string());
+        }
+        return Ok(());
+    }
+
+    write_new_file(paths, path, content, owned)
+}
+
 fn write_tracked_file(
     paths: &InstallPaths,
     path: &str,
@@ -5844,6 +5884,55 @@ mod tests {
         assert!(report_json.contains("\"setup_guide_path\""));
         assert!(report_json.contains("\"safety_checks\""));
         assert!(report_json.contains("\"vhost_checks\""));
+
+        fs::remove_file(os_release_path)?;
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn install_adopts_existing_g7_managed_swap_files()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let os_release_path = write_temp_os_release()?;
+        let fs_root = create_temp_fs_root()?;
+        fs::create_dir_all(fs_root.join("etc/systemd/system"))?;
+        fs::create_dir_all(fs_root.join("etc/sysctl.d"))?;
+        fs::write(
+            fs_root.join("etc/systemd/system/swapfile.swap"),
+            "[Unit]\nDescription=G7 Installer managed swapfile\n",
+        )?;
+        fs::write(
+            fs_root.join("etc/sysctl.d/99-g7-installer-swap.conf"),
+            "# Managed by g7inst.\nvm.swappiness = 60\n",
+        )?;
+        let probe = clean_root_probe(&os_release_path, &fs_root)?;
+        let paths = InstallPaths::with_root(&fs_root);
+
+        let report = run_with_probe_and_paths(
+            "example.com".to_string(),
+            super::plan::PlanOptions::default(),
+            &probe,
+            &paths,
+        )?;
+
+        assert_eq!(
+            fs::read_to_string(fs_root.join("etc/systemd/system/swapfile.swap"))?,
+            super::swap_unit_content()
+        );
+        assert_eq!(
+            fs::read_to_string(fs_root.join("etc/sysctl.d/99-g7-installer-swap.conf"))?,
+            super::swap_sysctl_content()
+        );
+        assert!(
+            report
+                .owned_files
+                .contains(&"/etc/systemd/system/swapfile.swap".to_string())
+        );
+        assert!(
+            report
+                .owned_files
+                .contains(&"/etc/sysctl.d/99-g7-installer-swap.conf".to_string())
+        );
 
         fs::remove_file(os_release_path)?;
         fs::remove_dir_all(fs_root)?;
