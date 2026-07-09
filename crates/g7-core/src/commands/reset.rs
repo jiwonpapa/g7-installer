@@ -139,18 +139,9 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
                 database_reset_message(database_name, database_user),
             ));
         } else {
-            let sql = database_reset_sql(database_name, database_user);
             let engine =
                 DatabaseEngine::from_id(metadata.database_engine.as_deref().unwrap_or("mysql"));
-            let output = probe
-                .database_apply_sql(engine, &sql)
-                .map_err(command_error)?;
-            require_success("database-drop", "database root sql", output)?;
-            actions.push(ResetAction::new(
-                "database",
-                "dropped",
-                database_reset_message(database_name, database_user),
-            ));
+            actions.push(reset_database(probe, engine, database_name, database_user)?);
         }
     }
 
@@ -687,6 +678,33 @@ fn database_reset_message(database_name: Option<&str>, database_user: Option<&st
     }
 }
 
+fn reset_database<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    engine: DatabaseEngine,
+    database_name: Option<&str>,
+    database_user: Option<&str>,
+) -> Result<ResetAction> {
+    let sql = database_reset_sql(database_name, database_user);
+    match probe.database_apply_sql(engine, &sql) {
+        Ok(output) => {
+            require_success("database-drop", "database root sql", output)?;
+            Ok(ResetAction::new(
+                "database",
+                "dropped",
+                database_reset_message(database_name, database_user),
+            ))
+        }
+        Err(g7_system::probe::SystemProbeError::Command(
+            g7_system::command::CommandError::Execute { program, .. },
+        )) if matches!(program.as_str(), "mysql" | "mariadb") => Ok(ResetAction::new(
+            "database",
+            "skipped",
+            "DB 클라이언트가 이미 제거되어 DB 정리를 건너뛰었습니다. 이전 리셋 시도에서 패키지가 먼저 제거된 상태로 판단합니다.",
+        )),
+        Err(error) => Err(command_error(error)),
+    }
+}
+
 fn database_reset_sql(database_name: Option<&str>, database_user: Option<&str>) -> String {
     let mut sql = String::new();
     if let Some(database_name) = database_name {
@@ -917,7 +935,7 @@ mod tests {
     use super::{ResetPaths, run_with_probe_and_paths, validate_reset_path};
     use g7_state::owned_files::{OWNED_FILES_PATH, OwnedFiles, write_owned_files};
     use g7_system::SystemProbe;
-    use g7_system::command::{CommandOutput, FakeCommandRunner};
+    use g7_system::command::{CommandError, CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
     use std::fs;
     use std::path::PathBuf;
@@ -938,6 +956,56 @@ mod tests {
             .expect_err("operator PHP config must stay outside reset allowlist");
         validate_reset_path("/etc/php/8.5/apache2/conf.d/99-g7-installer.ini")
             .expect_err("unsupported PHP SAPI must stay outside reset allowlist");
+    }
+
+    #[test]
+    fn reset_continues_when_database_client_is_already_removed()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let fs_root = create_temp_fs_root()?;
+        fs::create_dir_all(fs_root.join("var/lib/g7-installer"))?;
+        fs::create_dir_all(fs_root.join("var/log/g7-installer"))?;
+        fs::write(
+            fs_root.join("var/log/g7-installer/report.json"),
+            r#"{
+                "database": "mysql",
+                "database_name": "g7devops",
+                "database_user": "g7devops"
+            }"#,
+        )?;
+        let owned = OwnedFiles {
+            version: 1,
+            files: vec![
+                "/var/log/g7-installer/report.json".to_string(),
+                OWNED_FILES_PATH.to_string(),
+            ],
+        };
+        write_owned_files(&fs_root.join(strip_root(OWNED_FILES_PATH)), &owned)?;
+
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success("0\n"));
+        runner.push_error(CommandError::Execute {
+            program: "mysql".to_string(),
+            message: "No such file or directory".to_string(),
+        });
+        let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
+        let report =
+            run_with_probe_and_paths(true, false, &probe, &ResetPaths::with_root(&fs_root))?;
+
+        assert!(
+            report
+                .actions
+                .iter()
+                .any(|action| { action.name == "database" && action.status == "skipped" })
+        );
+        assert!(!fs_root.join("var/log/g7-installer/report.json").exists());
+        assert!(
+            !fs_root
+                .join("var/lib/g7-installer/owned-files.json")
+                .exists()
+        );
+
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
     }
 
     #[test]
