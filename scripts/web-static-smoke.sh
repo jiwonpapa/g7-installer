@@ -24,6 +24,44 @@ reject_pattern() {
   fi
 }
 
+need_web_setup_pattern() {
+  local pattern="$1"
+
+  if ! rg -q "${pattern}" "${ROOT_DIR}/crates/g7-cli/src/web_setup.rs" "${ROOT_DIR}/crates/g7-cli/src/web_setup"; then
+    echo "missing web UI contract in web setup source: ${pattern}" >&2
+    exit 1
+  fi
+}
+
+reject_web_setup_pattern() {
+  local pattern="$1"
+  local message="$2"
+
+  if rg -q "${pattern}" "${ROOT_DIR}/crates/g7-cli/src/web_setup.rs" "${ROOT_DIR}/crates/g7-cli/src/web_setup"; then
+    echo "${message}" >&2
+    exit 1
+  fi
+}
+
+need_install_source_pattern() {
+  local pattern="$1"
+
+  if ! rg -q "${pattern}" "${ROOT_DIR}/crates/g7-core/src/commands/install.rs" "${ROOT_DIR}/crates/g7-core/src/commands/install"; then
+    echo "missing install contract in install source: ${pattern}" >&2
+    exit 1
+  fi
+}
+
+reject_install_source_pattern() {
+  local pattern="$1"
+  local message="$2"
+
+  if rg -q "${pattern}" "${ROOT_DIR}/crates/g7-core/src/commands/install.rs" "${ROOT_DIR}/crates/g7-core/src/commands/install"; then
+    echo "${message}" >&2
+    exit 1
+  fi
+}
+
 need_pattern "web/index.html" "G7 설치 마법사"
 need_pattern "web/index.html" "data-view=\"login\""
 need_pattern "web/index.html" "접속 확인"
@@ -150,19 +188,19 @@ need_pattern "web/input.css" ".provision-modal-box"
 need_pattern "web/input.css" ".download-actions"
 need_pattern "web/input.css" "g7inst-spin"
 need_pattern "web/input.css" "data-status=\"info\""
-need_pattern "crates/g7-cli/src/web_setup.rs" "CACHE_CONTROL"
-need_pattern "crates/g7-cli/src/web_setup.rs" "emit_progress"
-need_pattern "crates/g7-cli/src/web_setup.rs" "ensure_setup_runs_as_root"
-need_pattern "crates/g7-cli/src/web_setup.rs" "sudo-token"
-need_pattern "crates/g7-cli/src/web_setup.rs" "Server password: not required"
-need_pattern "crates/g7-cli/src/web_setup.rs" "/setup/provision"
-need_pattern "crates/g7-cli/src/web_setup.rs" "validate_database_request"
-need_pattern "crates/g7-cli/src/web_setup.rs" "install_running: state.install_running.load"
-need_pattern "crates/g7-cli/src/web_setup.rs" "provision_security"
-need_pattern "crates/g7-core/src/commands/install.rs" "BACKUP_MANIFEST_PATH"
-need_pattern "crates/g7-core/src/commands/install.rs" "backup_manifest_content"
-need_pattern "crates/g7-core/src/commands/install.rs" "postfix_preseed"
-need_pattern "crates/g7-core/src/commands/install.rs" "inet_interfaces"
+need_web_setup_pattern "CACHE_CONTROL"
+need_web_setup_pattern "emit_progress"
+need_web_setup_pattern "ensure_setup_runs_as_root"
+need_web_setup_pattern "sudo-token"
+need_web_setup_pattern "Server password: not required"
+need_web_setup_pattern "/setup/provision"
+need_web_setup_pattern "validate_database_request"
+need_web_setup_pattern "install_running: state.install_running.load"
+need_web_setup_pattern "provision_security"
+need_install_source_pattern "BACKUP_MANIFEST_PATH"
+need_install_source_pattern "backup_manifest_content"
+need_install_source_pattern "postfix_preseed"
+need_install_source_pattern "inet_interfaces"
 need_pattern "crates/g7-system/src/mail.rs" "debconf-set-selections"
 need_pattern "crates/g7-system/src/mail.rs" "postconf"
 need_pattern ".github/workflows/quality-gate.yml" "Browser wizard E2E"
@@ -174,8 +212,8 @@ reject_pattern "web/index.html" "로컬 테스트|value=\"local-test\"" "web UI 
 reject_pattern "web/index.html" "옵션을 확인한 뒤 계획 생성을 누르세요" "web UI contract regression: plan step must auto-generate the review"
 reject_pattern "web/app.js" "/api/auth/login|login-password|login-username|login-form" "web UI contract regression: password login API must not return"
 reject_pattern "web/app.js" "계획 생성 버튼을 누르면 실제 plan 결과로 교체됩니다" "web UI contract regression: manual-only plan copy must not return"
-reject_pattern "crates/g7-cli/src/web_setup.rs" "/api/auth/login|LoginRequest|verify_server_account_password|sudo passwd" "web setup regression: server account password verifier must not return"
-reject_pattern "crates/g7-core/src/commands/install.rs" "access_log /var/log/nginx/g7-access.log g7_timing|log_format g7_timing" "nginx config regression: installer vhost must not depend on global custom log_format"
+reject_web_setup_pattern "/api/auth/login|LoginRequest|verify_server_account_password|sudo passwd" "web setup regression: server account password verifier must not return"
+reject_install_source_pattern "access_log /var/log/nginx/g7-access.log g7_timing|log_format g7_timing" "nginx config regression: installer vhost must not depend on global custom log_format"
 
 if rg -q "installButton\\.textContent|installResultButton\\.textContent|checkNextButton\\.textContent|themeToggle\\.textContent|button\\.textContent" "${ROOT_DIR}/web/app.js"; then
   echo "web UI contract regression: stateful buttons must use setButtonLabel" >&2

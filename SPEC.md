@@ -397,17 +397,21 @@ bootstrap.sh
 
 ## 14. 테스트 전략
 
-### 14.1 로컬 테스트
+### 14.1 로컬 빠른 테스트
 
 ```bash
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test
-cargo audit
-cargo deny check
+bash scripts/quick-gate.sh
 ```
 
-### 14.2 통합 테스트
+### 14.2 전체 품질 게이트
+
+```bash
+bash scripts/quality-gate.sh
+```
+
+`quality-gate.sh`는 quick gate를 먼저 실행한 뒤 전체 `cargo test`, clippy, doc, coverage, web build를 수행합니다.
+
+### 14.3 통합 테스트
 
 - fake command runner로 apt/nginx/systemd 명령 시뮬레이션
 - fresh server 판정 테스트
@@ -415,7 +419,7 @@ cargo deny check
 - template render 테스트
 - state resume 테스트
 
-### 14.3 실제 smoke
+### 14.4 실제 smoke
 
 릴리스 전 Ubuntu 24.04 fresh VPS 또는 VM에서:
 

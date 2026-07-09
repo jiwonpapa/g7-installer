@@ -190,6 +190,8 @@ sudo g7inst reset --yes
 
 ## 상세 문서
 
+- 로컬 빠른 검증: `bash scripts/quick-gate.sh`
+- 전체 품질 검증: `bash scripts/quality-gate.sh`
 - [초보용 설치 안내](docs/beginner-install.md)
 - [Lightsail 상세 안내](docs/lightsail-ubuntu24-setup-guide.md)
 - [SPEC](SPEC.md)

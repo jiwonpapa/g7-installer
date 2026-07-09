@@ -4,12 +4,15 @@ Date: 2026-07-08
 
 ## Current Status
 
-- Local regression gate exists: `scripts/quality-gate.sh`.
-- Local gate covers shell syntax, web static smoke, setup auth smoke, JS syntax, `cargo fmt --check`, `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo doc --no-deps`, `cargo llvm-cov --fail-under-lines 75`, and web CSS build. Set `G7_WEB_E2E=1` to also run the browser wizard E2E locally.
+- Local quick gate exists: `scripts/quick-gate.sh`.
+- Full regression gate exists: `scripts/quality-gate.sh`.
+- Quick gate covers shell syntax, web static smoke, setup auth smoke, JS syntax, `cargo fmt --check`, `cargo test -p g7-core --lib`, and `cargo test -p g7-cli --bin g7inst`.
+- Full gate runs the quick gate first, then full `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo doc --no-deps`, `cargo llvm-cov --fail-under-lines 75`, and web CSS build. Set `G7_WEB_E2E=1` to also run the browser wizard E2E locally.
 - Current measured line coverage is 79.30%.
 - Web controller line coverage is 81.72%.
 - Release assets are Linux musl binaries for x86_64 and aarch64 plus `checksums.txt`.
-- `scripts/ops-harness.sh` verifies a disposable Ubuntu 24.04 server through install, report validation, setup-guide capture, and full installer reset. The reset path removes installer-created services, account, DB/user, packages, owned files, and metadata for a fresh reinstall attempt while preserving Let's Encrypt certificates to avoid duplicate issuance limits.
+- `scripts/ops-harness.sh` verifies a disposable Ubuntu 24.04 server through fresh doctor, install, report validation, setup-guide capture, optional app smoke, reset dry-run, and full installer reset. The reset path removes installer-created services, account, DB/user, packages, owned files, and metadata for a fresh reinstall attempt while preserving Let's Encrypt certificates to avoid duplicate issuance limits.
+- Ops harness defaults to `G7_OPS_CERTBOT_SCOPE=skip`, which runs `--local-test` and never issues a production Let's Encrypt certificate. Use `G7_OPS_CERTBOT_SCOPE=staging` only with a real DNS domain. Production Let's Encrypt requires both `G7_OPS_CERTBOT_SCOPE=production` and `G7_OPS_ALLOW_PRODUCTION_LE=1`.
 - GitHub Actions workflow is present at `.github/workflows/quality-gate.yml`.
 - Browser-driven wizard E2E exists at `scripts/web-ui-e2e.spec.mjs` and covers route rendering, report downloads, plan auto-review, and provision cards against mocked controller APIs.
 
@@ -20,6 +23,7 @@ Date: 2026-07-08
 - Package rollback verification used `ssh` inside a file-fed loop. Without `ssh -n`, the first SSH call could consume the remaining package list from stdin.
 - Browser-driven web UI E2E uses mocked controller APIs locally. Full root-capable install E2E remains covered by `scripts/ops-harness.sh` on a disposable Ubuntu VPS.
 - CLI print-path coverage is still weaker than core command coverage.
+- `install.rs`, `web_setup.rs`, and `plan.rs` are now physically split with `include!` as a low-risk first cut. The next architectural pass should replace transitional includes with real Rust submodules and narrower public boundaries.
 
 ## Improvements Applied
 
@@ -36,6 +40,10 @@ Date: 2026-07-08
 - Shell compound checks that require sudo now run through `sudo sh -c` instead of relying on partial sudo command parsing.
 - Ops harness now expects the full install phase to reach `completed`, captures `/var/log/g7-installer/setup-guide.md`, and uses `reset --yes` for full installer-created resource cleanup instead of unsafe package rollback after DB/certificate mutation.
 - Ops harness checks reset output, verifies packages that were absent before install are absent again, verifies installer-owned paths are gone, and confirms `doctor` returns `install_allowed: true` after reset.
+- Added `scripts/quick-gate.sh` so local development can avoid full coverage/doc/web-build cost on every small change.
+- Full quality gate now runs the quick gate first.
+- Ops harness separates Let's Encrypt scope, reset dry-run, and optional app smoke. Production LE issuance is opt-in only.
+- `install.rs`, `web_setup.rs`, and `plan.rs` were physically split into focused files as a behavior-preserving first cut.
 - Ops harness checks:
   - disposable-server confirmation guard
   - Ubuntu 24.04 host check

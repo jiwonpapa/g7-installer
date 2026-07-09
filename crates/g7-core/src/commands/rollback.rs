@@ -11,14 +11,14 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::commands::reset::{self, ResetPaths, ResetReport};
+use crate::installer_paths::REPORT_PATH;
+use crate::resource_policy::{is_certbot_package, preserve_service_on_reset};
 use crate::{Error, Result};
 use g7_state::owned_files::{OWNED_FILES_PATH, read_owned_files};
 use g7_state::state::{InstallerPhase, STATE_PATH, read_state_file};
 use g7_system::SystemProbe;
 use g7_system::command::{CommandOutput, CommandRunner};
 use g7_system::package::PackageStatus;
-
-const REPORT_PATH: &str = "/var/log/g7-installer/report.json";
 const SAFE_ROLLBACK_PHASES: [&str; 4] = [
     InstallerPhase::PackageFailed.as_str(),
     InstallerPhase::PackagesInstalled.as_str(),
@@ -161,6 +161,18 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     package_actions.extend(
         baseline
             .iter()
+            .filter(|check| check.status == SAFE_BASELINE_STATUS && is_certbot_package(&check.name))
+            .map(|check| {
+                RollbackAction::new(
+                    &check.name,
+                    "preserved",
+                    "인증서 보존을 위해 certbot 계열 패키지는 제거하지 않습니다.",
+                )
+            }),
+    );
+    package_actions.extend(
+        baseline
+            .iter()
             .filter(|check| check.status == "installed")
             .map(|check| {
                 RollbackAction::new(
@@ -292,6 +304,7 @@ fn rollback_packages(baseline: &[ReportCheck]) -> Vec<String> {
         baseline
             .iter()
             .filter(|check| check.status == SAFE_BASELINE_STATUS)
+            .filter(|check| !is_certbot_package(&check.name))
             .map(|check| check.name.as_str()),
     )
 }
@@ -300,6 +313,18 @@ fn planned_package_actions(baseline: &[ReportCheck]) -> Vec<RollbackAction> {
     baseline
         .iter()
         .map(|check| {
+            if is_certbot_package(&check.name) {
+                return RollbackAction::new(
+                    &check.name,
+                    if check.status == SAFE_BASELINE_STATUS {
+                        "would-preserve"
+                    } else {
+                        "skipped"
+                    },
+                    "인증서 보존을 위해 certbot 계열 패키지는 제거하지 않습니다.",
+                );
+            }
+
             if check.status == SAFE_BASELINE_STATUS {
                 RollbackAction::new(&check.name, "would-purge", "패키지를 제거할 예정입니다.")
             } else {
@@ -321,6 +346,14 @@ fn planned_service_actions(
     services
         .iter()
         .map(|service| {
+            if preserve_service_on_reset(service) {
+                return Ok(RollbackAction::new(
+                    service,
+                    "skipped",
+                    "인증서 자동 갱신을 보존하기 위해 certbot.timer는 유지합니다.",
+                ));
+            }
+
             let owners = service_owner_packages(service, report);
             let owner_statuses = owners
                 .iter()
@@ -385,7 +418,7 @@ fn service_owner_packages(service: &str, report: &serde_json::Value) -> Vec<Stri
     if service == "postfix" {
         return vec!["postfix".to_string()];
     }
-    if service == "certbot.timer" {
+    if preserve_service_on_reset(service) {
         return vec!["certbot".to_string()];
     }
 
@@ -770,6 +803,72 @@ mod tests {
                 .package_actions
                 .iter()
                 .any(|action| action.name == "php8.3-fpm" && action.status == "removed")
+        );
+
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn rollback_preserves_certbot_packages_and_timer_even_when_installer_added_them()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let fs_root = rollback_fs_root(false, true)?;
+        fs::write(
+            fs_root.join("var/log/g7-installer/report.json"),
+            r#"{
+  "version": 1,
+  "domain": "example.com",
+  "phase": "packages-installed",
+  "web_server": "nginx",
+  "php_version": "8.3",
+  "database": "mysql",
+  "web_root": "/home/g7/public_html",
+  "preinstall_package_checks": [
+    { "name": "nginx", "status": "not-installed", "message": "absent" },
+    { "name": "certbot", "status": "not-installed", "message": "absent" },
+    { "name": "python3-certbot-nginx", "status": "not-installed", "message": "absent" }
+  ],
+  "package_checks": [
+    { "name": "nginx", "status": "pass", "message": "패키지 설치 확인 완료" },
+    { "name": "certbot", "status": "pass", "message": "패키지 설치 확인 완료" },
+    { "name": "python3-certbot-nginx", "status": "pass", "message": "패키지 설치 확인 완료" }
+  ],
+  "service_checks": [
+    { "name": "nginx", "status": "pass", "message": "service is active" },
+    { "name": "certbot.timer", "status": "pass", "message": "service is active" }
+  ],
+  "port_checks": []
+}
+"#,
+        )?;
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success("0\n"));
+        runner.push_output(CommandOutput::success("0\n"));
+        let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
+
+        let report =
+            run_with_probe_and_paths(false, true, &probe, &RollbackPaths::with_root(&fs_root))?;
+
+        assert!(
+            report
+                .package_actions
+                .iter()
+                .any(|action| { action.name == "certbot" && action.status == "would-preserve" })
+        );
+        assert!(report.package_actions.iter().any(|action| {
+            action.name == "python3-certbot-nginx" && action.status == "would-preserve"
+        }));
+        assert!(
+            !report
+                .package_actions
+                .iter()
+                .any(|action| { action.name == "certbot" && action.status == "would-purge" })
+        );
+        assert!(
+            report
+                .service_actions
+                .iter()
+                .any(|action| { action.name == "certbot.timer" && action.status == "skipped" })
         );
 
         fs::remove_dir_all(fs_root)?;

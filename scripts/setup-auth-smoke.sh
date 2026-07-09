@@ -26,14 +26,33 @@ need() {
   fi
 }
 
-need crates/g7-cli/src/web_setup.rs "ensure_setup_runs_as_root"
-need crates/g7-cli/src/web_setup.rs "g7inst setup must be started with sudo/root"
-need crates/g7-cli/src/web_setup.rs "Server account password input is not used in the web UI"
-need crates/g7-cli/src/web_setup.rs "sudo-token"
+need_web_setup() {
+  local pattern="$1"
+
+  if ! rg -q "${pattern}" crates/g7-cli/src/web_setup.rs crates/g7-cli/src/web_setup; then
+    echo "missing setup auth contract in web setup source: ${pattern}" >&2
+    exit 1
+  fi
+}
+
+reject_web_setup() {
+  local pattern="$1"
+  local message="$2"
+
+  if rg -q "${pattern}" crates/g7-cli/src/web_setup.rs crates/g7-cli/src/web_setup; then
+    echo "${message}" >&2
+    exit 1
+  fi
+}
+
+need_web_setup "ensure_setup_runs_as_root"
+need_web_setup "g7inst setup must be started with sudo/root"
+need_web_setup "Server account password input is not used in the web UI"
+need_web_setup "sudo-token"
 need web/index.html "서버 비밀번호 입력 없음"
 need web/app.js "setup token session is required"
 
-reject crates/g7-cli/src/web_setup.rs "/api/auth/login|LoginRequest|verify_server_account_password|account_can_install|require_login_allowed|require_loopback_login" "setup auth regression: password login backend returned"
+reject_web_setup "/api/auth/login|LoginRequest|verify_server_account_password|account_can_install|require_login_allowed|require_loopback_login" "setup auth regression: password login backend returned"
 reject web/index.html "login-password|login-username|login-form|서버 계정|로그인하고 계속" "setup auth regression: password login UI returned"
 reject web/app.js "/api/auth/login|login-password|login-username|login-form" "setup auth regression: password login frontend returned"
 

@@ -9,6 +9,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::installer_paths::{BACKUP_DIR, CONFIG_PATH, LETSENCRYPT_LIVE_DIR, REPORT_PATH};
+use crate::resource_policy::{preserve_package_on_reset, preserve_service_on_reset};
 use crate::{Error, Result};
 use g7_state::owned_files::{OWNED_FILES_PATH, read_owned_files};
 use g7_system::SystemProbe;
@@ -24,8 +26,6 @@ const MANAGED_SWAP_MARKERS: [(&str, &str); 2] = [
     (SWAP_UNIT_PATH, "G7 Installer managed swapfile"),
     (SWAP_SYSCTL_PATH, "Managed by g7inst."),
 ];
-const REPORT_PATH: &str = "/var/log/g7-installer/report.json";
-const CONFIG_PATH: &str = "/etc/g7-installer/config.toml";
 const BASELINE_NOT_INSTALLED: &str = "not-installed";
 const PHP_SOURCE_ONDREJ: &str = "ondrej";
 const ONDREJ_PHP_SOURCE_PATHS: [&str; 3] = [
@@ -115,8 +115,6 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     let metadata = reset_metadata(paths)?;
     let mut actions = Vec::new();
     let certificate_domains = preserved_certificate_domains(paths, &metadata)?;
-    let preserve_certbot = should_preserve_certbot(&metadata, &certificate_domains);
-
     for domain in &certificate_domains {
         actions.push(ResetAction::new(
             format!("certificate:{domain}"),
@@ -126,6 +124,17 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
                 "preserved"
             },
             "Let's Encrypt certificate preserved to avoid duplicate issuance limits",
+        ));
+    }
+    if certbot_timer_should_be_preserved(paths, &metadata) {
+        actions.push(ResetAction::new(
+            "service:certbot.timer",
+            if dry_run {
+                "would-preserve"
+            } else {
+                "preserved"
+            },
+            "인증서 자동 갱신을 보존하기 위해 certbot.timer는 중지하지 않습니다.",
         ));
     }
 
@@ -187,7 +196,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     }
 
     let packages = metadata.packages_to_purge.clone();
-    actions.extend(reset_packages(probe, &packages, dry_run, preserve_certbot)?);
+    actions.extend(reset_packages(probe, &packages, dry_run)?);
 
     let (removed, missing) = remove_reset_files(paths, &metadata, dry_run)?;
 
@@ -489,7 +498,12 @@ fn fill_metadata_from_config(metadata: &mut ResetMetadata, config: &str) {
 }
 
 fn reset_services(paths: &ResetPaths, metadata: &ResetMetadata) -> Vec<String> {
-    let mut services = metadata.services.clone();
+    let mut services = metadata
+        .services
+        .iter()
+        .filter(|service| !preserve_service_on_reset(service))
+        .cloned()
+        .collect::<Vec<_>>();
 
     if paths.resolve(SWAP_UNIT_PATH).exists() {
         services.push("swapfile.swap".to_string());
@@ -507,8 +521,13 @@ fn reset_services(paths: &ResetPaths, metadata: &ResetMetadata) -> Vec<String> {
     unique_names(services.iter().map(String::as_str))
 }
 
-fn should_preserve_certbot(metadata: &ResetMetadata, certificate_domains: &[String]) -> bool {
-    metadata.certbot_issued || !certificate_domains.is_empty()
+fn certbot_timer_should_be_preserved(paths: &ResetPaths, metadata: &ResetMetadata) -> bool {
+    metadata
+        .services
+        .iter()
+        .any(|service| preserve_service_on_reset(service))
+        || paths.resolve("/etc/systemd/system/certbot.timer").exists()
+        || paths.resolve("/lib/systemd/system/certbot.timer").exists()
 }
 
 fn preserved_certificate_domains(
@@ -520,7 +539,7 @@ fn preserved_certificate_domains(
     if let Some(domain) = metadata.domain.as_deref().filter(|domain| {
         metadata.certbot_issued
             || paths
-                .resolve(&format!("/etc/letsencrypt/live/{domain}"))
+                .resolve(&format!("{LETSENCRYPT_LIVE_DIR}/{domain}"))
                 .exists()
     }) {
         domains.push(domain.to_string());
@@ -531,13 +550,13 @@ fn preserved_certificate_domains(
 }
 
 fn letsencrypt_live_domains(paths: &ResetPaths) -> Result<Vec<String>> {
-    let live_dir = paths.resolve("/etc/letsencrypt/live");
+    let live_dir = paths.resolve(LETSENCRYPT_LIVE_DIR);
     let entries = match fs::read_dir(&live_dir) {
         Ok(entries) => entries,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(source) => {
             return Err(Error::FileReadFailed {
-                path: "/etc/letsencrypt/live".to_string(),
+                path: LETSENCRYPT_LIVE_DIR.to_string(),
                 source,
             });
         }
@@ -546,7 +565,7 @@ fn letsencrypt_live_domains(paths: &ResetPaths) -> Result<Vec<String>> {
     let mut domains = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|source| Error::FileReadFailed {
-            path: "/etc/letsencrypt/live".to_string(),
+            path: LETSENCRYPT_LIVE_DIR.to_string(),
             source,
         })?;
         let name = entry.file_name().to_string_lossy().to_string();
@@ -620,13 +639,12 @@ fn reset_packages<R: CommandRunner>(
     probe: &SystemProbe<R>,
     packages: &[String],
     dry_run: bool,
-    preserve_certbot: bool,
 ) -> Result<Vec<ResetAction>> {
     let mut actions = Vec::new();
     let mut purge_packages = Vec::new();
 
     for package in packages {
-        if preserve_certbot && is_certbot_package(package) {
+        if preserve_package_on_reset(package) {
             actions.push(ResetAction::new(
                 format!("package:{package}"),
                 if dry_run {
@@ -678,10 +696,6 @@ fn reset_packages<R: CommandRunner>(
     }));
 
     Ok(actions)
-}
-
-fn is_certbot_package(package: &str) -> bool {
-    package == "certbot" || package == "letsencrypt" || package.starts_with("python3-certbot")
 }
 
 fn database_reset_message(database_name: Option<&str>, database_user: Option<&str>) -> String {
@@ -794,7 +808,7 @@ fn validate_reset_path(path: &str) -> Result<()> {
         "/etc/g7-installer",
         "/var/lib/g7-installer",
         "/var/log/g7-installer",
-        "/var/backups/g7-installer",
+        BACKUP_DIR,
         "/var/www/g7",
         "/etc/nginx/sites-available/g7.conf",
         "/etc/nginx/sites-enabled/g7.conf",
@@ -1026,7 +1040,7 @@ mod tests {
     }
 
     #[test]
-    fn reset_continues_when_service_unit_is_already_removed()
+    fn reset_preserves_certbot_timer_instead_of_disabling_it()
     -> std::result::Result<(), Box<dyn std::error::Error>> {
         let fs_root = create_temp_fs_root()?;
         fs::create_dir_all(fs_root.join("var/lib/g7-installer"))?;
@@ -1050,21 +1064,15 @@ mod tests {
 
         let runner = FakeCommandRunner::default();
         runner.push_output(CommandOutput::success("0\n"));
-        runner.push_output(CommandOutput {
-            status: 3,
-            stdout: "inactive\n".to_string(),
-            stderr: String::new(),
-        });
-        runner.push_output(CommandOutput::failure(
-            1,
-            "Failed to disable unit: Unit file certbot.timer does not exist.",
-        ));
         let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
         let report =
             run_with_probe_and_paths(true, false, &probe, &ResetPaths::with_root(&fs_root))?;
 
         assert!(report.actions.iter().any(|action| {
-            action.name == "service:certbot.timer" && action.status == "missing"
+            action.name == "service:certbot.timer" && action.status == "preserved"
+        }));
+        assert!(!report.actions.iter().any(|action| {
+            action.name == "service:certbot.timer" && action.status == "disabled"
         }));
         assert!(!fs_root.join("var/log/g7-installer/report.json").exists());
         assert!(
@@ -1144,6 +1152,9 @@ mod tests {
                 ],
                 "certbot_checks": [
                     {"name": "tls-config", "status": "fail", "message": "rate limited"}
+                ],
+                "service_checks": [
+                    {"name": "certbot.timer", "status": "pass", "message": "active"}
                 ]
             }"#,
         )?;
@@ -1171,10 +1182,84 @@ mod tests {
         assert!(report.actions.iter().any(|action| {
             action.name == "package:python3-certbot-nginx" && action.status == "would-preserve"
         }));
+        assert!(report.actions.iter().any(|action| {
+            action.name == "service:certbot.timer" && action.status == "would-preserve"
+        }));
         assert!(
             !report.actions.iter().any(|action| {
                 action.name == "package:certbot" && action.status == "would-purge"
             })
+        );
+        assert!(!report.actions.iter().any(|action| {
+            action.name == "service:certbot.timer" && action.status == "would-disable"
+        }));
+
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn reset_preserves_certbot_packages_even_without_live_certificate()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let fs_root = create_temp_fs_root()?;
+        fs::create_dir_all(fs_root.join("var/log/g7-installer"))?;
+        fs::write(
+            fs_root.join("var/log/g7-installer/report.json"),
+            r#"{
+                "domain": "g7devops.com",
+                "preinstall_package_checks": [
+                    {"name": "nginx", "status": "not-installed", "message": "fresh"},
+                    {"name": "certbot", "status": "not-installed", "message": "fresh"},
+                    {"name": "python3-certbot-nginx", "status": "not-installed", "message": "fresh"}
+                ],
+                "certbot_checks": [
+                    {"name": "tls-config", "status": "fail", "message": "rate limited"}
+                ]
+            }"#,
+        )?;
+
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success("0\n"));
+        let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
+        let report =
+            run_with_probe_and_paths(true, true, &probe, &ResetPaths::with_root(&fs_root))?;
+        let dry_run_snapshot = report
+            .actions
+            .iter()
+            .map(|action| format!("{}:{}", action.name, action.status))
+            .collect::<Vec<_>>();
+
+        assert!(
+            report
+                .actions
+                .iter()
+                .any(|action| { action.name == "package:nginx" && action.status == "would-purge" })
+        );
+        assert!(report.actions.iter().any(|action| {
+            action.name == "package:certbot" && action.status == "would-preserve"
+        }));
+        assert!(report.actions.iter().any(|action| {
+            action.name == "package:python3-certbot-nginx" && action.status == "would-preserve"
+        }));
+        assert!(
+            !report.actions.iter().any(|action| {
+                action.name == "package:certbot" && action.status == "would-purge"
+            })
+        );
+        assert!(
+            dry_run_snapshot
+                .iter()
+                .any(|line| line == "package:certbot:would-preserve")
+        );
+        assert!(
+            dry_run_snapshot
+                .iter()
+                .any(|line| line == "package:python3-certbot-nginx:would-preserve")
+        );
+        assert!(
+            !dry_run_snapshot
+                .iter()
+                .any(|line| line == "package:certbot:would-purge")
         );
 
         fs::remove_dir_all(fs_root)?;

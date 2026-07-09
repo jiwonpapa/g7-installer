@@ -6,16 +6,8 @@ COVERAGE_FLOOR="${G7_COVERAGE_FLOOR:-75}"
 
 cd "${ROOT_DIR}"
 
-echo "[quality-gate] shell syntax"
-bash -n scripts/*.sh
-echo "[quality-gate] web static smoke"
-bash scripts/web-static-smoke.sh
-echo "[quality-gate] setup auth smoke"
-bash scripts/setup-auth-smoke.sh
-echo "[quality-gate] javascript syntax"
-node --check web/app.js
-echo "[quality-gate] cargo fmt"
-cargo fmt --check
+echo "[quality-gate] quick gate"
+bash scripts/quick-gate.sh
 echo "[quality-gate] cargo test"
 cargo test
 echo "[quality-gate] cargo clippy"

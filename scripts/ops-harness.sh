@@ -13,6 +13,8 @@ INSTALL_VERSION="${G7_OPS_VERSION:-v${EXPECTED_VERSION}}"
 SUDO="${G7_OPS_SUDO:-sudo -n}"
 VERIFY_REINSTALL="${G7_OPS_VERIFY_REINSTALL:-0}"
 CLEANUP="${G7_OPS_CLEANUP:-1}"
+CERTBOT_SCOPE="${G7_OPS_CERTBOT_SCOPE:-skip}"
+APP_SMOKE="${G7_OPS_APP_SMOKE:-0}"
 CONFIRM_DISPOSABLE="${G7_OPS_CONFIRM_DISPOSABLE:-0}"
 REPORT_DIR="${G7_OPS_REPORT_DIR:-${ROOT_DIR}/target/ops-harness/$(date +%Y%m%d-%H%M%S)}"
 BOOTSTRAP_URL="https://raw.githubusercontent.com/${REPO}/main/scripts/bootstrap.sh"
@@ -29,6 +31,26 @@ case "${SOURCE}" in
     exit 2
     ;;
 esac
+
+case "${CERTBOT_SCOPE}" in
+  skip|staging)
+    ;;
+  production)
+    if [[ "${G7_OPS_ALLOW_PRODUCTION_LE:-0}" != "1" ]]; then
+      echo "G7_OPS_CERTBOT_SCOPE=production requires G7_OPS_ALLOW_PRODUCTION_LE=1" >&2
+      exit 2
+    fi
+    ;;
+  *)
+    echo "unsupported G7_OPS_CERTBOT_SCOPE: ${CERTBOT_SCOPE} (use skip, staging, or production)" >&2
+    exit 2
+    ;;
+esac
+
+if [[ "${CERTBOT_SCOPE}" != "skip" && "${DOMAIN}" == *.local ]]; then
+  echo "G7_OPS_CERTBOT_SCOPE=${CERTBOT_SCOPE} requires a real DNS domain, not ${DOMAIN}" >&2
+  exit 2
+fi
 
 if [[ "${CONFIRM_DISPOSABLE}" != "1" ]]; then
   cat >&2 <<EOF
@@ -158,6 +180,53 @@ for item in data.get("preinstall_package_checks") or []:
 PY
 }
 
+install_args() {
+  case "${CERTBOT_SCOPE}" in
+    skip)
+      printf -- "--local-test --domain %s" "$(quote "${DOMAIN}")"
+      ;;
+    staging|production)
+      printf -- "--domain %s" "$(quote "${DOMAIN}")"
+      ;;
+  esac
+}
+
+install_env_prefix() {
+  case "${CERTBOT_SCOPE}" in
+    staging)
+      printf "env G7_CERTBOT_STAGING=1 "
+      ;;
+    *)
+      printf ""
+      ;;
+  esac
+}
+
+run_app_smoke() {
+  local cycle="$1"
+  local report_path="$2"
+  local url
+
+  if [[ "${APP_SMOKE}" != "1" ]]; then
+    log "${cycle}: app smoke skipped (set G7_OPS_APP_SMOKE=1 to enable)"
+    return
+  fi
+
+  url="$(python3 - "$report_path" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+print(data.get("app_url") or "")
+PY
+)"
+  if [[ -z "${url}" ]]; then
+    fail "${cycle}: report did not contain app_url for app smoke"
+  fi
+
+  capture_remote "${cycle}-app-smoke" "curl -fsSL --max-time 15 $(quote "${url}") >/dev/null"
+}
+
 install_binary() {
   local remote_bin_q
   remote_bin_q="$(quote "${REMOTE_BIN}")"
@@ -197,23 +266,27 @@ run_install_cycle() {
   local rollback_dry_run
   local rollback_output
   local doctor_after_rollback
+  local reset_dry_run_output
   local report_path
   local package_list_path
+  local args
+  local env_prefix
 
   remote_bin_q="$(quote "${REMOTE_BIN}")"
-  domain_q="$(quote "${DOMAIN}")"
   report_path="${REPORT_DIR}/${cycle}-report.json"
   package_list_path="${REPORT_DIR}/${cycle}-new-packages.txt"
+  args="$(install_args)"
+  env_prefix="$(install_env_prefix)"
 
   log "${cycle}: preflight doctor"
   doctor_before="$(sudo_capture "${cycle}-doctor-before" "${remote_bin_q} doctor")"
   assert_contains "${cycle} doctor before" "${doctor_before}" "install_allowed: true"
 
   log "${cycle}: plan"
-  capture_remote "${cycle}-plan" "${remote_bin_q} plan --local-test --domain ${domain_q}"
+  capture_remote "${cycle}-plan" "${remote_bin_q} plan ${args}"
 
   log "${cycle}: install"
-  install_output="$(sudo_capture "${cycle}-install" "${remote_bin_q} install --local-test --domain ${domain_q}")"
+  install_output="$(sudo_capture "${cycle}-install" "${env_prefix}${remote_bin_q} install ${args}")"
   assert_contains "${cycle} install" "${install_output}" "phase: completed"
 
   report_json="$(sudo_capture "${cycle}-report-json" "cat /var/log/g7-installer/report.json")"
@@ -221,12 +294,17 @@ run_install_cycle() {
   validate_report "${report_path}"
   write_new_package_list "${report_path}" "${package_list_path}"
   sudo_capture "${cycle}-setup-guide" "cat /var/log/g7-installer/setup-guide.md" >/dev/null
+  run_app_smoke "${cycle}" "${report_path}"
 
   log "${cycle}: post-install doctor must block fresh install"
   doctor_after_install="$(sudo_capture "${cycle}-doctor-after-install" "${remote_bin_q} doctor")"
   assert_contains "${cycle} doctor after install" "${doctor_after_install}" "install_allowed: false"
 
   if [[ "${CLEANUP}" == "1" ]]; then
+    log "${cycle}: reset dry-run preview"
+    reset_dry_run_output="$(sudo_capture "${cycle}-reset-dry-run" "${remote_bin_q} reset --yes --dry-run")"
+    assert_contains "${cycle} reset dry-run" "${reset_dry_run_output}" "dry_run: true"
+
     log "${cycle}: reset installer-created resources"
     reset_output="$(sudo_capture "${cycle}-reset" "${remote_bin_q} reset --yes")"
     assert_contains "${cycle} reset" "${reset_output}" "G7 Installer Reset"

@@ -9,6 +9,24 @@ pub fn certonly_webroot<R: CommandRunner>(
     domains: &[String],
     email: &str,
 ) -> Result<CommandOutput, CommandError> {
+    certonly_webroot_with_staging(
+        runner,
+        webroot,
+        cert_name,
+        domains,
+        email,
+        certbot_staging_enabled(),
+    )
+}
+
+fn certonly_webroot_with_staging<R: CommandRunner>(
+    runner: &R,
+    webroot: &str,
+    cert_name: &str,
+    domains: &[String],
+    email: &str,
+    staging: bool,
+) -> Result<CommandOutput, CommandError> {
     let mut spec = CommandSpec::new(CERTBOT)
         .arg("certonly")
         .arg("--webroot")
@@ -21,6 +39,9 @@ pub fn certonly_webroot<R: CommandRunner>(
         .arg("--email")
         .arg(email)
         .arg("--keep-until-expiring");
+    if staging {
+        spec = spec.arg("--staging");
+    }
 
     for domain in domains {
         spec = spec.arg("-d").arg(domain);
@@ -57,9 +78,16 @@ pub fn delete_cert<R: CommandRunner>(
     )
 }
 
+fn certbot_staging_enabled() -> bool {
+    std::env::var("G7_CERTBOT_STAGING")
+        .ok()
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{certonly_webroot, delete_cert, renew_dry_run};
+    use super::{certonly_webroot, certonly_webroot_with_staging, delete_cert, renew_dry_run};
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
 
@@ -87,6 +115,26 @@ mod tests {
                 .contains(&OsString::from("--non-interactive"))
         );
         assert!(recorded[0].args.contains(&OsString::from("-d")));
+        Ok(())
+    }
+
+    #[test]
+    fn certonly_webroot_supports_staging_opt_in()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success(""));
+
+        certonly_webroot_with_staging(
+            &runner,
+            "/home/g7/public_html/public",
+            "example.com",
+            &["example.com".to_string()],
+            "admin@example.com",
+            true,
+        )?;
+        let recorded = runner.recorded();
+
+        assert!(recorded[0].args.contains(&OsString::from("--staging")));
         Ok(())
     }
 
