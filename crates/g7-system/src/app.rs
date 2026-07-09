@@ -22,6 +22,20 @@ pub fn composer_install<R: CommandRunner>(
     )
 }
 
+pub fn composer_require<R: CommandRunner>(
+    runner: &R,
+    cwd: &Path,
+    package: &str,
+) -> Result<CommandOutput, CommandError> {
+    runner.run(
+        &CommandSpec::new("composer")
+            .arg("require")
+            .arg(package)
+            .arg("--no-interaction")
+            .current_dir(cwd),
+    )
+}
+
 pub fn npm_install<R: CommandRunner>(
     runner: &R,
     cwd: &Path,
@@ -57,7 +71,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{artisan, composer_install, npm_install, npm_run_build};
+    use super::{artisan, composer_install, composer_require, npm_install, npm_run_build};
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
     use std::path::Path;
@@ -86,6 +100,28 @@ mod tests {
                 OsString::from("--no-interaction"),
             ]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn composer_require_runs_in_app_directory()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success(""));
+
+        composer_require(&runner, Path::new("/srv/app"), "laravel/octane")?;
+        let recorded = runner.recorded();
+
+        assert_eq!(recorded[0].program, OsString::from("composer"));
+        assert_eq!(
+            recorded[0].args,
+            vec![
+                OsString::from("require"),
+                OsString::from("laravel/octane"),
+                OsString::from("--no-interaction"),
+            ]
+        );
+        assert_eq!(recorded[0].cwd.as_deref(), Some(Path::new("/srv/app")));
         Ok(())
     }
 

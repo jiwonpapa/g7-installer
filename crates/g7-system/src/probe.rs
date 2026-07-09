@@ -7,7 +7,7 @@ use crate::account::{
     set_login_password, user_exists,
 };
 use crate::apache::{config_test as apache_config_test, enable_module as apache_enable_module};
-use crate::app::{artisan, composer_install, npm_install, npm_run_build};
+use crate::app::{artisan, composer_install, composer_require, npm_install, npm_run_build};
 use crate::apt::{apt_add_repository, apt_candidate_available, apt_install, apt_purge, apt_update};
 use crate::archive::{
     copy_dir_contents, download_file, git_clone, git_diff_index_clean, git_fsck_full,
@@ -276,6 +276,14 @@ impl<R: CommandRunner> SystemProbe<R> {
 
     pub fn composer_install(&self, cwd: &Path) -> Result<CommandOutput, SystemProbeError> {
         composer_install(&self.runner, cwd).map_err(SystemProbeError::Command)
+    }
+
+    pub fn composer_require(
+        &self,
+        cwd: &Path,
+        package: &str,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        composer_require(&self.runner, cwd, package).map_err(SystemProbeError::Command)
     }
 
     pub fn npm_install(&self, cwd: &Path) -> Result<CommandOutput, SystemProbeError> {

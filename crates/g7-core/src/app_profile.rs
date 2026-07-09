@@ -7,7 +7,8 @@
 use crate::{Error, Result};
 
 pub const DEFAULT_APP_PROFILE: &str = "gnuboard7";
-pub const SUPPORTED_APP_PROFILES: [&str; 3] = ["gnuboard7", "wordpress", "laravel"];
+pub const SUPPORTED_APP_PROFILES: [&str; 4] =
+    ["gnuboard7", "wordpress", "laravel", "laravel-octane"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppProfile {
@@ -102,6 +103,24 @@ const LARAVEL_EXTENSIONS: &[&str] = &[
     "xml",
 ];
 
+const LARAVEL_OCTANE_EXTENSIONS: &[&str] = &[
+    "bcmath",
+    "ctype",
+    "curl",
+    "dom",
+    "fileinfo",
+    "filter",
+    "hash",
+    "mbstring",
+    "openssl",
+    "pcntl",
+    "pdo",
+    "pdo_mysql",
+    "session",
+    "tokenizer",
+    "xml",
+];
+
 const WORDPRESS_PROFILE: AppProfile = AppProfile {
     id: "wordpress",
     label: "WordPress",
@@ -186,11 +205,44 @@ const LARAVEL_PROFILE: AppProfile = AppProfile {
     ],
 };
 
+const LARAVEL_OCTANE_PROFILE: AppProfile = AppProfile {
+    id: "laravel-octane",
+    label: "Laravel Octane",
+    summary: "Laravel app served by Octane workers on FrankenPHP behind an Nginx edge proxy.",
+    min_php: "8.2",
+    database_requirement: "MySQL or MariaDB supported by the selected Laravel release",
+    document_root: DocumentRootStrategy::PublicSubdir,
+    php_extensions: LARAVEL_OCTANE_EXTENSIONS,
+    system_packages: &["composer", "nodejs", "npm"],
+    services: &[
+        "laravel-queue.service",
+        "laravel-scheduler.service",
+        "laravel-scheduler.timer",
+    ],
+    writable_paths: &["storage", "bootstrap/cache"],
+    post_install_steps: &[
+        "fetch Laravel application source",
+        "run composer install --no-dev",
+        "install Laravel Octane with FrankenPHP",
+        "build frontend assets",
+        "create .env and APP_KEY",
+        "run migrations and optimization",
+        "serve app through Octane on 127.0.0.1:7080",
+    ],
+    health_checks: &[
+        "GET /",
+        "php artisan about",
+        "g7-frankenphp Octane service active",
+        "queue worker active when enabled",
+    ],
+};
+
 pub fn resolve_app_profile(value: &str) -> Result<&'static AppProfile> {
     let value = value.trim().to_ascii_lowercase();
     match value.as_str() {
         "wordpress" => Ok(&WORDPRESS_PROFILE),
         "laravel" => Ok(&LARAVEL_PROFILE),
+        "laravel-octane" | "octane" => Ok(&LARAVEL_OCTANE_PROFILE),
         "gnuboard7" | "g7" => Ok(&GNUBOARD7_PROFILE),
         _ => Err(Error::InvalidOption {
             field: "app-profile",
@@ -244,6 +296,30 @@ mod tests {
             "/home/g7/public_html"
         );
         assert!(profile.php_extensions.contains(&"mysqli"));
+        Ok(())
+    }
+
+    #[test]
+    fn laravel_octane_uses_public_root_and_frankenphp_service()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let profile = resolve_app_profile("octane")?;
+
+        assert_eq!(profile.id, "laravel-octane");
+        assert_eq!(
+            profile.document_root_for("/home/g7/public_html"),
+            "/home/g7/public_html/public"
+        );
+        assert!(
+            profile
+                .health_checks
+                .contains(&"g7-frankenphp Octane service active")
+        );
+        assert!(
+            profile
+                .post_install_steps
+                .iter()
+                .any(|step| step.contains("Octane"))
+        );
         Ok(())
     }
 }

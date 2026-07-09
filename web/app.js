@@ -191,6 +191,10 @@ const checkLabel = {
   "frankenphp-vhost": "FrankenPHP vhost",
   "frankenphp-runtime": "FrankenPHP 런타임",
   "frankenphp-restart": "FrankenPHP 재시작",
+  "frankenphp-octane-service-file": "Octane 서비스 설정",
+  "frankenphp-octane-daemon-reload": "Octane 서비스 반영",
+  "frankenphp-octane-restart": "Octane 재시작",
+  "frankenphp-octane-active": "Octane 실행 확인",
   "frankenphp-runtime-boundary": "FrankenPHP 공개 경계",
   "frankenphp-edge-runtime-reload": "Nginx edge reload",
   "frankenphp-https-vhost": "FrankenPHP HTTPS",
@@ -248,6 +252,21 @@ const templates = {
     redis: "enable",
     mail_mode: "local-postfix",
     app_package: "gnuboard7",
+    web_root_mode: "public-html",
+    www_mode: "redirect-to-www",
+    security_profile: "standard",
+    ssh_policy: "audit-only",
+  },
+  "frankenphp-octane": {
+    domain: null,
+    deployment_mode: "public",
+    web_server: "frankenphp",
+    php_version: "8.5",
+    database: "mysql",
+    database_version: "mysql-8.4",
+    redis: "enable",
+    mail_mode: "local-postfix",
+    app_package: "laravel-octane",
     web_root_mode: "public-html",
     www_mode: "redirect-to-www",
     security_profile: "standard",
@@ -1248,7 +1267,7 @@ function databasePrefix(appPackage) {
   if (appPackage === "wordpress") {
     return "wp";
   }
-  if (appPackage === "laravel") {
+  if (appPackage === "laravel" || appPackage === "laravel-octane") {
     return "laravel";
   }
   return "g7";
@@ -1313,6 +1332,21 @@ function syncFrankenPhpRuntime() {
   }
 }
 
+function syncOctaneRuntime() {
+  const appPackage = nodes.optionsForm.elements.app_package?.value;
+  const webServer = nodes.optionsForm.elements.web_server;
+  const phpVersion = nodes.optionsForm.elements.php_version;
+  if (appPackage !== "laravel-octane") {
+    return;
+  }
+  if (webServer && webServer.value !== "frankenphp") {
+    webServer.value = "frankenphp";
+  }
+  if (phpVersion && phpVersion.value !== "8.5") {
+    phpVersion.value = "8.5";
+  }
+}
+
 function refreshFormState(options = {}) {
   const preservePlan = Boolean(options.preservePlan);
   const shouldPersist = options.persist !== false;
@@ -1329,6 +1363,7 @@ function refreshFormState(options = {}) {
     renderPackageProgress([]);
     refreshInstallButtonState();
   }
+  syncOctaneRuntime();
   syncFrankenPhpRuntime();
   const webRootIsCustom = nodes.webRootMode.value === "custom";
   nodes.customWebRoot.disabled = !webRootIsCustom;
@@ -1442,6 +1477,7 @@ function appPackageLabel(value) {
     gnuboard7: "그누보드7",
     wordpress: "WordPress",
     laravel: "Laravel",
+    "laravel-octane": "Laravel Octane",
   };
   return labels[value] || value || "그누보드7";
 }
@@ -2900,9 +2936,13 @@ function provisioningActions(report = {}) {
         "rule = SSH 자동 차단을 피하기 위해 점검/승인 후 적용",
       ],
     }),
-    provisioningAction("app", "웹앱/G7 건강검사", report.app_checks, {
-      summary: "앱 소스, .env, 쓰기 권한, G7 빌드 산출물과 업로드 제한 위치를 확인합니다.",
-      command: selectedApp === "wordpress" ? `브라우저에서 ${appUrl} 접속` : `cd ${appRoot} && php artisan about`,
+    provisioningAction("app", "웹앱 건강검사", report.app_checks, {
+      summary: "앱 소스, .env, 쓰기 권한, 빌드 산출물과 런타임 상태를 확인합니다.",
+      command: selectedApp === "wordpress"
+        ? `브라우저에서 ${appUrl} 접속`
+        : selectedApp === "laravel-octane"
+          ? `cd ${appRoot} && php artisan about && sudo systemctl status g7-frankenphp`
+          : `cd ${appRoot} && php artisan about`,
       settings: [
         ["앱", appPackageLabel(selectedApp)],
         ["앱 경로", appRoot],

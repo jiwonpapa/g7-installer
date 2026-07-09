@@ -48,7 +48,7 @@ enum Command {
         /// Use local test mode without public DNS or Let's Encrypt.
         #[arg(long, default_value_t = false)]
         local_test: bool,
-        /// App profile: gnuboard7, wordpress, or laravel.
+        /// App profile: gnuboard7, wordpress, laravel, or laravel-octane.
         #[arg(long = "app", visible_alias = "app-package", default_value_t = plan::DEFAULT_APP_PROFILE.to_string())]
         app_profile: String,
         /// Web server: nginx, apache, or frankenphp.
@@ -117,7 +117,7 @@ enum Command {
         /// Use local test mode without public DNS or Let's Encrypt.
         #[arg(long, default_value_t = false)]
         local_test: bool,
-        /// App profile: gnuboard7, wordpress, or laravel.
+        /// App profile: gnuboard7, wordpress, laravel, or laravel-octane.
         #[arg(long = "app", visible_alias = "app-package", default_value_t = plan::DEFAULT_APP_PROFILE.to_string())]
         app_profile: String,
         /// Web server: nginx, apache, or frankenphp.

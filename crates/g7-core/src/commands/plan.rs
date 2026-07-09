@@ -661,6 +661,13 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
     let app_profile = resolve_app_profile(&options.app_profile)?;
     let web_server =
         normalize_supported_option("web-server", options.web_server, &SUPPORTED_WEB_SERVERS)?;
+    if app_profile.id == "laravel-octane" && web_server != "frankenphp" {
+        return Err(Error::InvalidOption {
+            field: "web-server",
+            value: web_server,
+            supported: "frankenphp for laravel-octane".to_string(),
+        });
+    }
     let mut php_version = normalize_php_version(options.php_version)?;
     if web_server == "frankenphp" {
         php_version = g7_system::php::NEXT_FPM_VERSION.to_string();
@@ -981,7 +988,10 @@ fn packages(input: PackageInput<'_>) -> Vec<PlanPackage> {
         },
     ]);
 
-    if matches!(input.app_profile.id, "gnuboard7" | "laravel") {
+    if matches!(
+        input.app_profile.id,
+        "gnuboard7" | "laravel" | "laravel-octane"
+    ) {
         packages.push(PlanPackage {
             name: "git composer nodejs npm".to_string(),
             description: "앱 소스 내려받기와 PHP/프론트엔드 빌드에 필요한 도구입니다.",
@@ -1910,6 +1920,7 @@ fn rewrite_policy(app_profile: &str) -> &'static str {
     match app_profile {
         "wordpress" => "WordPress permalink rewrite to /index.php",
         "laravel" => "Laravel public/ front controller rewrite",
+        "laravel-octane" => "Nginx static assets and proxy to Laravel Octane on FrankenPHP",
         _ => "Gnuboard public/ front controller and PHP path handling",
     }
 }
@@ -2318,7 +2329,7 @@ fn database_user_for_site_user(site_user: &str, app_profile: &str) -> String {
 fn database_prefix(app_profile: &str) -> &'static str {
     match app_profile {
         "wordpress" => "wp",
-        "laravel" => "laravel",
+        "laravel" | "laravel-octane" => "laravel",
         _ => "g7",
     }
 }
@@ -2771,6 +2782,51 @@ mod tests {
                 .any(|setting| setting.key == "password_policy"
                     && setting.value.contains("사용자 입력값"))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn plan_supports_laravel_octane_only_with_frankenphp()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let options = PlanOptions {
+            app_profile: "laravel-octane".to_string(),
+            web_server: "frankenphp".to_string(),
+            ..PlanOptions::default()
+        };
+        let plan = build_with_options("example.com".to_string(), options)?;
+
+        assert_eq!(plan.app_profile, "laravel-octane");
+        assert_eq!(plan.app_profile_label, "Laravel Octane");
+        assert_eq!(plan.web_server, "frankenphp");
+        assert_eq!(plan.database_name, "laravel_example_com");
+        assert!(
+            plan.app_requirements
+                .iter()
+                .any(|requirement| requirement.name == "php-extension:pcntl")
+        );
+        assert!(
+            plan.services
+                .iter()
+                .any(|service| service.name == "g7-frankenphp")
+        );
+        assert!(
+            plan.provisioning
+                .iter()
+                .flat_map(|section| section.settings.iter())
+                .any(|setting| {
+                    setting.key == "rewrite_policy" && setting.value.contains("Octane")
+                })
+        );
+
+        let invalid = build_with_options(
+            "example.com".to_string(),
+            PlanOptions {
+                app_profile: "laravel-octane".to_string(),
+                web_server: "nginx".to_string(),
+                ..PlanOptions::default()
+            },
+        );
+        assert!(invalid.is_err());
         Ok(())
     }
 
