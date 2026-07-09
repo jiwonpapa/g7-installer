@@ -4879,7 +4879,9 @@ fn write_managed_marker_file(
             path: path.to_string(),
             source,
         })?;
-        if !existing.contains(marker) {
+        if !(existing.contains(marker)
+            || path == SWAP_SYSCTL_PATH && is_legacy_g7_swap_sysctl(&existing))
+        {
             return Err(Error::InstallVerificationFailed {
                 checks: format!("{path} already exists and is not marked as g7inst-managed"),
             });
@@ -4892,6 +4894,15 @@ fn write_managed_marker_file(
     }
 
     write_new_file(paths, path, content, owned)
+}
+
+fn is_legacy_g7_swap_sysctl(content: &str) -> bool {
+    let normalized = content
+        .lines()
+        .map(|line| line.split_whitespace().collect::<String>())
+        .collect::<Vec<_>>();
+
+    normalized == ["vm.swappiness=10", "vm.vfs_cache_pressure=50"]
 }
 
 fn write_tracked_file(
@@ -5903,7 +5914,7 @@ mod tests {
         )?;
         fs::write(
             fs_root.join("etc/sysctl.d/99-g7-installer-swap.conf"),
-            "# Managed by g7inst.\nvm.swappiness = 60\n",
+            "vm.swappiness=10\nvm.vfs_cache_pressure=50\n",
         )?;
         let probe = clean_root_probe(&os_release_path, &fs_root)?;
         let paths = InstallPaths::with_root(&fs_root);

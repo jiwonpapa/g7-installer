@@ -349,7 +349,18 @@ fn reset_file_list(paths: &ResetPaths, metadata: &ResetMetadata) -> Result<Vec<S
 }
 
 fn managed_marker_file_exists(paths: &ResetPaths, path: &str, marker: &str) -> bool {
-    fs::read_to_string(paths.resolve(path)).is_ok_and(|content| content.contains(marker))
+    fs::read_to_string(paths.resolve(path)).is_ok_and(|content| {
+        content.contains(marker) || (path == SWAP_SYSCTL_PATH && is_legacy_g7_swap_sysctl(&content))
+    })
+}
+
+fn is_legacy_g7_swap_sysctl(content: &str) -> bool {
+    let normalized = content
+        .lines()
+        .map(|line| line.split_whitespace().collect::<String>())
+        .collect::<Vec<_>>();
+
+    normalized == ["vm.swappiness=10", "vm.vfs_cache_pressure=50"]
 }
 
 #[derive(Debug, Clone, Default)]
@@ -954,7 +965,7 @@ mod tests {
         )?;
         fs::write(
             fs_root.join("etc/sysctl.d/99-g7-installer-swap.conf"),
-            "# Managed by g7inst.\nvm.swappiness = 10\n",
+            "vm.swappiness=10\nvm.vfs_cache_pressure=50\n",
         )?;
         fs::write(fs_root.join("swapfile"), "swap")?;
         fs::write(
