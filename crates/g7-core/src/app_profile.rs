@@ -7,8 +7,13 @@
 use crate::{Error, Result};
 
 pub const DEFAULT_APP_PROFILE: &str = "gnuboard7";
-pub const SUPPORTED_APP_PROFILES: [&str; 4] =
-    ["gnuboard7", "wordpress", "laravel", "laravel-octane"];
+pub const SUPPORTED_APP_PROFILES: [&str; 5] = [
+    "gnuboard7",
+    "gnuboard7-octane",
+    "wordpress",
+    "laravel",
+    "laravel-octane",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppProfile {
@@ -175,6 +180,42 @@ const GNUBOARD7_PROFILE: AppProfile = AppProfile {
     ],
 };
 
+const GNUBOARD7_OCTANE_PROFILE: AppProfile = AppProfile {
+    id: "gnuboard7-octane",
+    label: "Gnuboard 7 Octane",
+    summary: "Experimental Gnuboard 7 profile served by Laravel Octane workers on FrankenPHP.",
+    min_php: "8.2",
+    database_requirement: "MySQL 8.0+ or MariaDB 10.3+",
+    document_root: DocumentRootStrategy::PublicSubdir,
+    php_extensions: GNUBOARD7_EXTENSIONS,
+    system_packages: &["composer", "nodejs", "npm"],
+    services: &[
+        "g7-queue.service",
+        "g7-scheduler.service",
+        "g7-scheduler.timer",
+        "g7-reverb.service",
+    ],
+    writable_paths: &["storage", "bootstrap/cache"],
+    post_install_steps: &[
+        "download G7 release",
+        "run composer install",
+        "install Laravel Octane with FrankenPHP",
+        "build frontend assets",
+        "create .env and APP_KEY",
+        "link storage",
+        "open browser installer at /install through Octane",
+        "run migrations and optimization after browser install",
+        "enable queue, scheduler, and Reverb after browser install",
+    ],
+    health_checks: &[
+        "GET /install",
+        "php artisan about",
+        "g7-frankenphp Octane service active",
+        "queue worker active",
+        "scheduler active",
+    ],
+};
+
 const LARAVEL_PROFILE: AppProfile = AppProfile {
     id: "laravel",
     label: "Laravel",
@@ -243,6 +284,7 @@ pub fn resolve_app_profile(value: &str) -> Result<&'static AppProfile> {
         "wordpress" => Ok(&WORDPRESS_PROFILE),
         "laravel" => Ok(&LARAVEL_PROFILE),
         "laravel-octane" | "octane" => Ok(&LARAVEL_OCTANE_PROFILE),
+        "gnuboard7-octane" | "g7-octane" => Ok(&GNUBOARD7_OCTANE_PROFILE),
         "gnuboard7" | "g7" => Ok(&GNUBOARD7_PROFILE),
         _ => Err(Error::InvalidOption {
             field: "app-profile",
@@ -314,6 +356,27 @@ mod tests {
                 .health_checks
                 .contains(&"g7-frankenphp Octane service active")
         );
+        assert!(
+            profile
+                .post_install_steps
+                .iter()
+                .any(|step| step.contains("Octane"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn gnuboard7_octane_keeps_g7_requirements()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let profile = resolve_app_profile("g7-octane")?;
+
+        assert_eq!(profile.id, "gnuboard7-octane");
+        assert_eq!(
+            profile.document_root_for("/home/g7/public_html"),
+            "/home/g7/public_html/public"
+        );
+        assert!(profile.php_extensions.contains(&"pcntl"));
+        assert!(profile.services.contains(&"g7-reverb.service"));
         assert!(
             profile
                 .post_install_steps

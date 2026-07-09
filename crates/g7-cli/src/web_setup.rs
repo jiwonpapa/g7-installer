@@ -109,6 +109,8 @@ struct SetupRequest {
     domain: String,
     #[serde(default)]
     local_test: bool,
+    #[serde(default)]
+    install_template: Option<String>,
     web_server: String,
     php_version: String,
     #[serde(default = "default_php_source")]
@@ -779,6 +781,7 @@ async fn api_plan(
 ) -> std::result::Result<impl IntoResponse, ApiError> {
     let session = require_authenticated_session(&state, &headers, peer.ip())?;
     require_csrf(&headers, &session)?;
+    validate_template_app_request(&request)?;
     validate_site_password_request(&request)?;
     validate_database_request(&request)?;
     emit_log(&state, "설치 계획 계산 중");
@@ -806,6 +809,7 @@ async fn api_install_prepare(
 ) -> std::result::Result<impl IntoResponse, ApiError> {
     let session = require_authenticated_session(&state, &headers, peer.ip())?;
     require_csrf(&headers, &session)?;
+    validate_template_app_request(&request)?;
     validate_site_password_request(&request)?;
     validate_database_request(&request)?;
 
@@ -1711,6 +1715,28 @@ fn default_php_source() -> String {
     plan::DEFAULT_PHP_SOURCE.to_string()
 }
 
+fn validate_template_app_request(request: &SetupRequest) -> std::result::Result<(), ApiError> {
+    let install_template = request.install_template.as_deref().unwrap_or("recommended");
+    let app_package = request.app_package.as_str();
+    let is_octane_app = matches!(app_package, "gnuboard7-octane" | "laravel-octane");
+
+    if install_template == "frankenphp-octane" && !is_octane_app {
+        return Err(ApiError::bad_request(
+            "Octane 실험 템플릿은 그누보드7 Octane 또는 Laravel Octane 앱만 선택할 수 있습니다.",
+        )
+        .with_hint("설치할 앱을 그누보드7 Octane 또는 Laravel Octane으로 바꾸세요."));
+    }
+
+    if is_octane_app && request.web_server != "frankenphp" {
+        return Err(ApiError::bad_request(
+            "Octane 앱은 FrankenPHP 웹서버에서만 실행할 수 있습니다.",
+        )
+        .with_hint("웹서버를 FrankenPHP로 바꾸거나 일반 앱 프로필을 선택하세요."));
+    }
+
+    Ok(())
+}
+
 fn validate_site_password_request(request: &SetupRequest) -> std::result::Result<(), ApiError> {
     let password = request.site_password.as_deref().unwrap_or("");
     let confirm = request.site_password_confirm.as_deref().unwrap_or("");
@@ -2440,6 +2466,7 @@ mod tests {
         SetupRequest {
             domain: domain.to_string(),
             local_test: true,
+            install_template: Some("recommended".to_string()),
             web_server: "nginx".to_string(),
             php_version: "8.5".to_string(),
             php_source: "auto".to_string(),
@@ -2705,6 +2732,34 @@ mod tests {
         assert_eq!(options.smtp_from, None);
         assert_eq!(options.web_server, "nginx");
         assert_eq!(options.database_engine, "mysql");
+    }
+
+    #[test]
+    fn octane_template_requires_octane_app_profile() {
+        let mut request = setup_request("example.com");
+        request.install_template = Some("frankenphp-octane".to_string());
+        request.web_server = "frankenphp".to_string();
+        request.app_package = "gnuboard7".to_string();
+
+        let error =
+            super::validate_template_app_request(&request).expect_err("must reject plain G7");
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+
+        request.app_package = "gnuboard7-octane".to_string();
+        assert!(super::validate_template_app_request(&request).is_ok());
+    }
+
+    #[test]
+    fn octane_app_requires_frankenphp_runtime() {
+        let mut request = setup_request("example.com");
+        request.app_package = "gnuboard7-octane".to_string();
+        request.web_server = "nginx".to_string();
+
+        let error = super::validate_template_app_request(&request).expect_err("must reject nginx");
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+
+        request.web_server = "frankenphp".to_string();
+        assert!(super::validate_template_app_request(&request).is_ok());
     }
 
     #[test]

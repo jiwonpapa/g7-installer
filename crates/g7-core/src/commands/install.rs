@@ -2471,7 +2471,9 @@ fn apply_app_phase<R: CommandRunner>(
 
     let app_url = app_access_url(plan, summary);
     let mut checks = match plan.app_profile.as_str() {
-        "gnuboard7" => install_gnuboard7_app(probe, paths, plan, owned, &app_url)?,
+        "gnuboard7" | "gnuboard7-octane" => {
+            install_gnuboard7_app(probe, paths, plan, owned, &app_url)?
+        }
         "wordpress" => install_wordpress_app(probe, paths, plan, owned)?,
         "laravel" | "laravel-octane" => install_laravel_app(probe, paths, plan, owned, &app_url)?,
         _ => {
@@ -2798,7 +2800,7 @@ fn install_gnuboard7_app<R: CommandRunner>(
     write_existing_file(
         paths,
         &format!("{}/.env", plan.web_root),
-        &laravel_env_content(plan, &db_password, app_url, LaravelRuntimeKind::Gnuboard7)?,
+        &laravel_env_content(plan, &db_password, app_url, gnuboard7_runtime_kind(plan))?,
     )?;
 
     let mut checks = vec![
@@ -2826,7 +2828,7 @@ fn install_gnuboard7_app<R: CommandRunner>(
         paths,
         plan,
         owned,
-        LaravelRuntimeKind::Gnuboard7,
+        gnuboard7_runtime_kind(plan),
         LaravelRuntimeOptions::browser_installer(),
     )?);
     checks.push(InstallCheck::pass(
@@ -3123,6 +3125,7 @@ fn install_wordpress_app<R: CommandRunner>(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LaravelRuntimeKind {
     Gnuboard7,
+    Gnuboard7Octane,
     Laravel,
     LaravelOctane,
 }
@@ -3172,6 +3175,21 @@ fn laravel_runtime_kind(plan: &plan::InstallPlan) -> LaravelRuntimeKind {
     }
 }
 
+fn gnuboard7_runtime_kind(plan: &plan::InstallPlan) -> LaravelRuntimeKind {
+    if plan.app_profile == "gnuboard7-octane" {
+        LaravelRuntimeKind::Gnuboard7Octane
+    } else {
+        LaravelRuntimeKind::Gnuboard7
+    }
+}
+
+fn is_octane_runtime(kind: LaravelRuntimeKind) -> bool {
+    matches!(
+        kind,
+        LaravelRuntimeKind::Gnuboard7Octane | LaravelRuntimeKind::LaravelOctane
+    )
+}
+
 fn configure_laravel_runtime<R: CommandRunner>(
     probe: &SystemProbe<R>,
     paths: &InstallPaths,
@@ -3200,7 +3218,7 @@ fn configure_laravel_runtime<R: CommandRunner>(
         format!("Installed PHP dependencies in {}.", plan.web_root),
     ));
 
-    if kind == LaravelRuntimeKind::LaravelOctane {
+    if is_octane_runtime(kind) {
         let output = probe
             .composer_require(&cwd, "laravel/octane")
             .map_err(|err| {
@@ -3355,7 +3373,7 @@ fn configure_laravel_runtime<R: CommandRunner>(
         }
     }
 
-    if kind == LaravelRuntimeKind::LaravelOctane {
+    if is_octane_runtime(kind) {
         checks.extend(configure_laravel_octane_service(probe, paths, plan, owned)?);
     }
 
@@ -3465,13 +3483,14 @@ fn run_artisan_step<R: CommandRunner, const N: usize>(
 
 fn app_systemd_units(plan: &plan::InstallPlan, kind: LaravelRuntimeKind) -> Vec<AppSystemdUnit> {
     let prefix = match kind {
-        LaravelRuntimeKind::Gnuboard7 => "g7",
+        LaravelRuntimeKind::Gnuboard7 | LaravelRuntimeKind::Gnuboard7Octane => "g7",
         LaravelRuntimeKind::Laravel | LaravelRuntimeKind::LaravelOctane => "laravel",
     };
     let mut units = vec![
         AppSystemdUnit {
             name: match kind {
                 LaravelRuntimeKind::Gnuboard7 => "g7-queue.service",
+                LaravelRuntimeKind::Gnuboard7Octane => "g7-queue.service",
                 LaravelRuntimeKind::Laravel | LaravelRuntimeKind::LaravelOctane => {
                     "laravel-queue.service"
                 }
@@ -3482,6 +3501,7 @@ fn app_systemd_units(plan: &plan::InstallPlan, kind: LaravelRuntimeKind) -> Vec<
         AppSystemdUnit {
             name: match kind {
                 LaravelRuntimeKind::Gnuboard7 => "g7-scheduler.service",
+                LaravelRuntimeKind::Gnuboard7Octane => "g7-scheduler.service",
                 LaravelRuntimeKind::Laravel | LaravelRuntimeKind::LaravelOctane => {
                     "laravel-scheduler.service"
                 }
@@ -3492,6 +3512,7 @@ fn app_systemd_units(plan: &plan::InstallPlan, kind: LaravelRuntimeKind) -> Vec<
         AppSystemdUnit {
             name: match kind {
                 LaravelRuntimeKind::Gnuboard7 => "g7-scheduler.timer",
+                LaravelRuntimeKind::Gnuboard7Octane => "g7-scheduler.timer",
                 LaravelRuntimeKind::Laravel | LaravelRuntimeKind::LaravelOctane => {
                     "laravel-scheduler.timer"
                 }
@@ -3501,7 +3522,10 @@ fn app_systemd_units(plan: &plan::InstallPlan, kind: LaravelRuntimeKind) -> Vec<
         },
     ];
 
-    if kind == LaravelRuntimeKind::Gnuboard7 {
+    if matches!(
+        kind,
+        LaravelRuntimeKind::Gnuboard7 | LaravelRuntimeKind::Gnuboard7Octane
+    ) {
         units.push(AppSystemdUnit {
             name: "g7-reverb.service",
             content: reverb_service_content(plan),
@@ -3552,7 +3576,7 @@ fn systemd_unit_path(unit: &str) -> String {
 
 fn app_runtime_unit_names(plan: &plan::InstallPlan) -> &'static [&'static str] {
     match plan.app_profile.as_str() {
-        "gnuboard7" => &[
+        "gnuboard7" | "gnuboard7-octane" => &[
             "g7-queue.service",
             "g7-scheduler.service",
             "g7-scheduler.timer",
@@ -3581,7 +3605,9 @@ fn ensure_app_writable_dirs(
 
 fn app_writable_paths(plan: &plan::InstallPlan) -> &'static [&'static str] {
     match plan.app_profile.as_str() {
-        "gnuboard7" | "laravel" | "laravel-octane" => &["storage", "bootstrap/cache"],
+        "gnuboard7" | "gnuboard7-octane" | "laravel" | "laravel-octane" => {
+            &["storage", "bootstrap/cache"]
+        }
         "wordpress" => &["wp-content/uploads"],
         _ => &[],
     }
@@ -3753,7 +3779,7 @@ fn app_access_url(plan: &plan::InstallPlan, summary: &ApplySummary) -> String {
 
 fn app_entry_path(plan: &plan::InstallPlan) -> &'static str {
     match plan.app_profile.as_str() {
-        "gnuboard7" => "/install",
+        "gnuboard7" | "gnuboard7-octane" => "/install",
         "wordpress" => "/wp-admin/install.php",
         _ => "/",
     }
@@ -3803,7 +3829,10 @@ fn laravel_env_content(
         if redis_enabled { "redis" } else { "database" },
     );
     env.push_str(&mail_env_content(plan));
-    if kind == LaravelRuntimeKind::Gnuboard7 {
+    if matches!(
+        kind,
+        LaravelRuntimeKind::Gnuboard7 | LaravelRuntimeKind::Gnuboard7Octane
+    ) {
         let public_reverb_port = if app_url.starts_with("https://") {
             "443"
         } else {
@@ -3819,7 +3848,7 @@ fn laravel_env_content(
             primary_http_host(plan)
         ));
     }
-    if kind == LaravelRuntimeKind::LaravelOctane {
+    if is_octane_runtime(kind) {
         let octane_https = if app_url.starts_with("https://") {
             "true"
         } else {
@@ -4500,7 +4529,8 @@ fn frankenphp_service_content(plan: &plan::InstallPlan) -> String {
 
 fn frankenphp_octane_service_content(plan: &plan::InstallPlan) -> String {
     format!(
-        "[Unit]\nDescription=G7 Laravel Octane on FrankenPHP\nAfter=network-online.target mysql.service mariadb.service redis-server.service\nWants=network-online.target\n\n[Service]\nType=simple\nUser={site_user}\nGroup=www-data\nWorkingDirectory={web_root}\nEnvironment=APP_ENV=production\nEnvironment=DB_HOST=127.0.0.1\nEnvironment=DB_READ_HOST=127.0.0.1\nExecStart=/usr/bin/php artisan octane:frankenphp --host={host} --port={port} --admin-port=2019 --workers=auto --max-requests=500\nRestart=always\nRestartSec=3\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=full\nReadWritePaths={web_root} /tmp\nLimitNOFILE=65535\nTimeoutStopSec=3600\n\n[Install]\nWantedBy=multi-user.target\n",
+        "[Unit]\nDescription=G7 {label} on FrankenPHP\nAfter=network-online.target mysql.service mariadb.service redis-server.service\nWants=network-online.target\n\n[Service]\nType=simple\nUser={site_user}\nGroup=www-data\nWorkingDirectory={web_root}\nEnvironment=APP_ENV=production\nEnvironment=DB_HOST=127.0.0.1\nEnvironment=DB_READ_HOST=127.0.0.1\nExecStart=/usr/bin/php artisan octane:frankenphp --host={host} --port={port} --admin-port=2019 --workers=auto --max-requests=500\nRestart=always\nRestartSec=3\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=full\nReadWritePaths={web_root} /tmp\nLimitNOFILE=65535\nTimeoutStopSec=3600\n\n[Install]\nWantedBy=multi-user.target\n",
+        label = plan.app_profile_label,
         site_user = plan.site_user,
         web_root = plan.web_root,
         host = FRANKENPHP_HOST,
@@ -6550,6 +6580,72 @@ mod tests {
     }
 
     #[test]
+    fn install_configures_gnuboard7_octane_on_frankenphp()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let os_release_path = write_temp_os_release()?;
+        let fs_root = create_temp_fs_root()?;
+        let options = super::plan::PlanOptions {
+            app_profile: "gnuboard7-octane".to_string(),
+            web_server: "frankenphp".to_string(),
+            ..super::plan::PlanOptions::default()
+        };
+        let probe =
+            clean_root_probe_for_options(&os_release_path, &fs_root, "example.com", &options)?;
+        let paths = InstallPaths::with_root(&fs_root);
+
+        let report = run_with_probe_and_paths("example.com".to_string(), options, &probe, &paths)?;
+
+        assert_eq!(report.app_profile, "gnuboard7-octane");
+        assert_eq!(report.app_url, "https://www.example.com/install");
+        assert!(
+            report
+                .app_checks
+                .iter()
+                .any(|check| { check.name == "composer-require-octane" && check.status == "pass" })
+        );
+        assert!(
+            report
+                .app_checks
+                .iter()
+                .any(|check| { check.name == "artisan-octane-install" && check.status == "pass" })
+        );
+        assert!(
+            report.app_checks.iter().any(|check| {
+                check.name == "frankenphp-octane-active" && check.status == "pass"
+            })
+        );
+
+        let unit = fs::read_to_string(fs_root.join("etc/systemd/system/g7-frankenphp.service"))?;
+        assert!(unit.contains("Description=G7 Gnuboard 7 Octane on FrankenPHP"));
+        assert!(unit.contains("artisan octane:frankenphp"));
+        assert!(unit.contains("--host=127.0.0.1 --port=7080"));
+
+        let env = fs::read_to_string(fs_root.join("home/g7/public_html/.env"))?;
+        assert!(env.contains("OCTANE_SERVER=frankenphp"));
+        assert!(env.contains("OCTANE_HTTPS=true"));
+        assert!(env.contains("BROADCAST_CONNECTION=reverb"));
+
+        let recorded = probe.runner().recorded();
+        assert!(
+            recorded.iter().any(|spec| {
+                spec.display() == "composer require laravel/octane --no-interaction"
+            })
+        );
+        assert!(recorded.iter().any(|spec| {
+            spec.display() == "php artisan octane:install --server=frankenphp --no-interaction"
+        }));
+        assert!(
+            recorded
+                .iter()
+                .any(|spec| { spec.display() == "systemctl restart g7-frankenphp" })
+        );
+
+        fs::remove_file(os_release_path)?;
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
     fn install_laravel_runs_runtime_pipeline_and_services()
     -> std::result::Result<(), Box<dyn std::error::Error>> {
         let os_release_path = write_temp_os_release()?;
@@ -7039,18 +7135,27 @@ mod tests {
         install_plan: &super::plan::InstallPlan,
     ) {
         match install_plan.app_profile.as_str() {
-            "gnuboard7" => {
+            "gnuboard7" | "gnuboard7-octane" => {
                 runner.push_output(CommandOutput::success("cloned\n"));
                 push_successful_git_validation_outputs(runner, super::GNUBOARD7_REQUIRED_FILES);
                 runner.push_output(CommandOutput::success(""));
                 push_successful_required_path_outputs(runner, super::GNUBOARD7_REQUIRED_FILES, &[]);
                 push_successful_app_permission_outputs(runner, install_plan);
                 runner.push_output(CommandOutput::success("composer ok\n"));
+                if install_plan.app_profile == "gnuboard7-octane" {
+                    runner.push_output(CommandOutput::success("octane composer ok\n"));
+                    runner.push_output(CommandOutput::success("octane installed\n"));
+                }
                 runner.push_output(CommandOutput::success("npm install ok\n"));
                 runner.push_output(CommandOutput::success("npm build ok\n"));
                 runner.push_output(CommandOutput::success("key generated\n"));
                 runner.push_output(CommandOutput::success("storage linked\n"));
                 runner.push_output(CommandOutput::success(""));
+                if install_plan.app_profile == "gnuboard7-octane" {
+                    runner.push_output(CommandOutput::success(""));
+                    runner.push_output(CommandOutput::success(""));
+                    runner.push_output(CommandOutput::success("active\n"));
+                }
             }
             "wordpress" => {
                 runner.push_output(CommandOutput::success(""));
@@ -7133,7 +7238,7 @@ mod tests {
         }
         if matches!(
             install_plan.app_profile.as_str(),
-            "gnuboard7" | "laravel" | "laravel-octane"
+            "gnuboard7" | "gnuboard7-octane" | "laravel" | "laravel-octane"
         ) {
             runner.push_output(CommandOutput::success(""));
         }

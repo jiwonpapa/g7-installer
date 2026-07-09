@@ -175,7 +175,7 @@
                     <input class="radio radio-primary" type="radio" name="install_template" value="frankenphp-octane" />
                     <span>
                       <strong>Octane 실험</strong>
-                      <small>Laravel Octane + FrankenPHP</small>
+                      <small>그누보드7 Octane + FrankenPHP</small>
                     </span>
                   </label>
                 </div>
@@ -186,7 +186,7 @@
                   설치할 앱
                   <span class="help-wrap">
                     <button class="help-circle" type="button" aria-label="설치 앱 도움말">?</button>
-                    <span class="help-text">서버 스택을 준비한 뒤 마지막 단계에서 올릴 앱 종류입니다. 그누보드7은 /install, WordPress는 설치 화면 링크를 리포트합니다.</span>
+                    <span class="help-text">서버 스택을 준비한 뒤 마지막 단계에서 올릴 앱 종류입니다. Octane 실험 템플릿은 그누보드7 Octane 또는 Laravel Octane 앱만 선택할 수 있습니다.</span>
                   </span>
                 </legend>
                 <div class="template-grid">
@@ -195,6 +195,13 @@
                     <span>
                       <strong>그누보드7</strong>
                       <small>기본 목표 앱</small>
+                    </span>
+                  </label>
+                  <label class="template-card">
+                    <input class="radio radio-primary" type="radio" name="app_package" value="gnuboard7-octane" />
+                    <span>
+                      <strong>그누보드7 Octane</strong>
+                      <small>G7 성능 실험</small>
                     </span>
                   </label>
                   <label class="template-card">
@@ -219,6 +226,7 @@
                     </span>
                   </label>
                 </div>
+                <p id="template-app-status" class="password-status mt-3" aria-live="polite" hidden></p>
               </fieldset>
 
               <div class="grid gap-4 md:grid-cols-2">

@@ -102,7 +102,7 @@ sudo g7inst self-update
 ```bash
 --local-test
 --web-server nginx|apache
---app gnuboard7|wordpress|laravel|laravel-octane
+--app gnuboard7|gnuboard7-octane|wordpress|laravel|laravel-octane
 --php-version 8.3|8.5
 --database mariadb|mysql
 --site-user g7

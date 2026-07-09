@@ -269,7 +269,7 @@ sudo cat /var/log/g7-installer/report.json
 sudo less /var/log/g7-installer/setup-guide.md
 ```
 
-리포트 단계가 `completed`이면 패키지, Nginx/Apache/FrankenPHP vhost, PHP/DB 튜닝, DB 계정, SSL 처리, 앱 설치, 설정 안내서 저장까지 끝난 상태입니다. 그누보드7/Laravel은 Composer, NPM, Artisan, queue, scheduler 서비스까지 구성하고, Laravel Octane은 `g7-frankenphp` 워커 서비스까지 구성하며, WordPress는 설치 화면으로 이어집니다. DNS가 맞지 않으면 SSL은 보류되고 리포트에 실패 항목이 남습니다.
+리포트 단계가 `completed`이면 패키지, Nginx/Apache/FrankenPHP vhost, PHP/DB 튜닝, DB 계정, SSL 처리, 앱 설치, 설정 안내서 저장까지 끝난 상태입니다. 그누보드7/Laravel은 Composer, NPM, Artisan, queue, scheduler 서비스까지 구성하고, 그누보드7 Octane/Laravel Octane은 `g7-frankenphp` 워커 서비스까지 구성하며, WordPress는 설치 화면으로 이어집니다. DNS가 맞지 않으면 SSL은 보류되고 리포트에 실패 항목이 남습니다.
 
 ## 11. 다른 Ubuntu VPS에서 쓰기
 

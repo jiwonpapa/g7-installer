@@ -39,6 +39,7 @@ const nodes = {
   databasePassword: document.querySelector("#database-password"),
   databasePasswordConfirm: document.querySelector("#database-password-confirm"),
   databasePasswordStatus: document.querySelector("#database-password-status"),
+  templateAppStatus: document.querySelector("#template-app-status"),
   optionsPlanButtons: document.querySelectorAll('[data-view="options"] [data-next="plan"]'),
   mailMode: document.querySelector("#mail-mode"),
   databaseVersion: document.querySelector("#database-version"),
@@ -266,7 +267,7 @@ const templates = {
     database_version: "mysql-8.4",
     redis: "enable",
     mail_mode: "local-postfix",
-    app_package: "laravel-octane",
+    app_package: "gnuboard7-octane",
     web_root_mode: "public-html",
     www_mode: "redirect-to-www",
     security_profile: "standard",
@@ -1081,6 +1082,7 @@ function optionPayload() {
 
   return {
     domain: form.get("domain")?.trim() || "example.com",
+    install_template: form.get("install_template") || "recommended",
     web_server: form.get("web_server"),
     php_version: form.get("php_version"),
     php_source: phpSourceForVersion(form.get("php_version")),
@@ -1112,7 +1114,7 @@ function optionPayload() {
 }
 
 function validateSitePassword(payload) {
-  return sitePasswordError(payload) || databaseError(payload);
+  return sitePasswordError(payload) || databaseError(payload) || appTemplateError(payload);
 }
 
 const sitePasswordAlertMessages = [
@@ -1129,7 +1131,28 @@ const sitePasswordAlertMessages = [
   "DB 비밀번호 확인이 일치하지 않습니다.",
   "DB 비밀번호는 8자 이상이어야 합니다.",
   "DB 비밀번호에 사용할 수 없는 문자가 있습니다.",
+  "Octane 실험 템플릿은 그누보드7 Octane 또는 Laravel Octane 앱만 선택할 수 있습니다.",
+  "Octane 앱은 FrankenPHP 웹서버에서만 실행할 수 있습니다.",
 ];
+
+function selectedInstallTemplate() {
+  return nodes.optionsForm.elements.install_template?.value || "recommended";
+}
+
+function isOctaneApp(appPackage) {
+  return appPackage === "gnuboard7-octane" || appPackage === "laravel-octane";
+}
+
+function appTemplateError(payload = optionPayload()) {
+  const template = selectedInstallTemplate();
+  if (template === "frankenphp-octane" && !isOctaneApp(payload.app_package)) {
+    return "Octane 실험 템플릿은 그누보드7 Octane 또는 Laravel Octane 앱만 선택할 수 있습니다.";
+  }
+  if (isOctaneApp(payload.app_package) && payload.web_server !== "frankenphp") {
+    return "Octane 앱은 FrankenPHP 웹서버에서만 실행할 수 있습니다.";
+  }
+  return null;
+}
 
 function sitePasswordError(payload = optionPayload()) {
   if (!payload.site_password) {
@@ -1202,7 +1225,8 @@ function refreshSitePasswordState(options = {}) {
   const dbIdentifierError = databaseIdentifierError(payload);
   const dbPasswordError = databasePasswordError(payload);
   const dbError = dbIdentifierError || dbPasswordError;
-  const combinedError = error || dbError;
+  const templateError = appTemplateError(payload);
+  const combinedError = error || dbError || templateError;
   const hasInput = Boolean(payload.site_password || payload.site_password_confirm);
   const hasDbPasswordInput = Boolean(payload.database_password || payload.database_password_confirm);
   const shouldShowStatus = Boolean(options.show || hasInput || state.activeStep === "options");
@@ -1240,6 +1264,11 @@ function refreshSitePasswordState(options = {}) {
     nodes.databasePasswordStatus.hidden = !shouldShowDbStatus;
     nodes.databasePasswordStatus.dataset.status = dbError ? "fail" : "pass";
     nodes.databasePasswordStatus.textContent = dbError || "DB 이름, 계정, 비밀번호 확인이 통과했습니다.";
+  }
+  if (nodes.templateAppStatus) {
+    nodes.templateAppStatus.hidden = !templateError && state.activeStep !== "options";
+    nodes.templateAppStatus.dataset.status = templateError ? "fail" : "pass";
+    nodes.templateAppStatus.textContent = templateError || "설치 템플릿과 앱 조합이 맞습니다.";
   }
   nodes.optionsPlanButtons.forEach((button) => {
     button.disabled = Boolean(combinedError);
@@ -1336,7 +1365,7 @@ function syncOctaneRuntime() {
   const appPackage = nodes.optionsForm.elements.app_package?.value;
   const webServer = nodes.optionsForm.elements.web_server;
   const phpVersion = nodes.optionsForm.elements.php_version;
-  if (appPackage !== "laravel-octane") {
+  if (!isOctaneApp(appPackage)) {
     return;
   }
   if (webServer && webServer.value !== "frankenphp") {
@@ -1475,6 +1504,7 @@ function databaseVersionLabel(value) {
 function appPackageLabel(value) {
   const labels = {
     gnuboard7: "그누보드7",
+    "gnuboard7-octane": "그누보드7 Octane",
     wordpress: "WordPress",
     laravel: "Laravel",
     "laravel-octane": "Laravel Octane",
@@ -2940,7 +2970,7 @@ function provisioningActions(report = {}) {
       summary: "앱 소스, .env, 쓰기 권한, 빌드 산출물과 런타임 상태를 확인합니다.",
       command: selectedApp === "wordpress"
         ? `브라우저에서 ${appUrl} 접속`
-        : selectedApp === "laravel-octane"
+        : isOctaneApp(selectedApp)
           ? `cd ${appRoot} && php artisan about && sudo systemctl status g7-frankenphp`
           : `cd ${appRoot} && php artisan about`,
       settings: [
