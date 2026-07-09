@@ -1,3 +1,9 @@
+//! Reset installer-owned resources without touching operator-owned server state.
+//!
+//! This command only removes paths recorded by `owned-files.json` after they pass
+//! the explicit reset allowlist below. The allowlist is intentionally narrow:
+//! add a regression test whenever a new installer-managed path is introduced.
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::io;
@@ -822,13 +828,22 @@ fn is_safe_runtime_config(path: &str) -> bool {
         .map(|part| part.as_os_str().to_string_lossy().to_string())
         .collect::<Vec<_>>();
 
-    parts.len() == 7
-        && parts[1] == "etc"
-        && parts[2] == "php"
-        && valid_path_segment(&parts[3])
-        && parts[4] == "fpm"
-        && ((parts[5] == "pool.d" && parts[6].starts_with("g7-") && parts[6].ends_with(".conf"))
-            || (parts[5] == "conf.d" && parts[6] == "99-g7-installer.ini"))
+    if parts.len() != 7 || parts[1] != "etc" || parts[2] != "php" || !valid_path_segment(&parts[3])
+    {
+        return false;
+    }
+
+    let sapi = parts[4].as_str();
+    let config_dir = parts[5].as_str();
+    let file_name = parts[6].as_str();
+
+    (sapi == "fpm"
+        && config_dir == "pool.d"
+        && file_name.starts_with("g7-")
+        && file_name.ends_with(".conf"))
+        || ((sapi == "fpm" || sapi == "cli")
+            && config_dir == "conf.d"
+            && file_name == "99-g7-installer.ini")
 }
 
 fn valid_path_segment(value: &str) -> bool {
@@ -899,7 +914,7 @@ fn files_contain_systemd_units(files: &[String]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ResetPaths, run_with_probe_and_paths};
+    use super::{ResetPaths, run_with_probe_and_paths, validate_reset_path};
     use g7_state::owned_files::{OWNED_FILES_PATH, OwnedFiles, write_owned_files};
     use g7_system::SystemProbe;
     use g7_system::command::{CommandOutput, FakeCommandRunner};
@@ -909,6 +924,21 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn reset_allows_installer_php_runtime_configs() {
+        validate_reset_path("/etc/php/8.5/fpm/conf.d/99-g7-installer.ini")
+            .expect("php-fpm override should be resettable");
+        validate_reset_path("/etc/php/8.5/cli/conf.d/99-g7-installer.ini")
+            .expect("frankenphp cli override should be resettable");
+        validate_reset_path("/etc/php/8.5/fpm/pool.d/g7-g7devops.conf")
+            .expect("site php-fpm pool should be resettable");
+
+        validate_reset_path("/etc/php/8.5/cli/conf.d/20-opcache.ini")
+            .expect_err("operator PHP config must stay outside reset allowlist");
+        validate_reset_path("/etc/php/8.5/apache2/conf.d/99-g7-installer.ini")
+            .expect_err("unsupported PHP SAPI must stay outside reset allowlist");
+    }
 
     #[test]
     fn reset_removes_only_owned_paths() -> std::result::Result<(), Box<dyn std::error::Error>> {
