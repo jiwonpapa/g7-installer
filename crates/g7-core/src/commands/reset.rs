@@ -108,14 +108,10 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     require_root(probe)?;
     let metadata = reset_metadata(paths)?;
     let mut actions = Vec::new();
-    let preserve_certbot = should_preserve_certbot(paths, &metadata);
+    let certificate_domains = preserved_certificate_domains(paths, &metadata)?;
+    let preserve_certbot = should_preserve_certbot(&metadata, &certificate_domains);
 
-    if let Some(domain) = metadata.domain.as_deref().filter(|domain| {
-        preserve_certbot
-            || paths
-                .resolve(&format!("/etc/letsencrypt/live/{domain}"))
-                .exists()
-    }) {
+    for domain in &certificate_domains {
         actions.push(ResetAction::new(
             format!("certificate:{domain}"),
             if dry_run {
@@ -514,13 +510,59 @@ fn reset_services(paths: &ResetPaths, metadata: &ResetMetadata) -> Vec<String> {
     unique_names(services.iter().map(String::as_str))
 }
 
-fn should_preserve_certbot(paths: &ResetPaths, metadata: &ResetMetadata) -> bool {
-    metadata.certbot_issued
-        || metadata.domain.as_deref().is_some_and(|domain| {
-            paths
+fn should_preserve_certbot(metadata: &ResetMetadata, certificate_domains: &[String]) -> bool {
+    metadata.certbot_issued || !certificate_domains.is_empty()
+}
+
+fn preserved_certificate_domains(
+    paths: &ResetPaths,
+    metadata: &ResetMetadata,
+) -> Result<Vec<String>> {
+    let mut domains = Vec::new();
+
+    if let Some(domain) = metadata.domain.as_deref().filter(|domain| {
+        metadata.certbot_issued
+            || paths
                 .resolve(&format!("/etc/letsencrypt/live/{domain}"))
                 .exists()
-        })
+    }) {
+        domains.push(domain.to_string());
+    }
+
+    domains.extend(letsencrypt_live_domains(paths)?);
+    Ok(unique_names(domains.iter().map(String::as_str)))
+}
+
+fn letsencrypt_live_domains(paths: &ResetPaths) -> Result<Vec<String>> {
+    let live_dir = paths.resolve("/etc/letsencrypt/live");
+    let entries = match fs::read_dir(&live_dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(source) => {
+            return Err(Error::FileReadFailed {
+                path: "/etc/letsencrypt/live".to_string(),
+                source,
+            });
+        }
+    };
+
+    let mut domains = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|source| Error::FileReadFailed {
+            path: "/etc/letsencrypt/live".to_string(),
+            source,
+        })?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name == "README" || !valid_path_segment(&name) {
+            continue;
+        }
+        let path = entry.path();
+        if path.is_dir() || path.is_symlink() {
+            domains.push(name);
+        }
+    }
+
+    Ok(unique_names(domains.iter().map(String::as_str)))
 }
 
 fn disable_services<R: CommandRunner>(
@@ -916,6 +958,58 @@ mod tests {
 
         assert!(report.removed.contains(&"/usr/local/bin/g7".to_string()));
         assert!(!fs_root.join("usr/local/bin/g7").exists());
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn reset_preserves_existing_letsencrypt_lineage_without_report_success()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let fs_root = create_temp_fs_root()?;
+        fs::create_dir_all(fs_root.join("var/log/g7-installer"))?;
+        fs::create_dir_all(fs_root.join("etc/letsencrypt/live/g7devops.com"))?;
+        fs::write(
+            fs_root.join("var/log/g7-installer/report.json"),
+            r#"{
+                "preinstall_package_checks": [
+                    {"name": "certbot", "status": "not-installed", "message": "fresh"},
+                    {"name": "python3-certbot-nginx", "status": "not-installed", "message": "fresh"}
+                ],
+                "certbot_checks": [
+                    {"name": "tls-config", "status": "fail", "message": "rate limited"}
+                ]
+            }"#,
+        )?;
+        fs::write(
+            fs_root.join("etc/letsencrypt/live/g7devops.com/fullchain.pem"),
+            "cert",
+        )?;
+        fs::write(
+            fs_root.join("etc/letsencrypt/live/g7devops.com/privkey.pem"),
+            "key",
+        )?;
+
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success("0\n"));
+        let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
+        let report =
+            run_with_probe_and_paths(true, true, &probe, &ResetPaths::with_root(&fs_root))?;
+
+        assert!(report.actions.iter().any(|action| {
+            action.name == "certificate:g7devops.com" && action.status == "would-preserve"
+        }));
+        assert!(report.actions.iter().any(|action| {
+            action.name == "package:certbot" && action.status == "would-preserve"
+        }));
+        assert!(report.actions.iter().any(|action| {
+            action.name == "package:python3-certbot-nginx" && action.status == "would-preserve"
+        }));
+        assert!(
+            !report.actions.iter().any(|action| {
+                action.name == "package:certbot" && action.status == "would-purge"
+            })
+        );
+
         fs::remove_dir_all(fs_root)?;
         Ok(())
     }

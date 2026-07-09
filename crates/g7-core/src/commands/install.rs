@@ -5530,6 +5530,7 @@ mod tests {
     use g7_state::state::STATE_PATH;
     use g7_system::SystemProbe;
     use g7_system::command::{CommandOutput, FakeCommandRunner};
+    use std::ffi::OsString;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -5938,6 +5939,57 @@ mod tests {
         );
 
         fs::remove_file(os_release_path)?;
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn tls_phase_reuses_existing_certificate_without_certonly()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let fs_root = create_temp_fs_root()?;
+        fs::create_dir_all(fs_root.join("etc/letsencrypt/live/example.com"))?;
+        fs::write(
+            fs_root.join("etc/letsencrypt/live/example.com/fullchain.pem"),
+            "cert",
+        )?;
+        fs::write(
+            fs_root.join("etc/letsencrypt/live/example.com/privkey.pem"),
+            "key",
+        )?;
+        let plan = super::plan::build_with_options(
+            "example.com".to_string(),
+            super::plan::PlanOptions::default(),
+        )?;
+        let paths = InstallPaths::with_root(&fs_root);
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
+        for _host in super::certificate_hosts(&plan) {
+            runner.push_output(CommandOutput::success(""));
+        }
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success("renew ok\n"));
+        let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
+        let mut owned = Vec::new();
+
+        let checks = super::apply_tls_phase(&probe, &paths, &plan, &mut owned, &[])?;
+
+        assert!(checks.iter().any(|check| {
+            check.name == "tls-certificate"
+                && check.status == "pass"
+                && check.message.contains("기존 Let's Encrypt 인증서")
+        }));
+        let recorded = probe.runner().recorded();
+        assert!(!recorded.iter().any(|spec| {
+            spec.program == std::ffi::OsStr::new("certbot")
+                && spec.args.contains(&OsString::from("certonly"))
+        }));
+        assert!(recorded.iter().any(|spec| {
+            spec.program == std::ffi::OsStr::new("certbot")
+                && spec.args.contains(&OsString::from("renew"))
+        }));
+
         fs::remove_dir_all(fs_root)?;
         Ok(())
     }
