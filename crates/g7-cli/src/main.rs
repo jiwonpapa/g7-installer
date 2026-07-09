@@ -48,10 +48,10 @@ enum Command {
         /// Use local test mode without public DNS or Let's Encrypt.
         #[arg(long, default_value_t = false)]
         local_test: bool,
-        /// App profile: gnuboard7, gnuboard7-octane, wordpress, laravel, or laravel-octane.
+        /// Public app profile: gnuboard7 or wordpress.
         #[arg(long = "app", visible_alias = "app-package", default_value_t = plan::DEFAULT_APP_PROFILE.to_string())]
         app_profile: String,
-        /// Web server: nginx, apache, or frankenphp.
+        /// Public web server: nginx or apache.
         #[arg(long, default_value_t = plan::DEFAULT_WEB_SERVER.to_string())]
         web_server: String,
         /// PHP runtime version. Default is 8.5. PHP 8.3 uses Ubuntu apt; PHP 8.5 adds the Ondrej PHP PPA automatically.
@@ -117,10 +117,10 @@ enum Command {
         /// Use local test mode without public DNS or Let's Encrypt.
         #[arg(long, default_value_t = false)]
         local_test: bool,
-        /// App profile: gnuboard7, gnuboard7-octane, wordpress, laravel, or laravel-octane.
+        /// Public app profile: gnuboard7 or wordpress.
         #[arg(long = "app", visible_alias = "app-package", default_value_t = plan::DEFAULT_APP_PROFILE.to_string())]
         app_profile: String,
-        /// Web server: nginx, apache, or frankenphp.
+        /// Public web server: nginx or apache.
         #[arg(long, default_value_t = plan::DEFAULT_WEB_SERVER.to_string())]
         web_server: String,
         /// PHP runtime version. Default is 8.5. PHP 8.3 uses Ubuntu apt; PHP 8.5 adds the Ondrej PHP PPA automatically.

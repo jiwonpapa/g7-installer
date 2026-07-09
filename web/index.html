@@ -34,7 +34,7 @@
       </header>
 
       <section class="system-banner">
-        <span>현재 버전은 apt 패키지 설치, Nginx/Apache/FrankenPHP 도메인 연결, PHP/DB 튜닝, DB 계정 생성, 웹서버별 SSL 발급/갱신 검증, 앱 설치 링크, 설정 안내서 저장까지 수행합니다.</span>
+        <span>현재 공개 버전은 apt 패키지 설치, Nginx/Apache 도메인 연결, PHP/DB 튜닝, DB 계정 생성, SSL 발급/갱신 검증, 그누보드7/WordPress 설치 링크, 설정 안내서 저장까지 수행합니다.</span>
       </section>
 
       <section class="app-workspace">
@@ -164,20 +164,6 @@
                       <small>Apache + MySQL + Redis</small>
                     </span>
                   </label>
-                  <label class="template-card">
-                    <input class="radio radio-primary" type="radio" name="install_template" value="frankenphp" />
-                    <span>
-                      <strong>성능 실험</strong>
-                      <small>Nginx edge + FrankenPHP + MySQL</small>
-                    </span>
-                  </label>
-                  <label class="template-card">
-                    <input class="radio radio-primary" type="radio" name="install_template" value="frankenphp-octane" />
-                    <span>
-                      <strong>Octane 실험</strong>
-                      <small>그누보드7 Octane + FrankenPHP</small>
-                    </span>
-                  </label>
                 </div>
               </fieldset>
 
@@ -186,7 +172,7 @@
                   설치할 앱
                   <span class="help-wrap">
                     <button class="help-circle" type="button" aria-label="설치 앱 도움말">?</button>
-                    <span class="help-text">서버 스택을 준비한 뒤 마지막 단계에서 올릴 앱 종류입니다. Octane 실험 템플릿은 그누보드7 Octane 또는 Laravel Octane 앱만 선택할 수 있습니다.</span>
+                    <span class="help-text">서버 스택을 준비한 뒤 마지막 단계에서 올릴 앱 종류입니다. 공개 설치기는 그누보드7과 WordPress에 집중합니다.</span>
                   </span>
                 </legend>
                 <div class="template-grid">
@@ -198,31 +184,10 @@
                     </span>
                   </label>
                   <label class="template-card">
-                    <input class="radio radio-primary" type="radio" name="app_package" value="gnuboard7-octane" />
-                    <span>
-                      <strong>그누보드7 Octane</strong>
-                      <small>G7 성능 실험</small>
-                    </span>
-                  </label>
-                  <label class="template-card">
                     <input class="radio radio-primary" type="radio" name="app_package" value="wordpress" />
                     <span>
                       <strong>WordPress</strong>
                       <small>PHP CMS 구성</small>
-                    </span>
-                  </label>
-                  <label class="template-card">
-                    <input class="radio radio-primary" type="radio" name="app_package" value="laravel" />
-                    <span>
-                      <strong>Laravel</strong>
-                      <small>Composer 앱 구성</small>
-                    </span>
-                  </label>
-                  <label class="template-card">
-                    <input class="radio radio-primary" type="radio" name="app_package" value="laravel-octane" />
-                    <span>
-                      <strong>Laravel Octane</strong>
-                      <small>FrankenPHP 워커 구성</small>
                     </span>
                   </label>
                 </div>
@@ -325,13 +290,12 @@
                       웹서버
                       <span class="help-wrap">
                     <button class="help-circle" type="button" aria-label="웹서버 도움말">?</button>
-                    <span class="help-text">방문자의 HTTP 요청을 PHP 앱으로 전달합니다. 일반 설치는 Nginx, 성능 비교는 FrankenPHP를 선택합니다.</span>
+                    <span class="help-text">방문자의 HTTP 요청을 PHP 앱으로 전달합니다. 일반 설치는 Nginx, Apache 호환이 필요하면 Apache를 선택합니다.</span>
                   </span>
                     </span>
                     <select name="web_server" class="select select-bordered w-full">
                       <option value="nginx">Nginx</option>
                       <option value="apache">Apache</option>
-                      <option value="frankenphp">FrankenPHP (Nginx edge)</option>
                     </select>
                   </label>
                   <label class="field">

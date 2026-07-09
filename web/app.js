@@ -243,37 +243,11 @@ const templates = {
     security_profile: "standard",
     ssh_policy: "audit-only",
   },
-  frankenphp: {
-    domain: null,
-    deployment_mode: "public",
-    web_server: "frankenphp",
-    php_version: "8.5",
-    database: "mysql",
-    database_version: "mysql-8.4",
-    redis: "enable",
-    mail_mode: "local-postfix",
-    app_package: "gnuboard7",
-    web_root_mode: "public-html",
-    www_mode: "redirect-to-www",
-    security_profile: "standard",
-    ssh_policy: "audit-only",
-  },
-  "frankenphp-octane": {
-    domain: null,
-    deployment_mode: "public",
-    web_server: "frankenphp",
-    php_version: "8.5",
-    database: "mysql",
-    database_version: "mysql-8.4",
-    redis: "enable",
-    mail_mode: "local-postfix",
-    app_package: "gnuboard7-octane",
-    web_root_mode: "public-html",
-    www_mode: "redirect-to-www",
-    security_profile: "standard",
-    ssh_policy: "audit-only",
-  },
 };
+
+const publicInstallTemplates = new Set(Object.keys(templates));
+const publicWebServers = new Set(["nginx", "apache"]);
+const publicAppPackages = new Set(["gnuboard7", "wordpress"]);
 
 let operationOverlayResolve = null;
 
@@ -1131,25 +1105,39 @@ const sitePasswordAlertMessages = [
   "DB 비밀번호 확인이 일치하지 않습니다.",
   "DB 비밀번호는 8자 이상이어야 합니다.",
   "DB 비밀번호에 사용할 수 없는 문자가 있습니다.",
-  "Octane 실험 템플릿은 그누보드7 Octane 또는 Laravel Octane 앱만 선택할 수 있습니다.",
-  "Octane 앱은 FrankenPHP 웹서버에서만 실행할 수 있습니다.",
+  "공개 설치기는 권장 설치 또는 Apache 호환 템플릿만 지원합니다.",
+  "공개 설치기는 Nginx 또는 Apache만 지원합니다.",
+  "공개 설치기는 그누보드7 또는 WordPress만 지원합니다.",
 ];
 
 function selectedInstallTemplate() {
   return nodes.optionsForm.elements.install_template?.value || "recommended";
 }
 
-function isOctaneApp(appPackage) {
-  return appPackage === "gnuboard7-octane" || appPackage === "laravel-octane";
+function normalizePublicSelection() {
+  const form = nodes.optionsForm;
+
+  if (!publicInstallTemplates.has(form.elements.install_template?.value || "")) {
+    setFormValue("install_template", "recommended");
+  }
+  if (!publicWebServers.has(form.elements.web_server?.value || "")) {
+    setFormValue("web_server", "nginx");
+  }
+  if (!publicAppPackages.has(form.elements.app_package?.value || "")) {
+    setFormValue("app_package", "gnuboard7");
+  }
 }
 
 function appTemplateError(payload = optionPayload()) {
   const template = selectedInstallTemplate();
-  if (template === "frankenphp-octane" && !isOctaneApp(payload.app_package)) {
-    return "Octane 실험 템플릿은 그누보드7 Octane 또는 Laravel Octane 앱만 선택할 수 있습니다.";
+  if (!publicInstallTemplates.has(template)) {
+    return "공개 설치기는 권장 설치 또는 Apache 호환 템플릿만 지원합니다.";
   }
-  if (isOctaneApp(payload.app_package) && payload.web_server !== "frankenphp") {
-    return "Octane 앱은 FrankenPHP 웹서버에서만 실행할 수 있습니다.";
+  if (!publicWebServers.has(payload.web_server)) {
+    return "공개 설치기는 Nginx 또는 Apache만 지원합니다.";
+  }
+  if (!publicAppPackages.has(payload.app_package)) {
+    return "공개 설치기는 그누보드7 또는 WordPress만 지원합니다.";
   }
   return null;
 }
@@ -1296,9 +1284,6 @@ function databasePrefix(appPackage) {
   if (appPackage === "wordpress") {
     return "wp";
   }
-  if (appPackage === "laravel" || appPackage === "laravel-octane") {
-    return "laravel";
-  }
   return "g7";
 }
 
@@ -1353,32 +1338,10 @@ function applyTemplate(templateName) {
   refreshFormState();
 }
 
-function syncFrankenPhpRuntime() {
-  const webServer = nodes.optionsForm.elements.web_server?.value;
-  const phpVersion = nodes.optionsForm.elements.php_version;
-  if (webServer === "frankenphp" && phpVersion && phpVersion.value !== "8.5") {
-    phpVersion.value = "8.5";
-  }
-}
-
-function syncOctaneRuntime() {
-  const appPackage = nodes.optionsForm.elements.app_package?.value;
-  const webServer = nodes.optionsForm.elements.web_server;
-  const phpVersion = nodes.optionsForm.elements.php_version;
-  if (!isOctaneApp(appPackage)) {
-    return;
-  }
-  if (webServer && webServer.value !== "frankenphp") {
-    webServer.value = "frankenphp";
-  }
-  if (phpVersion && phpVersion.value !== "8.5") {
-    phpVersion.value = "8.5";
-  }
-}
-
 function refreshFormState(options = {}) {
   const preservePlan = Boolean(options.preservePlan);
   const shouldPersist = options.persist !== false;
+  normalizePublicSelection();
 
   if (!preservePlan) {
     state.planReport = null;
@@ -1392,8 +1355,6 @@ function refreshFormState(options = {}) {
     renderPackageProgress([]);
     refreshInstallButtonState();
   }
-  syncOctaneRuntime();
-  syncFrankenPhpRuntime();
   const webRootIsCustom = nodes.webRootMode.value === "custom";
   nodes.customWebRoot.disabled = !webRootIsCustom;
   if (!webRootIsCustom) {
@@ -1504,10 +1465,7 @@ function databaseVersionLabel(value) {
 function appPackageLabel(value) {
   const labels = {
     gnuboard7: "그누보드7",
-    "gnuboard7-octane": "그누보드7 Octane",
     wordpress: "WordPress",
-    laravel: "Laravel",
-    "laravel-octane": "Laravel Octane",
   };
   return labels[value] || value || "그누보드7";
 }
@@ -2970,9 +2928,7 @@ function provisioningActions(report = {}) {
       summary: "앱 소스, .env, 쓰기 권한, 빌드 산출물과 런타임 상태를 확인합니다.",
       command: selectedApp === "wordpress"
         ? `브라우저에서 ${appUrl} 접속`
-        : isOctaneApp(selectedApp)
-          ? `cd ${appRoot} && php artisan about && sudo systemctl status g7-frankenphp`
-          : `cd ${appRoot} && php artisan about`,
+        : `cd ${appRoot} && php artisan about`,
       settings: [
         ["앱", appPackageLabel(selectedApp)],
         ["앱 경로", appRoot],

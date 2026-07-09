@@ -247,6 +247,12 @@ test("plan route auto-generates a review after doctor pass", async ({ page }) =>
     await expect(page.getByText("서버 점검 통과")).toBeVisible();
 
     await page.getByRole("button", { name: "다음: 설치 방식" }).click();
+    await expect(page.locator('input[name="install_template"][value="frankenphp"]')).toHaveCount(0);
+    await expect(page.locator('input[name="install_template"][value="frankenphp-octane"]')).toHaveCount(0);
+    await expect(page.locator('input[name="app_package"][value="gnuboard7-octane"]')).toHaveCount(0);
+    await expect(page.locator('input[name="app_package"][value="laravel"]')).toHaveCount(0);
+    await expect(page.locator('input[name="app_package"][value="laravel-octane"]')).toHaveCount(0);
+    await expect(page.locator('select[name="web_server"] option[value="frankenphp"]')).toHaveCount(0);
     await page.fill("#site-password", "0808dong!!");
     await page.fill("#site-password-confirm", "0808dong!!");
     await page.fill("#database-name-input", "g7devops");

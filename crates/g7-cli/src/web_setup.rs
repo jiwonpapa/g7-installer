@@ -1718,20 +1718,26 @@ fn default_php_source() -> String {
 fn validate_template_app_request(request: &SetupRequest) -> std::result::Result<(), ApiError> {
     let install_template = request.install_template.as_deref().unwrap_or("recommended");
     let app_package = request.app_package.as_str();
-    let is_octane_app = matches!(app_package, "gnuboard7-octane" | "laravel-octane");
 
-    if install_template == "frankenphp-octane" && !is_octane_app {
+    if !matches!(install_template, "recommended" | "apache") {
         return Err(ApiError::bad_request(
-            "Octane 실험 템플릿은 그누보드7 Octane 또는 Laravel Octane 앱만 선택할 수 있습니다.",
+            "공개 설치기는 권장 설치 또는 Apache 호환 템플릿만 지원합니다.",
         )
-        .with_hint("설치할 앱을 그누보드7 Octane 또는 Laravel Octane으로 바꾸세요."));
+        .with_hint("설치 템플릿을 권장 설치 또는 Apache 호환으로 바꾸세요."));
     }
 
-    if is_octane_app && request.web_server != "frankenphp" {
+    if !matches!(request.web_server.as_str(), "nginx" | "apache") {
+        return Err(
+            ApiError::bad_request("공개 설치기는 Nginx 또는 Apache 웹서버만 지원합니다.")
+                .with_hint("웹서버를 Nginx 또는 Apache로 바꾸세요."),
+        );
+    }
+
+    if !matches!(app_package, "gnuboard7" | "wordpress") {
         return Err(ApiError::bad_request(
-            "Octane 앱은 FrankenPHP 웹서버에서만 실행할 수 있습니다.",
+            "공개 설치기는 그누보드7 또는 WordPress 앱만 지원합니다.",
         )
-        .with_hint("웹서버를 FrankenPHP로 바꾸거나 일반 앱 프로필을 선택하세요."));
+        .with_hint("설치할 앱을 그누보드7 또는 WordPress로 바꾸세요."));
     }
 
     Ok(())
@@ -2735,30 +2741,35 @@ mod tests {
     }
 
     #[test]
-    fn octane_template_requires_octane_app_profile() {
+    fn public_wizard_rejects_unsupported_templates() {
         let mut request = setup_request("example.com");
         request.install_template = Some("frankenphp-octane".to_string());
-        request.web_server = "frankenphp".to_string();
         request.app_package = "gnuboard7".to_string();
 
-        let error =
-            super::validate_template_app_request(&request).expect_err("must reject plain G7");
+        let error = super::validate_template_app_request(&request)
+            .expect_err("must reject experimental template");
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
 
-        request.app_package = "gnuboard7-octane".to_string();
+        request.install_template = Some("recommended".to_string());
         assert!(super::validate_template_app_request(&request).is_ok());
     }
 
     #[test]
-    fn octane_app_requires_frankenphp_runtime() {
+    fn public_wizard_rejects_unsupported_runtime_and_apps() {
         let mut request = setup_request("example.com");
-        request.app_package = "gnuboard7-octane".to_string();
-        request.web_server = "nginx".to_string();
+        request.web_server = "frankenphp".to_string();
 
-        let error = super::validate_template_app_request(&request).expect_err("must reject nginx");
+        let error = super::validate_template_app_request(&request)
+            .expect_err("must reject experimental runtime");
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
 
-        request.web_server = "frankenphp".to_string();
+        request.web_server = "nginx".to_string();
+        request.app_package = "laravel".to_string();
+        let error =
+            super::validate_template_app_request(&request).expect_err("must reject Laravel");
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+
+        request.app_package = "wordpress".to_string();
         assert!(super::validate_template_app_request(&request).is_ok());
     }
 

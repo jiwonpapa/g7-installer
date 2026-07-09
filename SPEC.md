@@ -4,7 +4,7 @@
 
 G7 Installer는 새 Ubuntu VPS에 그누보드7 중심의 PHP 웹앱 운영 환경을 자동 구성하는 Rust 기반 서버 CLI입니다.
 
-목표는 초보 사용자가 VPS에 접속한 뒤 최소 명령으로 그누보드7, WordPress, Laravel 설치 기반을 완료하게 하는 것입니다.
+목표는 초보 사용자가 VPS에 접속한 뒤 최소 명령으로 그누보드7 또는 WordPress 설치 기반을 완료하게 하는 것입니다.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7-installer/main/scripts/bootstrap.sh | sudo bash
@@ -31,7 +31,7 @@ gnuboard/g7-installer
 
 G7 본체와의 관계:
 
-- 설치기는 G7/Laravel 앱 소스를 받아 Composer, NPM, Artisan, systemd 서비스 구성을 수행합니다.
+- 설치기는 G7 앱 소스를 받아 Composer, NPM, Artisan, systemd 서비스 구성을 수행합니다.
 - WordPress는 최신 배포 zip을 받아 설치 화면으로 연결합니다.
 - 각 앱 본체 레포를 직접 수정하지 않습니다.
 
@@ -45,7 +45,7 @@ OS: Ubuntu 24.04 LTS
 웹서버: Nginx 기본, Apache 선택 옵션
 PHP: PHP-FPM 8.3 기본, 8.5 선택 옵션
 DB: MySQL 기본, MariaDB 선택 옵션
-앱 프로파일: gnuboard7 기본, WordPress/Laravel 선택 옵션
+앱 프로파일: gnuboard7 기본, WordPress 선택 옵션
 HTTPS: Certbot Let's Encrypt
 Cache/Queue: Redis 기본 지원
 메일: SMTP relay 기본 권장, local Postfix 선택
@@ -102,7 +102,7 @@ sudo g7inst self-update
 ```bash
 --local-test
 --web-server nginx|apache
---app gnuboard7|gnuboard7-octane|wordpress|laravel|laravel-octane
+--app gnuboard7|wordpress
 --php-version 8.3|8.5
 --database mariadb|mysql
 --site-user g7
@@ -228,9 +228,6 @@ g7inst doctor
 /etc/systemd/system/g7-scheduler.service
 /etc/systemd/system/g7-scheduler.timer
 /etc/systemd/system/g7-reverb.service
-/etc/systemd/system/laravel-queue.service
-/etc/systemd/system/laravel-scheduler.service
-/etc/systemd/system/laravel-scheduler.timer
 ```
 
 `owned-files.json`은 installer가 만든 파일만 추적합니다. 추적되지 않은 운영 파일은 자동 수정하지 않습니다.
