@@ -6,6 +6,7 @@ pub mod archive;
 pub mod certbot;
 pub mod command;
 pub mod database;
+pub mod mail;
 pub mod network;
 pub mod nginx;
 pub mod os;

@@ -1036,6 +1036,26 @@ fn apply_package_phase<R: CommandRunner>(
     summary.package_checks = candidate_checks;
     completed_steps.push("package-candidates-checked".to_string());
 
+    if plan.mail_mode == "local-postfix" && packages.iter().any(|package| package == "postfix") {
+        let mailname = postfix_mailname(plan);
+        let output = match probe.postfix_preseed(&mailname) {
+            Ok(output) => output,
+            Err(err) => {
+                return Err(package_phase_failure(
+                    command_error("postfix-preseed", "debconf-set-selections postfix", err),
+                    &summary,
+                    &completed_steps,
+                ));
+            }
+        };
+        if let Err(error) =
+            require_success("postfix-preseed", "debconf-set-selections postfix", output)
+        {
+            return Err(package_phase_failure(error, &summary, &completed_steps));
+        }
+        completed_steps.push("postfix-preseeded".to_string());
+    }
+
     let install_command = format!("apt-get install -y {}", packages.join(" "));
     let output = match probe.apt_install(&packages) {
         Ok(output) => output,
@@ -1066,6 +1086,13 @@ fn apply_package_phase<R: CommandRunner>(
         if let Err(error) = require_success("service-enable", command.clone(), output) {
             return Err(package_phase_failure(error, &summary, &completed_steps));
         }
+    }
+
+    if plan.mail_mode == "local-postfix" {
+        if let Err(error) = apply_local_postfix_runtime(probe, plan) {
+            return Err(package_phase_failure(error, &summary, &completed_steps));
+        }
+        completed_steps.push("postfix-configured".to_string());
     }
 
     let package_checks = verify_packages(probe, &packages)
@@ -1104,6 +1131,47 @@ fn package_phase_failure(
         summary: summary.clone(),
         completed_steps: completed_steps.to_vec(),
     })
+}
+
+fn apply_local_postfix_runtime<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    plan: &plan::InstallPlan,
+) -> Result<()> {
+    for (key, value) in local_postfix_runtime_settings(plan) {
+        let command = format!("postconf -e {key}");
+        let output = probe
+            .postconf_set(key, &value)
+            .map_err(|err| command_error("postfix-config", &command, err))?;
+        require_success("postfix-config", command, output)?;
+    }
+
+    let output = probe
+        .restart_service("postfix")
+        .map_err(|err| command_error("postfix-restart", "systemctl restart postfix", err))?;
+    require_success("postfix-restart", "systemctl restart postfix", output)?;
+
+    Ok(())
+}
+
+fn postfix_mailname(plan: &plan::InstallPlan) -> String {
+    plan.domain.trim().trim_end_matches('.').to_string()
+}
+
+fn local_postfix_runtime_settings(plan: &plan::InstallPlan) -> Vec<(&'static str, String)> {
+    let mailname = postfix_mailname(plan);
+
+    vec![
+        ("myhostname", mailname),
+        ("myorigin", "$myhostname".to_string()),
+        ("inet_interfaces", "loopback-only".to_string()),
+        ("inet_protocols", "ipv4".to_string()),
+        (
+            "mydestination",
+            "$myhostname, localhost.$mydomain, localhost".to_string(),
+        ),
+        ("mynetworks", "127.0.0.0/8".to_string()),
+        ("relayhost", String::new()),
+    ]
 }
 
 fn php_source_prerequisite_packages() -> Vec<String> {
@@ -5572,6 +5640,28 @@ mod tests {
         assert!(driver_settings.contains("\"session_driver\": \"redis\""));
         assert!(driver_settings.contains("\"queue_driver\": \"sync\""));
         let recorded = probe.runner().recorded();
+        assert!(recorded.iter().any(|spec| {
+            spec.program == std::ffi::OsStr::new("debconf-set-selections")
+                && spec.stdin.as_ref().is_some_and(|stdin| {
+                    String::from_utf8_lossy(stdin)
+                        .contains("postfix postfix/main_mailer_type select Internet Site")
+                })
+        }));
+        assert!(
+            recorded
+                .iter()
+                .any(|spec| { spec.display() == "postconf -e inet_interfaces = loopback-only" })
+        );
+        assert!(
+            recorded
+                .iter()
+                .any(|spec| spec.display() == "postconf -e inet_protocols = ipv4")
+        );
+        assert!(
+            recorded
+                .iter()
+                .any(|spec| spec.display() == "systemctl restart postfix")
+        );
         let app_copy_index = recorded
             .iter()
             .position(|spec| {
@@ -6303,8 +6393,17 @@ mod tests {
                 "{package}:\n  Candidate: 1\n"
             )));
         }
+        if install_plan.mail_mode == "local-postfix" && packages.iter().any(|p| p == "postfix") {
+            runner.push_output(CommandOutput::success(""));
+        }
         runner.push_output(CommandOutput::success("apt install ok\n"));
         for _service in &services {
+            runner.push_output(CommandOutput::success(""));
+        }
+        if install_plan.mail_mode == "local-postfix" {
+            for _setting in super::local_postfix_runtime_settings(install_plan) {
+                runner.push_output(CommandOutput::success(""));
+            }
             runner.push_output(CommandOutput::success(""));
         }
         for _package in &packages {

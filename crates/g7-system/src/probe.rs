@@ -16,6 +16,7 @@ use crate::archive::{
 use crate::certbot::{certonly_webroot, delete_cert, renew_dry_run};
 use crate::command::{CommandError, CommandOutput, CommandRunner, RealCommandRunner};
 use crate::database::{DatabaseEngine, apply_sql};
+use crate::mail::{postconf_set, postfix_preseed};
 use crate::network::{
     dns_ipv4_records, dns_ipv6_records, http_host_path_smoke, http_host_smoke, public_ipv4,
     public_ipv6, tcp_connect,
@@ -99,6 +100,14 @@ impl<R: CommandRunner> SystemProbe<R> {
 
     pub fn apt_candidate_available(&self, package: &str) -> Result<bool, SystemProbeError> {
         apt_candidate_available(&self.runner, package).map_err(SystemProbeError::Command)
+    }
+
+    pub fn postfix_preseed(&self, mailname: &str) -> Result<CommandOutput, SystemProbeError> {
+        postfix_preseed(&self.runner, mailname).map_err(SystemProbeError::Command)
+    }
+
+    pub fn postconf_set(&self, key: &str, value: &str) -> Result<CommandOutput, SystemProbeError> {
+        postconf_set(&self.runner, key, value).map_err(SystemProbeError::Command)
     }
 
     pub fn tcp_port_status(&self, port: u16) -> Result<PortStatus, SystemProbeError> {

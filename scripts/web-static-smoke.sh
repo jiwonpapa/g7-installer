@@ -161,6 +161,10 @@ need_pattern "crates/g7-cli/src/web_setup.rs" "install_running: state.install_ru
 need_pattern "crates/g7-cli/src/web_setup.rs" "provision_security"
 need_pattern "crates/g7-core/src/commands/install.rs" "BACKUP_MANIFEST_PATH"
 need_pattern "crates/g7-core/src/commands/install.rs" "backup_manifest_content"
+need_pattern "crates/g7-core/src/commands/install.rs" "postfix_preseed"
+need_pattern "crates/g7-core/src/commands/install.rs" "inet_interfaces"
+need_pattern "crates/g7-system/src/mail.rs" "debconf-set-selections"
+need_pattern "crates/g7-system/src/mail.rs" "postconf"
 need_pattern ".github/workflows/quality-gate.yml" "Browser wizard E2E"
 need_pattern "scripts/web-ui-e2e.spec.mjs" "wizard routes render report"
 
