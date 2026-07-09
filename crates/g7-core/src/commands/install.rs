@@ -688,19 +688,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             } else if tls_skipped {
                 completed_steps.push("tls-skipped".to_string());
             } else {
-                state.completed_steps = completed_steps.clone();
-                persist_progress(
-                    &progress,
-                    &mut owned_files,
-                    &owned_file_list,
-                    &state,
-                    &install_plan,
-                    &apply_summary,
-                    Some("TLS checks did not pass; app placement was not started."),
-                )?;
-                return Err(Error::InstallVerificationFailed {
-                    checks: "TLS checks did not pass; app placement was not started.".to_string(),
-                });
+                completed_steps.push("tls-deferred".to_string());
             }
             state.completed_steps = completed_steps.clone();
             persist_progress(
@@ -718,6 +706,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
                 "tls-config",
                 format!("TLS configuration failed: {err}"),
             )];
+            completed_steps.push("tls-deferred".to_string());
             state.completed_steps = completed_steps.clone();
             persist_progress(
                 &progress,
@@ -726,9 +715,8 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
                 &state,
                 &install_plan,
                 &apply_summary,
-                Some(&err.to_string()),
+                None,
             )?;
-            return Err(err);
         }
     }
 
@@ -750,6 +738,9 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
                 "app-source-deferred".to_string()
             });
             completed_steps.push("app-link-ready".to_string());
+            if state.phase != InstallerPhase::TlsEnabled.as_str() {
+                state.set_phase(InstallerPhase::AppConfigured);
+            }
             state.completed_steps = completed_steps.clone();
             persist_progress(
                 &progress,
@@ -2237,7 +2228,7 @@ fn apply_post_database_guidance(
     let app_checks = vec![InstallCheck {
         name: "app-fetch".to_string(),
         status: "deferred".to_string(),
-        message: "Selected web app source fetch and .env generation will run after runtime, database, and TLS are stable.".to_string(),
+        message: "Selected web app source fetch and .env generation will run after runtime and database are stable; HTTPS can remain deferred when Certbot is rate-limited.".to_string(),
     }];
     (firewall_checks, mail_checks, certbot_checks, app_checks)
 }
@@ -5902,6 +5893,56 @@ mod tests {
     }
 
     #[test]
+    fn install_continues_app_phase_when_certbot_is_rate_limited()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let os_release_path = write_temp_os_release()?;
+        let fs_root = create_temp_fs_root()?;
+        let options = super::plan::PlanOptions::default();
+        let probe = clean_probe_with_uid_for_options_and_certbot(
+            &os_release_path,
+            &fs_root,
+            "0\n",
+            "example.com",
+            &options,
+            CommandOutput::failure(1, "too many certificates already issued"),
+        )?;
+        let paths = InstallPaths::with_root(&fs_root);
+
+        let report = run_with_probe_and_paths("example.com".to_string(), options, &probe, &paths)?;
+
+        assert_eq!(report.phase, "app-configured");
+        assert!(report.completed_steps.contains(&"tls-deferred".to_string()));
+        assert!(
+            report
+                .completed_steps
+                .contains(&"app-source-prepared".to_string())
+        );
+        assert_eq!(report.app_url, "http://www.example.com/install");
+        assert!(
+            report
+                .certbot_checks
+                .iter()
+                .any(|check| check.name == "tls-config" && check.status == "fail")
+        );
+        assert!(
+            report
+                .app_checks
+                .iter()
+                .any(|check| check.name == "app-source" && check.status == "pass")
+        );
+        assert!(
+            !report
+                .vhost_checks
+                .iter()
+                .any(|check| check.name == "nginx-https-vhost")
+        );
+
+        fs::remove_file(os_release_path)?;
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
     fn install_adopts_existing_g7_managed_swap_files()
     -> std::result::Result<(), Box<dyn std::error::Error>> {
         let os_release_path = write_temp_os_release()?;
@@ -6451,6 +6492,24 @@ mod tests {
         domain: &str,
         options: &super::plan::PlanOptions,
     ) -> std::result::Result<SystemProbe<FakeCommandRunner>, Box<dyn std::error::Error>> {
+        clean_probe_with_uid_for_options_and_certbot(
+            os_release_path,
+            fs_root,
+            uid,
+            domain,
+            options,
+            CommandOutput::success("cert issued\n"),
+        )
+    }
+
+    fn clean_probe_with_uid_for_options_and_certbot(
+        os_release_path: &Path,
+        fs_root: &Path,
+        uid: &str,
+        domain: &str,
+        options: &super::plan::PlanOptions,
+        certbot_output: CommandOutput,
+    ) -> std::result::Result<SystemProbe<FakeCommandRunner>, Box<dyn std::error::Error>> {
         fs::create_dir_all(fs_root.join("etc/nginx/sites-enabled"))?;
         fs::create_dir_all(fs_root.join("etc/nginx/sites-available"))?;
         fs::create_dir_all(fs_root.join("etc/nginx/conf.d"))?;
@@ -6461,17 +6520,23 @@ mod tests {
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         let plan = super::plan::build_with_options(domain.to_string(), options.clone())?;
-        push_successful_apply_outputs(&runner, &plan, options.site_user_password.is_some());
+        push_successful_apply_outputs_with_certbot(
+            &runner,
+            &plan,
+            options.site_user_password.is_some(),
+            certbot_output,
+        );
 
         Ok(SystemProbe::new(runner)
             .with_os_release_path(os_release_path)
             .with_fs_root(fs_root))
     }
 
-    fn push_successful_apply_outputs(
+    fn push_successful_apply_outputs_with_certbot(
         runner: &FakeCommandRunner,
         install_plan: &super::plan::InstallPlan,
         site_password_set: bool,
+        certbot_output: CommandOutput,
     ) {
         let packages = super::package_names(install_plan);
         let services = super::managed_services(install_plan);
@@ -6519,7 +6584,12 @@ mod tests {
         }
         push_successful_network_outputs(runner, install_plan);
         push_successful_mail_outputs(runner, install_plan);
-        push_successful_site_and_vhost_outputs(runner, install_plan, site_password_set);
+        push_successful_site_and_vhost_outputs(
+            runner,
+            install_plan,
+            site_password_set,
+            certbot_output,
+        );
     }
 
     fn push_successful_network_outputs(
@@ -6553,6 +6623,7 @@ mod tests {
         runner: &FakeCommandRunner,
         install_plan: &super::plan::InstallPlan,
         site_password_set: bool,
+        certbot_output: CommandOutput,
     ) {
         runner.push_output(CommandOutput::failure(1, "no such user"));
         runner.push_output(CommandOutput::success(""));
@@ -6569,7 +6640,7 @@ mod tests {
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success(""));
-            push_successful_runtime_database_tls_outputs(runner, install_plan);
+            push_runtime_database_tls_outputs(runner, install_plan, certbot_output);
             return;
         }
         if install_plan.web_server == "frankenphp" {
@@ -6582,19 +6653,20 @@ mod tests {
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success(""));
-            push_successful_runtime_database_tls_outputs(runner, install_plan);
+            push_runtime_database_tls_outputs(runner, install_plan, certbot_output);
             return;
         }
 
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
-        push_successful_runtime_database_tls_outputs(runner, install_plan);
+        push_runtime_database_tls_outputs(runner, install_plan, certbot_output);
     }
 
-    fn push_successful_runtime_database_tls_outputs(
+    fn push_runtime_database_tls_outputs(
         runner: &FakeCommandRunner,
         install_plan: &super::plan::InstallPlan,
+        certbot_output: CommandOutput,
     ) {
         runner.push_output(CommandOutput::success(""));
         if matches!(
@@ -6616,23 +6688,29 @@ mod tests {
             for _host in super::certificate_hosts(install_plan) {
                 runner.push_output(CommandOutput::success(""));
             }
-            runner.push_output(CommandOutput::success("cert issued\n"));
-            runner.push_output(CommandOutput::success(""));
-            runner.push_output(CommandOutput::success(""));
-            runner.push_output(CommandOutput::success("renew ok\n"));
+            let certbot_succeeded = certbot_output.status == 0;
+            runner.push_output(certbot_output);
+            if certbot_succeeded {
+                runner.push_output(CommandOutput::success(""));
+                runner.push_output(CommandOutput::success(""));
+                runner.push_output(CommandOutput::success("renew ok\n"));
+            }
         } else if install_plan.deployment_mode == "public" && install_plan.web_server == "apache" {
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success(""));
             for _host in super::certificate_hosts(install_plan) {
                 runner.push_output(CommandOutput::success(""));
             }
-            runner.push_output(CommandOutput::success("cert issued\n"));
-            for _module in super::apache_tls_modules() {
+            let certbot_succeeded = certbot_output.status == 0;
+            runner.push_output(certbot_output);
+            if certbot_succeeded {
+                for _module in super::apache_tls_modules() {
+                    runner.push_output(CommandOutput::success(""));
+                }
                 runner.push_output(CommandOutput::success(""));
+                runner.push_output(CommandOutput::success(""));
+                runner.push_output(CommandOutput::success("renew ok\n"));
             }
-            runner.push_output(CommandOutput::success(""));
-            runner.push_output(CommandOutput::success(""));
-            runner.push_output(CommandOutput::success("renew ok\n"));
         } else if install_plan.deployment_mode == "public"
             && install_plan.web_server == "frankenphp"
         {
@@ -6641,10 +6719,13 @@ mod tests {
             for _host in super::certificate_hosts(install_plan) {
                 runner.push_output(CommandOutput::success(""));
             }
-            runner.push_output(CommandOutput::success("cert issued\n"));
-            runner.push_output(CommandOutput::success(""));
-            runner.push_output(CommandOutput::success(""));
-            runner.push_output(CommandOutput::success("renew ok\n"));
+            let certbot_succeeded = certbot_output.status == 0;
+            runner.push_output(certbot_output);
+            if certbot_succeeded {
+                runner.push_output(CommandOutput::success(""));
+                runner.push_output(CommandOutput::success(""));
+                runner.push_output(CommandOutput::success("renew ok\n"));
+            }
         }
         push_successful_app_outputs(runner, install_plan);
     }
