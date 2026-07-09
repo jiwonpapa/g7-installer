@@ -164,6 +164,30 @@
     @apply sr-only lg:not-sr-only;
   }
 
+  @media (max-width: 1023px) {
+    body[data-active-step="login"] [data-progress="login"] .step-copy span,
+    body[data-active-step="check"] [data-progress="check"] .step-copy span,
+    body[data-active-step="options"] [data-progress="options"] .step-copy span,
+    body[data-active-step="plan"] [data-progress="plan"] .step-copy span,
+    body[data-active-step="install"] [data-progress="install"] .step-copy span,
+    body[data-active-step="report"] [data-progress="report"] .step-copy span,
+    body[data-active-step="provision"] [data-progress="provision"] .step-copy span {
+      position: static;
+      width: auto;
+      height: auto;
+      margin: 0;
+      overflow: visible;
+      clip: auto;
+      white-space: nowrap;
+    }
+
+    body[data-active-step="install"] .promo-panel,
+    body[data-active-step="report"] .promo-panel,
+    body[data-active-step="provision"] .promo-panel {
+      display: none !important;
+    }
+  }
+
   .view-panel {
     @apply hidden bg-base-100 px-4 py-5 sm:px-6;
   }
@@ -268,6 +292,7 @@
   .log-box {
     @apply max-h-80 min-h-64 overflow-x-hidden whitespace-pre-wrap break-words font-mono text-xs leading-5;
     overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .log-dock {

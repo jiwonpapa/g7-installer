@@ -48,7 +48,7 @@ Date: 2026-07-08
   - `/var/log/g7-installer/setup-guide.md` must exist and be readable
   - post-install `doctor` must report `install_allowed: false`
   - optional `reset --yes` cleans installer-created resources and owned files
-  - optional second install cycle can run after reset; external VPS snapshot restore remains the strongest safety net
+  - optional second install cycle can run after reset; external VPS backup/snapshot restore is separate from installer rollback and may add cost/time
 
 ## Required Manual Follow-Up
 

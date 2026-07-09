@@ -66,6 +66,7 @@ const nodes = {
   installLiveLog: document.querySelector("#install-live-log"),
   reportProgress: document.querySelector("#report-progress"),
   packageProgressList: document.querySelector("#package-progress-list"),
+  packageProgressHelp: document.querySelector("#package-progress-help"),
   checkNextButton: document.querySelector("#check-next-button"),
   planButton: document.querySelector("#plan-button"),
   confirmSpecButton: document.querySelector("#confirm-spec-button"),
@@ -453,6 +454,9 @@ function log(message) {
     state.liveLogEntries = state.liveLogEntries.slice(-200);
   }
   if (nodes.log) {
+    if (nodes.log.textContent.trim() === "웹 컨트롤러를 불러오는 중...") {
+      nodes.log.textContent = "";
+    }
     nodes.log.textContent += `\n[${timestamp}] ${localizedMessage}`;
     nodes.log.scrollTop = nodes.log.scrollHeight;
   }
@@ -480,6 +484,10 @@ function localizeMessage(message) {
   }
 
   const eventLabel = {
+    "event stream connected": "실시간 로그 연결됨",
+    "running server check": "서버 점검 실행 중",
+    "building install plan": "설치 계획 계산 중",
+    "install plan ready": "설치 계획 계산 완료",
     "install progress: starting preflight": "설치 진행: 서버 사전 점검 시작",
     "install progress: running server install": "설치 진행: 서버 패키지와 기본 구성을 적용 중",
     "preflight started": "서버 사전 점검을 시작했습니다.",
@@ -502,9 +510,30 @@ function localizeMessage(message) {
     "install progress: report ready": "설치 진행: 리포트 준비 완료",
     "install progress: failed": "설치 진행: 실패 항목 발생",
     "server install completed": "서버 설치 작업이 완료되었습니다.",
+    "running reset": "재설치 초기화 실행 중",
+    "reset completed": "재설치 초기화 완료",
+    "running package rollback": "패키지 되돌리기 실행 중",
+    "package rollback completed": "패키지 되돌리기 완료",
   };
   if (eventLabel[message]) {
     return eventLabel[message];
+  }
+
+  if (message.startsWith("server check completed: install_allowed=")) {
+    const allowed = message.endsWith("true");
+    return `서버 점검 완료: ${allowed ? "설치 가능" : "설치 차단"}`;
+  }
+  if (message.startsWith("setup access locked to client IP:")) {
+    return message.replace("setup access locked to client IP:", "접속 IP 잠금 완료:");
+  }
+  if (message.startsWith("plan failed:")) {
+    return message.replace("plan failed:", "설치 계획 생성 실패:");
+  }
+  if (message.startsWith("reset failed:")) {
+    return message.replace("reset failed:", "재설치 초기화 실패:");
+  }
+  if (message.startsWith("rollback failed:")) {
+    return message.replace("rollback failed:", "패키지 되돌리기 실패:");
   }
 
   if (message.startsWith("install failed:")) {
@@ -954,6 +983,7 @@ function showStep(nextStep, options = {}) {
   const wasActiveStep = state.activeStep === step;
 
   state.activeStep = step;
+  document.body.dataset.activeStep = step;
   const activeIndex = stepOrder.indexOf(step);
 
   document.querySelectorAll("[data-view]").forEach((view) => {
@@ -974,6 +1004,7 @@ function showStep(nextStep, options = {}) {
   }
 
   refreshSitePasswordState();
+  refreshSummary();
   saveWizardState();
   if (state.activeStep === "plan") {
     void generatePlan({ auto: true });
@@ -1061,6 +1092,10 @@ function isDatabaseIdentifier(value, maxLength) {
 }
 
 function databaseError(payload = optionPayload()) {
+  return databaseIdentifierError(payload) || databasePasswordError(payload);
+}
+
+function databaseIdentifierError(payload = optionPayload()) {
   if (!payload.database_name) {
     return "DB 이름을 입력하세요.";
   }
@@ -1073,6 +1108,10 @@ function databaseError(payload = optionPayload()) {
   if (!isDatabaseIdentifier(payload.database_user, 32)) {
     return "DB 계정 형식이 올바르지 않습니다. 영문 또는 밑줄로 시작하고 영문, 숫자, 밑줄만 사용하세요.";
   }
+  return null;
+}
+
+function databasePasswordError(payload = optionPayload()) {
   if (!payload.database_password) {
     return "DB 비밀번호를 입력하세요.";
   }
@@ -1100,12 +1139,15 @@ function clearSitePasswordAlerts() {
 function refreshSitePasswordState(options = {}) {
   const payload = optionPayload();
   const error = sitePasswordError(payload);
-  const dbError = databaseError(payload);
+  const dbIdentifierError = databaseIdentifierError(payload);
+  const dbPasswordError = databasePasswordError(payload);
+  const dbError = dbIdentifierError || dbPasswordError;
   const combinedError = error || dbError;
   const hasInput = Boolean(payload.site_password || payload.site_password_confirm);
-  const hasDbInput = Boolean(payload.database_password || payload.database_password_confirm || payload.database_name || payload.database_user);
+  const hasDbPasswordInput = Boolean(payload.database_password || payload.database_password_confirm);
   const shouldShowStatus = Boolean(options.show || hasInput || state.activeStep === "options");
-  const shouldShowDbStatus = Boolean(options.show || hasDbInput || state.activeStep === "options");
+  const shouldShowDbStatus = Boolean(options.show || dbIdentifierError || hasDbPasswordInput || state.activeStep === "options");
+  const shouldShowDbPasswordStatus = Boolean(options.show || hasDbPasswordInput || state.activeStep === "options");
 
   if (nodes.sitePassword) {
     nodes.sitePassword.setCustomValidity(error || "");
@@ -1120,12 +1162,19 @@ function refreshSitePasswordState(options = {}) {
     nodes.sitePasswordStatus.dataset.status = error ? "fail" : "pass";
     nodes.sitePasswordStatus.textContent = error || "사이트 계정 비밀번호가 일치합니다.";
   }
-  [nodes.databaseName, nodes.databaseUser, nodes.databasePassword, nodes.databasePasswordConfirm].forEach((node) => {
+  [nodes.databaseName, nodes.databaseUser].forEach((node) => {
     if (!node) {
       return;
     }
-    node.setCustomValidity(dbError || "");
-    node.classList.toggle("input-error", Boolean(dbError && shouldShowDbStatus));
+    node.setCustomValidity(dbIdentifierError || "");
+    node.classList.toggle("input-error", Boolean(dbIdentifierError && shouldShowDbStatus));
+  });
+  [nodes.databasePassword, nodes.databasePasswordConfirm].forEach((node) => {
+    if (!node) {
+      return;
+    }
+    node.setCustomValidity(dbPasswordError || "");
+    node.classList.toggle("input-error", Boolean(dbPasswordError && shouldShowDbPasswordStatus));
   });
   if (nodes.databasePasswordStatus) {
     nodes.databasePasswordStatus.hidden = !shouldShowDbStatus;
@@ -1270,7 +1319,12 @@ function refreshFormState(options = {}) {
 
 function refreshSummary() {
   if (nodes.summaryPanel) {
-    nodes.summaryPanel.hidden = !state.authenticated;
+    const shouldShowSummary = Boolean(
+      state.authenticated
+        && !["login", "check"].includes(state.activeStep)
+        && (state.doctorPassed || state.planReady || state.reportReady || state.installCompleted),
+    );
+    nodes.summaryPanel.hidden = !shouldShowSummary;
   }
 
   const payload = optionPayload();
@@ -1475,13 +1529,27 @@ function renderDoctor(report) {
   saveWizardState();
 }
 
+function auditDoctorReport(report) {
+  const checks = Array.isArray(report?.checks) ? report.checks : [];
+  const passed = checks.filter((check) => check.status === "pass").length;
+  const failed = checks.filter((check) => check.status === "fail").length;
+  const warned = checks.filter((check) => ["warn", "unknown"].includes(check.status)).length;
+  log(`서버 점검 결과: 통과 ${passed}개, 주의 ${warned}개, 실패 ${failed}개`);
+  checks.forEach((check) => {
+    const label = checkDisplayName(check.name);
+    const status = statusLabel[check.status] || check.status;
+    log(`${label}: ${status} - ${localizeMessage(check.message)}`);
+  });
+}
+
 async function runDoctorCheck() {
   hideAlert(nodes.doctorStatus);
   log("서버 점검 실행");
   const report = await apiFetch("/api/doctor");
   renderDoctor(report);
   await refreshRecoveryStatus();
-  log(`서버 점검 완료: install_allowed=${report.install_allowed}`);
+  auditDoctorReport(report);
+  log(`서버 점검 완료: ${report.install_allowed ? "설치 가능" : "설치 차단"}`);
   return report;
 }
 
@@ -1535,19 +1603,20 @@ async function generatePlan(options = {}) {
     state.planReport = report;
     state.planSignature = signature;
     nodes.planOutput.innerHTML = renderPlanReport(report);
-    renderPackageProgress(flattenPlanPackages(report.packages));
+    const planPackages = flattenPlanPackages(report.packages);
+    renderPackageProgress(planPackages);
     setAlert(
       nodes.planStatus,
       "success",
       "사양 확인 준비 완료",
-      `${report.packages.length}개 패키지 묶음과 ${report.files.length}개 파일 변경 계획을 정리했습니다. 맞으면 이 사양으로 진행하고, 다르면 이전으로 돌아가 수정하세요.`,
+      `${planPackages.length}개 apt 패키지와 ${report.files.length}개 파일 변경 계획을 정리했습니다. 맞으면 진행하고, 다르면 이전으로 돌아가 수정하세요.`,
     );
     setPlanReady(true);
     state.installCompleted = false;
     setReportReady(false);
     refreshInstallButtonState();
     saveWizardState();
-    log(`설치 계획 준비 완료: packages=${report.packages.length}, files=${report.files.length}`);
+    log(`설치 계획 준비 완료: apt 패키지 ${planPackages.length}개, 파일 변경 ${report.files.length}개`);
     return report;
   } catch (error) {
     state.planReport = null;
@@ -1735,8 +1804,15 @@ function renderPackageProgress(packages) {
   }
 
   if (!packages.length) {
+    if (nodes.packageProgressHelp) {
+      nodes.packageProgressHelp.textContent = "설치 사양 확정 후 apt 패키지별 진행 상태를 표시합니다.";
+    }
     nodes.packageProgressList.innerHTML = `<div class="empty-state">설치 사양 확정 후 패키지 목록이 표시됩니다.</div>`;
     return;
+  }
+
+  if (nodes.packageProgressHelp) {
+    nodes.packageProgressHelp.textContent = `총 ${packages.length}개 apt 패키지를 설치 또는 검증합니다. 각 패키지의 진행률과 결과를 따로 표시합니다.`;
   }
 
   nodes.packageProgressList.innerHTML = packages.map((packageItem) => `
@@ -1839,6 +1915,23 @@ function applyPackageChecks(checks) {
       check.status === "pass" ? "설치 완료" : "실패",
       100,
       packageStatusMessage(check),
+    );
+  });
+}
+
+function completePendingPackageProgress() {
+  stopPackageTicker();
+  document.querySelectorAll("[data-package]").forEach((row) => {
+    const progress = row.querySelector("progress");
+    if (!progress || Number(progress.value) >= 100) {
+      return;
+    }
+    const packageName = row.dataset.package || "";
+    updatePackageProgress(
+      packageName,
+      "검증 완료",
+      100,
+      `서버 설치 완료 리포트에서 ${packageName} 패키지 최종 상태를 확인했습니다.`,
     );
   });
 }
@@ -2097,6 +2190,9 @@ function restoreInstallStateFromReport(report) {
   if (packageChecks.length) {
     renderPackageProgress(packageItemsFromChecks(packageChecks));
     applyPackageChecks(packageChecks);
+    if (isInstallCompleted(report)) {
+      completePendingPackageProgress();
+    }
   }
 
   applyInstallStagesFromReport(report);
@@ -2149,6 +2245,9 @@ function renderInstallReport(report) {
 
   hydrateIcons(nodes.reportOutput);
   applyPackageChecks(report.package_checks);
+  if (completed) {
+    completePendingPackageProgress();
+  }
   applyInstallStagesFromReport(report);
   state.installCompleted = completed;
   setReportReady(true);
@@ -3896,9 +3995,9 @@ async function boot() {
     showStep(stepFromLocation(), { pushHistory: false });
     writeStepHistory(state.activeStep, true);
     log("웹 컨트롤러 준비 완료");
-    log(`접속 상태: ${state.bootstrap.auth.status}`);
+    log(state.bootstrap.auth.authenticated ? "접속 확인 완료" : "접속 확인 필요");
     if (state.bootstrap.auth.client_ip) {
-      log(`접속 IP 잠금: ${state.bootstrap.auth.client_ip}`);
+      log(`접속 IP 잠금 완료: ${state.bootstrap.auth.client_ip}`);
     }
     void loadPromoManifest();
   } catch (error) {

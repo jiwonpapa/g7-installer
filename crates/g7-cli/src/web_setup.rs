@@ -718,7 +718,7 @@ async fn api_events(
 async fn event_socket(mut socket: WebSocket, mut events: broadcast::Receiver<WebEvent>) {
     let connected = WebEvent {
         event_type: "log",
-        message: "event stream connected".to_string(),
+        message: "실시간 로그 연결됨".to_string(),
         stage: None,
         status: None,
         operation: None,
@@ -753,13 +753,17 @@ async fn api_doctor(
     headers: HeaderMap,
 ) -> std::result::Result<impl IntoResponse, ApiError> {
     require_session(&state, &headers, peer.ip())?;
-    emit_log(&state, "running server check");
+    emit_log(&state, "서버 점검 실행 중");
     let report = doctor_to_api(doctor::run());
     emit_log(
         &state,
         format!(
-            "server check completed: install_allowed={}",
-            report.install_allowed
+            "서버 점검 완료: {}",
+            if report.install_allowed {
+                "설치 가능"
+            } else {
+                "설치 차단"
+            }
         ),
     );
 
@@ -776,19 +780,19 @@ async fn api_plan(
     require_csrf(&headers, &session)?;
     validate_site_password_request(&request)?;
     validate_database_request(&request)?;
-    emit_log(&state, "building install plan");
+    emit_log(&state, "설치 계획 계산 중");
     let domain = request.domain.clone();
     let database_version = normalize_database_version(&request.database_version);
     let options = options_from_request(request);
     let install_plan = match plan::build_with_options(domain, options) {
         Ok(install_plan) => install_plan,
         Err(error) => {
-            emit_log(&state, format!("plan failed: {error}"));
+            emit_log(&state, format!("설치 계획 생성 실패: {error}"));
             return Err(ApiError::bad_request(error)
                 .with_hint("설치 옵션 값을 확인한 뒤 다시 계획을 생성하세요."));
         }
     };
-    emit_log(&state, "install plan ready");
+    emit_log(&state, "설치 계획 계산 완료");
 
     Ok(Json(plan_to_api(install_plan, database_version)))
 }
@@ -805,7 +809,7 @@ async fn api_install_prepare(
     validate_database_request(&request)?;
 
     if state.install_running.swap(true, Ordering::SeqCst) {
-        emit_log(&state, "install request rejected: already running");
+        emit_log(&state, "설치 요청 거부: 이미 다른 설치 작업이 진행 중");
         return Err(ApiError::conflict("install is already running"));
     }
 
@@ -877,7 +881,7 @@ async fn api_install_prepare(
             emit_stage(&state, "app", "성공", "web app files prepared");
             emit_stage(&state, "report", "성공", "setup guide and report prepared");
             emit_progress(&state, "install", 100, "install progress: report ready");
-            emit_log(&state, "server install completed");
+            emit_log(&state, "서버 설치 완료");
             Ok(Json(install_to_api(report, database_version)))
         }
         Err(error) => {
@@ -909,15 +913,12 @@ async fn api_provision_action(
     }
 
     let report = read_saved_report_json()?;
-    emit_log(
-        &state,
-        format!("running provision action: {}", request.action),
-    );
+    emit_log(&state, format!("후속 작업 실행 중: {}", request.action));
     let action_report = run_provision_action(&request.action, &report)?;
     emit_log(
         &state,
         format!(
-            "provision action completed: {} {}",
+            "후속 작업 완료: {} {}",
             action_report.action, action_report.status
         ),
     );
@@ -940,7 +941,7 @@ async fn api_reset(
         ));
     }
 
-    emit_log(&state, "running reset");
+    emit_log(&state, "재설치 초기화 실행 중");
     emit_progress(
         &state,
         "reset",
@@ -951,7 +952,7 @@ async fn api_reset(
         Ok(report) => report,
         Err(error) => {
             emit_progress(&state, "reset", 100, "reset progress: failed");
-            emit_log(&state, format!("reset failed: {error}"));
+            emit_log(&state, format!("재설치 초기화 실패: {error}"));
             return Err(ApiError::bad_request(error)
                 .with_hint("root 권한과 installer report/owned-files 상태를 확인하세요."));
         }
@@ -962,7 +963,7 @@ async fn api_reset(
         100,
         "reset progress: full installer reset completed",
     );
-    emit_log(&state, "reset completed");
+    emit_log(&state, "재설치 초기화 완료");
 
     Ok(Json(ResetApiReport {
         dry_run: report.dry_run,
@@ -987,7 +988,7 @@ async fn api_rollback(
         ));
     }
 
-    emit_log(&state, "running package rollback");
+    emit_log(&state, "패키지 되돌리기 실행 중");
     emit_progress(
         &state,
         "rollback",
@@ -1001,7 +1002,7 @@ async fn api_rollback(
         Ok(report) => report,
         Err(error) => {
             emit_progress(&state, "rollback", 100, "rollback progress: failed");
-            emit_log(&state, format!("rollback failed: {error}"));
+            emit_log(&state, format!("패키지 되돌리기 실패: {error}"));
             return Err(ApiError::bad_request(error).with_hint(
                 "운영 웹루트가 비어 있고, 설치 직후 패키지 기준 정보가 남아 있는지 확인하세요.",
             ));
@@ -1013,7 +1014,7 @@ async fn api_rollback(
         100,
         "rollback progress: rollback completed",
     );
-    emit_log(&state, "package rollback completed");
+    emit_log(&state, "패키지 되돌리기 완료");
 
     Ok(Json(rollback_to_api(report)))
 }
@@ -2146,10 +2147,7 @@ fn lock_client_ip(state: &WebState, client_ip: IpAddr) -> std::result::Result<()
         Some(allowed_ip) => Err(client_ip_forbidden(allowed_ip, client_ip)),
         None => {
             *allowed = Some(client_ip);
-            emit_log(
-                state,
-                format!("setup access locked to client IP: {client_ip}"),
-            );
+            emit_log(state, format!("접속 IP 잠금 완료: {client_ip}"));
             Ok(())
         }
     }

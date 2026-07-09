@@ -9,9 +9,9 @@ cd "${ROOT_DIR}"
 echo "[quality-gate] shell syntax"
 bash -n scripts/*.sh
 echo "[quality-gate] web static smoke"
-scripts/web-static-smoke.sh
+bash scripts/web-static-smoke.sh
 echo "[quality-gate] setup auth smoke"
-scripts/setup-auth-smoke.sh
+bash scripts/setup-auth-smoke.sh
 echo "[quality-gate] javascript syntax"
 node --check web/app.js
 echo "[quality-gate] cargo fmt"

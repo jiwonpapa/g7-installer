@@ -28,8 +28,8 @@ jobs:
       - name: Static and Rust gate
         run: |
           bash -n scripts/*.sh
-          scripts/web-static-smoke.sh
-          scripts/setup-auth-smoke.sh
+          bash scripts/web-static-smoke.sh
+          bash scripts/setup-auth-smoke.sh
           node --check web/app.js
           cargo fmt --check
           cargo test

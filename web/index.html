@@ -112,7 +112,7 @@
                   문제 해결 / 초기화
                   <span class="help-wrap">
                     <button class="help-circle" type="button" aria-label="초기화 도움말">?</button>
-                    <span class="help-text">설치가 중간에 멈췄을 때만 사용합니다. 서버 전체 복구는 Lightsail 스냅샷이 기준입니다.</span>
+                    <span class="help-text">설치가 중간에 멈췄을 때만 사용합니다. 서버 전체 복구는 VPS 백업 기능을 필요에 따라 사용하세요.</span>
                   </span>
                 </h3>
                 <p data-recovery-message>설치기 소유 흔적을 확인하는 중입니다.</p>
@@ -527,7 +527,7 @@
                 <h2>기본 서버 구성 실행</h2>
                 <p>apt 패키지, 웹서버 도메인 연결, PHP/DB 튜닝, DB 계정, SSL, 앱 설치 링크, 설정 안내서를 순서대로 처리합니다.</p>
               </div>
-              <button id="install-button" class="btn btn-error icon-button" type="button" data-icon="package-plus">기본 구성 시작</button>
+              <button id="install-button" class="btn btn-primary icon-button" type="button" data-icon="package-plus">기본 구성 시작</button>
             </div>
             <div id="install-status" class="mt-5 hidden"></div>
             <section class="execution-board mt-5">
@@ -565,7 +565,7 @@
             </section>
             <section class="mt-5">
               <h3 class="text-lg font-semibold">패키지 진행 상황</h3>
-              <p class="mt-1 text-sm text-base-content/60">설치 계획에서 확인한 apt 패키지를 데스크톱은 2열, 모바일은 1열로 표시합니다.</p>
+              <p id="package-progress-help" class="mt-1 text-sm text-base-content/60">설치 사양 확정 후 apt 패키지별 진행 상태를 표시합니다.</p>
               <div id="package-progress-list" class="package-progress-list mt-4">
                 <div class="empty-state">설치 사양 확정 후 패키지 목록이 표시됩니다.</div>
               </div>
@@ -576,7 +576,7 @@
                   문제 해결 / 초기화
                   <span class="help-wrap">
                     <button class="help-circle" type="button" aria-label="초기화 도움말">?</button>
-                    <span class="help-text">설치가 중간에 멈췄을 때만 사용합니다. 서버 전체 복구는 Lightsail 스냅샷이 기준입니다.</span>
+                    <span class="help-text">설치가 중간에 멈췄을 때만 사용합니다. 서버 전체 복구는 VPS 백업 기능을 필요에 따라 사용하세요.</span>
                   </span>
                 </h3>
                 <p data-recovery-message>설치기 소유 흔적을 확인하는 중입니다.</p>
@@ -679,12 +679,12 @@
     <dialog id="install-confirm-dialog" class="modal">
       <div class="modal-box">
         <h3 class="text-lg font-semibold">기본 서버 구성을 시작할까요?</h3>
-        <p class="mt-2 text-sm text-base-content/60">서버 패키지, 웹서버 도메인 연결, PHP/DB 튜닝, DB 계정, SSL, 앱 설치 링크, 설정 안내서 생성을 진행합니다. 실제 VPS는 시작 전 Lightsail 스냅샷을 권장합니다.</p>
+        <p class="mt-2 text-sm text-base-content/60">신규 Ubuntu VPS 기준으로 서버 패키지, 웹서버, PHP/DB, SSL, 앱 설치 준비를 진행합니다. 이미 운영 중인 서버라면 중단하고 새 서버에서 진행하세요.</p>
         <div id="install-confirm-summary" class="report-card mt-5"></div>
         <div class="modal-action">
           <form method="dialog" class="flex gap-2">
             <button class="btn btn-ghost icon-button" value="cancel" data-icon="x">취소</button>
-            <button id="install-confirm-start" class="btn btn-error icon-button" value="start" data-icon="play">시작</button>
+            <button id="install-confirm-start" class="btn btn-primary icon-button" value="start" data-icon="play">시작</button>
           </form>
         </div>
       </div>
