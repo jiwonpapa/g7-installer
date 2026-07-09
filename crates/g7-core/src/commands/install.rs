@@ -64,6 +64,7 @@ const CERTBOT_HTTP01_SMOKE_CONTENT: &str = "g7-installer-certbot-http01-ok\n";
 const SWAP_FILE_PATH: &str = "/swapfile";
 const SWAP_UNIT_PATH: &str = "/etc/systemd/system/swapfile.swap";
 const SWAP_SYSCTL_PATH: &str = "/etc/sysctl.d/99-g7-installer-swap.conf";
+const NGINX_RUNTIME_TUNING_PATH: &str = "/etc/nginx/conf.d/g7-runtime-tuning.conf";
 const FRANKENPHP_VERSION: &str = "v1.12.4";
 const FRANKENPHP_DIR: &str = "/opt/g7-frankenphp";
 const FRANKENPHP_BIN_PATH: &str = "/opt/g7-frankenphp/frankenphp";
@@ -1210,6 +1211,18 @@ fn apply_vhost_phase<R: CommandRunner>(
 ) -> Result<Vec<InstallCheck>> {
     let mut checks = Vec::new();
 
+    if matches!(plan.web_server.as_str(), "nginx" | "frankenphp") {
+        let sizing = detected_memory_sizing(probe);
+        write_nginx_runtime_tuning(paths, &sizing, owned)?;
+        checks.push(InstallCheck::pass(
+            "nginx-runtime-tuning",
+            format!(
+                "Created {} before vhost validation so the g7_timing access log format is available.",
+                NGINX_RUNTIME_TUNING_PATH
+            ),
+        ));
+    }
+
     match plan.web_server.as_str() {
         "nginx" => {
             write_new_file(
@@ -1567,7 +1580,6 @@ fn apply_runtime_phase<R: CommandRunner>(
     let mut checks = Vec::new();
     let sizing = detected_memory_sizing(probe);
     let ini_path = php_ini_override_path(plan);
-    let nginx_tuning_path = "/etc/nginx/conf.d/g7-runtime-tuning.conf";
 
     checks.extend(apply_swap_configuration(probe, paths, &sizing, owned)?);
 
@@ -1614,12 +1626,7 @@ fn apply_runtime_phase<R: CommandRunner>(
     }
 
     if plan.web_server == "nginx" {
-        write_new_file(
-            paths,
-            nginx_tuning_path,
-            &nginx_runtime_tuning_content(&sizing),
-            owned,
-        )?;
+        write_nginx_runtime_tuning(paths, &sizing, owned)?;
         write_existing_file(
             paths,
             g7_system::nginx::G7_SITE_AVAILABLE,
@@ -3945,6 +3952,19 @@ gzip_types text/plain text/css application/json application/javascript text/xml 
     )
 }
 
+fn write_nginx_runtime_tuning(
+    paths: &InstallPaths,
+    sizing: &plan::ResolvedMemorySizing,
+    owned: &mut Vec<String>,
+) -> Result<()> {
+    let content = nginx_runtime_tuning_content(sizing);
+    if owned.iter().any(|path| path == NGINX_RUNTIME_TUNING_PATH) {
+        write_existing_file(paths, NGINX_RUNTIME_TUNING_PATH, &content)
+    } else {
+        write_new_file(paths, NGINX_RUNTIME_TUNING_PATH, &content, owned)
+    }
+}
+
 fn database_config_path(plan: &plan::InstallPlan) -> &'static str {
     if plan.database_engine == "mariadb" {
         "/etc/mysql/mariadb.conf.d/60-g7-installer.cnf"
@@ -5498,6 +5518,25 @@ mod tests {
             fs::read_to_string(fs_root.join("etc/nginx/conf.d/g7-runtime-tuning.conf"))?;
         assert!(nginx_runtime.contains("log_format g7_timing"));
         assert!(nginx_runtime.contains("gzip_comp_level 5"));
+        let runtime_tuning_index = report
+            .vhost_checks
+            .iter()
+            .position(|check| check.name == "nginx-runtime-tuning")
+            .ok_or_else(|| std::io::Error::other("missing nginx runtime tuning check"))?;
+        let configtest_index = report
+            .vhost_checks
+            .iter()
+            .position(|check| check.name == "nginx-configtest")
+            .ok_or_else(|| std::io::Error::other("missing nginx config test check"))?;
+        assert!(runtime_tuning_index < configtest_index);
+        assert_eq!(
+            report
+                .owned_files
+                .iter()
+                .filter(|path| path.as_str() == "/etc/nginx/conf.d/g7-runtime-tuning.conf")
+                .count(),
+            1
+        );
         assert!(fs_root.join("etc/php/8.5/fpm/pool.d/g7-g7.conf").exists());
         let php_pool = fs::read_to_string(fs_root.join("etc/php/8.5/fpm/pool.d/g7-g7.conf"))?;
         assert!(php_pool.contains("request_slowlog_timeout = 2s"));
