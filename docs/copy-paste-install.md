@@ -108,8 +108,12 @@ sudo -n true && echo "sudo OK"
 ```bash
 sudo apt-get update
 sudo apt-get install -y ca-certificates curl
-curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/latest/download/bootstrap.sh | sudo bash
+tmp="$(mktemp)"
+curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/latest/download/bootstrap.sh -o "$tmp"
+sudo bash "$tmp"
+rm -f "$tmp"
 g7inst --version
+sudo g7inst doctor
 ```
 
 sudo 비밀번호를 물어보면 SSH 터미널에 입력합니다.
@@ -231,6 +235,13 @@ https://example.com
 
 SSL은 DNS/IP가 맞고 Let's Encrypt 발급 조건이 통과해야 적용됩니다.
 
+`completed`는 서버 프로비저닝 완료입니다. CMS 관리자 설치까지 끝난 상태는 아닙니다. 결과 리포트의 `앱 링크`를 열어 다음을 진행합니다.
+
+- 그누보드7: 공식 `/install` 화면에서 Composer/Vendor, 관리자 계정, 확장, 마이그레이션을 완료합니다. 설치기는 그 전에 최신 안정 Release, 필수 빌드 파일, `.env.example` 기반 `.env`와 사이트 계정 전용 `0600` 권한까지 준비합니다.
+- WordPress: 공식 `/wp-admin/install.php` 화면에서 사이트 제목과 관리자 계정을 만듭니다.
+
+`www` 사용 여부와 HTTPS 적용 결과에 따라 주소가 달라질 수 있으므로 URL을 직접 조합하지 말고 결과 리포트의 링크를 사용합니다.
+
 ## 11. 다시 설치해야 할 때
 
 신규 VPS 테스트에서 설치기가 만든 항목을 지우고 다시 시도하려면:
@@ -240,6 +251,8 @@ sudo g7inst reset --yes
 ```
 
 기존 Let's Encrypt 인증서는 중복 발급 제한을 피하기 위해 보존 우선입니다.
+
+이 명령은 신규 VPS 재설치용입니다. 공식 CMS 설치를 마쳤거나 운영 데이터가 생겼다면 먼저 VPS 스냅샷이나 별도 백업을 만드세요.
 
 ## 막히면
 

@@ -116,15 +116,18 @@ http://127.0.0.1:7717/?token=...
 ```sh
 #!/bin/sh
 set -eu
+LOG=/var/log/g7-lightsail-bootstrap.log
+exec >"$LOG" 2>&1
 apt-get update
 apt-get install -y ca-certificates curl
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT HUP INT TERM
 curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/latest/download/bootstrap.sh -o "$tmp"
 bash "$tmp"
+g7inst --version
 ```
 
-이 스크립트는 `g7inst` 설치까지만 합니다. OS 업데이트, swap, 웹서버, PHP, DB, Redis, Certbot, 앱 설치는 `g7inst setup` 웹 UI가 처리합니다. UFW·fail2ban은 별도 유지보수 영역이므로 설치하거나 변경하지 않습니다.
+이 스크립트는 `g7inst` 설치까지만 합니다. 실행 로그는 `/var/log/g7-lightsail-bootstrap.log`에 남습니다. OS 업데이트, swap, 웹서버, PHP, DB, Redis, Certbot, 앱 설치는 `g7inst setup` 웹 UI가 처리합니다. UFW·fail2ban은 별도 유지보수 영역이므로 설치하거나 변경하지 않습니다.
 
 Lightsail은 시작 스크립트를 자체 `/bin/sh` 스크립트 뒤에 붙여 실행할 수 있습니다. 그래서 `pipefail`과 `curl ... | bash`를 쓰지 않습니다.
 
@@ -241,6 +244,18 @@ sudo tail -120 /var/log/g7-lightsail-bootstrap.log
 
 매번 sudo 비밀번호를 묻는 서버는 위의 `g7inst` 전용 sudoers 설정을 적용하면 이후 `g7inst setup` 재실행이 비밀번호 없이 진행됩니다.
 
+`g7inst: command not found`가 나오면 먼저 `sudo tail -120 /var/log/g7-lightsail-bootstrap.log`로 시작 스크립트가 끝났는지 확인합니다. 로그가 끝났는데도 없으면 아래를 서버 안에서 한 번 실행합니다.
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl
+tmp="$(mktemp)"
+curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/latest/download/bootstrap.sh -o "$tmp"
+sudo bash "$tmp"
+rm -f "$tmp"
+g7inst --version
+```
+
 ## 9. 선택: VPS 백업/스냅샷 확인
 
 설치기가 되돌릴 수 있는 범위는 설치기가 만든 파일과 패키지입니다. 서버 전체 복구가 필요하면 VPS 백업/스냅샷이 기준이지만, 비용과 생성 시간이 들 수 있습니다.
@@ -301,7 +316,7 @@ sudo cat /var/log/g7-installer/report.json
 sudo less /var/log/g7-installer/setup-guide.md
 ```
 
-리포트 단계가 `completed`이면 패키지, Nginx/Apache vhost, PHP/DB 튜닝, DB 계정, 앱 파일 배치, 설정 안내서 저장까지 끝난 상태입니다. SSL은 DNS/IP 검증과 인증서 발급 조건이 맞을 때 적용되며, 보류나 실패가 있으면 리포트에 표시됩니다. 그누보드7은 GitHub 공식 최신 안정 Release와 필수 빌드 파일을 검증하고 `.env.example`에서 사이트 계정 전용 `0600` 권한의 `.env`를 준비한 뒤 브라우저 `/install`로 인계합니다. Composer/Vendor, 관리자 계정, 확장과 마이그레이션은 G7 공식 설치 화면에서 진행합니다. WordPress는 공식 최신 설치 화면으로 이어집니다.
+리포트 단계가 `completed`이면 서버 프로비저닝이 끝난 상태입니다. 패키지, Nginx/Apache vhost, PHP/DB 튜닝, DB 계정, 앱 파일 배치, 설정 안내서 저장까지 끝났다는 뜻이며 CMS 관리자 설치 완료를 뜻하지는 않습니다. SSL은 DNS/IP 검증과 인증서 발급 조건이 맞을 때 적용되며, 보류나 실패가 있으면 리포트에 표시됩니다. 그누보드7은 GitHub 공식 최신 안정 Release와 필수 빌드 파일을 검증하고 `.env.example`에서 사이트 계정 전용 `0600` 권한의 `.env`를 준비한 뒤 브라우저 `/install`로 인계합니다. 결과 리포트의 `앱 링크`에서 Composer/Vendor, 관리자 계정, 확장과 마이그레이션을 진행합니다. WordPress도 결과 리포트의 공식 설치 링크에서 마칩니다.
 
 ## 11. 다른 Ubuntu VPS에서 쓰기
 

@@ -129,7 +129,7 @@ const LARAVEL_OCTANE_EXTENSIONS: &[&str] = &[
 const WORDPRESS_PROFILE: AppProfile = AppProfile {
     id: "wordpress",
     label: "WordPress",
-    summary: "PHP publishing CMS with rewrite rules, wp-config.php, uploads, and HTTPS.",
+    summary: "Official WordPress release handed off to its browser installer after VPS preparation.",
     min_php: "8.3",
     database_requirement: "MySQL 8.0+ or MariaDB 10.6+",
     document_root: DocumentRootStrategy::SiteRoot,
@@ -138,10 +138,10 @@ const WORDPRESS_PROFILE: AppProfile = AppProfile {
     services: &[],
     writable_paths: &["wp-content/uploads"],
     post_install_steps: &[
-        "download WordPress release",
-        "create database and wp-config.php",
-        "generate salts",
-        "apply rewrite rules",
+        "download and verify the latest WordPress release",
+        "open the official browser installer at /wp-admin/install.php",
+        "enter the installer-created database name and account",
+        "let the official installer create wp-config.php, salts, and the administrator account",
     ],
     health_checks: &["GET /", "GET /wp-admin/install.php"],
 };
@@ -160,8 +160,9 @@ const GNUBOARD7_PROFILE: AppProfile = AppProfile {
     post_install_steps: &[
         "resolve and download the latest stable G7 release",
         "verify the Git checkout and bundled public assets",
+        "copy .env.example to a site-owner-only .env file",
         "open the official browser installer at /install",
-        "let the official installer configure Vendor, .env, admin, extensions, and migrations",
+        "let the official installer configure Vendor, admin, extensions, and migrations",
     ],
     health_checks: &["GET /install", "official installer requirements pass"],
 };
@@ -180,6 +181,7 @@ const GNUBOARD7_OCTANE_PROFILE: AppProfile = AppProfile {
     post_install_steps: &[
         "resolve and download the latest stable G7 release",
         "verify the Git checkout and bundled public assets",
+        "copy .env.example to a site-owner-only .env file",
         "open the official browser installer at /install",
         "configure optional long-running services only after app installation",
     ],
@@ -309,6 +311,32 @@ mod tests {
             "/home/g7/public_html"
         );
         assert!(profile.php_extensions.contains(&"mysqli"));
+        assert!(
+            profile
+                .post_install_steps
+                .iter()
+                .any(|step| step.contains("official browser installer"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn gnuboard_profile_prepares_env_before_browser_handoff()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let profile = resolve_app_profile("gnuboard7")?;
+
+        assert!(
+            profile
+                .post_install_steps
+                .iter()
+                .any(|step| step.contains(".env.example"))
+        );
+        assert!(
+            profile
+                .post_install_steps
+                .iter()
+                .any(|step| step.contains("official browser installer"))
+        );
         Ok(())
     }
 
