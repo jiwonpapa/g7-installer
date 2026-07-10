@@ -128,29 +128,24 @@ pub(super) fn apply_app_permissions<R: CommandRunner>(
         .chown_recursive(&owner_group, &plan.web_root)
         .map_err(|err| command_error("app-web-root-owner", &command, err))?;
     require_success("app-web-root-owner", command, output)?;
-    let command = format!("chmod -R 0755 {}", plan.web_root);
-    let output = probe
-        .chmod_recursive("0755", &plan.web_root)
-        .map_err(|err| command_error("app-web-root-permissions", &command, err))?;
-    require_success("app-web-root-permissions", command, output)?;
     checks.push(InstallCheck::pass(
         "app-file-permissions",
         format!(
-            "Applied {} ownership and 0755 mode to {} after app placement.",
+            "Applied {} ownership to {} while preserving upstream file modes.",
             owner_group, plan.web_root
         ),
     ));
 
     for writable_path in app_writable_paths(plan) {
         let target = format!("{}/{}", plan.web_root, writable_path);
-        let command = format!("chmod -R 0775 {target}");
+        let command = format!("chmod 0755 {target}");
         let output = probe
-            .chmod_recursive("0775", &target)
+            .chmod_path("0755", &target)
             .map_err(|err| command_error("app-writable-permissions", &command, err))?;
         require_success("app-writable-permissions", command, output)?;
         checks.push(InstallCheck::pass(
             format!("app-writable:{writable_path}"),
-            format!("Set writable runtime path `{target}` to mode 0775."),
+            format!("Set runtime directory `{target}` to owner-writable mode 0755."),
         ));
     }
     if let Some(check) = apply_app_env_permissions(probe, paths, plan)? {
@@ -336,10 +331,12 @@ pub(super) fn check_key(path: &str) -> String {
 }
 
 pub(super) fn git_verify_error_step(app_key: &str) -> &'static str {
-    match app_key {
-        "gnuboard7" => "gnuboard7-source-verify",
-        "laravel" => "laravel-source-verify",
-        _ => "app-source-verify",
+    if app_key.starts_with("gnuboard7") {
+        "gnuboard7-source-verify"
+    } else if app_key.starts_with("laravel") {
+        "laravel-source-verify"
+    } else {
+        "app-source-verify"
     }
 }
 

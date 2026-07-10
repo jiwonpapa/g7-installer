@@ -181,18 +181,17 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     {
         if dry_run {
             actions.push(ResetAction::new(
+                format!("account-processes:{site_user}"),
+                "would-terminate",
+                "사이트 계정으로 실행 중인 프로세스와 SSH/SFTP 세션을 종료한 뒤 계정을 삭제합니다.",
+            ));
+            actions.push(ResetAction::new(
                 format!("account:{site_user}"),
                 "would-delete",
                 "site Linux account and home directory would be deleted",
             ));
         } else if probe.user_exists(site_user).map_err(command_error)? {
-            let output = probe.delete_login_user(site_user).map_err(command_error)?;
-            require_success("account-delete", format!("userdel -r {site_user}"), output)?;
-            actions.push(ResetAction::new(
-                format!("account:{site_user}"),
-                "deleted",
-                "site Linux account and home directory deleted",
-            ));
+            actions.extend(delete_site_user_account(probe, site_user)?);
         } else {
             actions.push(ResetAction::new(
                 format!("account:{site_user}"),
@@ -233,6 +232,68 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         removed,
         missing,
     })
+}
+
+fn delete_site_user_account<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    site_user: &str,
+) -> Result<Vec<ResetAction>> {
+    let mut process_action = terminate_site_user_processes(probe, site_user)?;
+    let mut output = probe.delete_login_user(site_user).map_err(command_error)?;
+    if output.status == 8 {
+        process_action = terminate_site_user_processes(probe, site_user)?;
+        output = probe.delete_login_user(site_user).map_err(command_error)?;
+    }
+    require_success("account-delete", format!("userdel -r {site_user}"), output)?;
+
+    Ok(vec![
+        process_action,
+        ResetAction::new(
+            format!("account:{site_user}"),
+            "deleted",
+            "site Linux account and home directory deleted",
+        ),
+    ])
+}
+
+fn terminate_site_user_processes<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    site_user: &str,
+) -> Result<ResetAction> {
+    let term = probe
+        .signal_login_user_processes("TERM", site_user)
+        .map_err(command_error)?;
+    let term_matched = term.status == 0;
+    if term.status != 0 && term.status != 1 {
+        require_success(
+            "account-process-stop",
+            format!("pkill -TERM -u {site_user}"),
+            term,
+        )?;
+    }
+
+    let kill = probe
+        .signal_login_user_processes("KILL", site_user)
+        .map_err(command_error)?;
+    let kill_matched = kill.status == 0;
+    if kill.status != 0 && kill.status != 1 {
+        require_success(
+            "account-process-kill",
+            format!("pkill -KILL -u {site_user}"),
+            kill,
+        )?;
+    }
+
+    let terminated = term_matched || kill_matched;
+    Ok(ResetAction::new(
+        format!("account-processes:{site_user}"),
+        if terminated { "terminated" } else { "none" },
+        if terminated {
+            "사이트 계정의 잔존 프로세스와 로그인 세션을 종료했습니다."
+        } else {
+            "사이트 계정으로 실행 중인 프로세스가 없었습니다."
+        },
+    ))
 }
 
 pub fn run_metadata_only_with_probe_and_paths<R: CommandRunner>(
@@ -970,7 +1031,9 @@ fn files_contain_systemd_units(files: &[String]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ResetPaths, run_with_probe_and_paths, validate_reset_path};
+    use super::{
+        ResetPaths, delete_site_user_account, run_with_probe_and_paths, validate_reset_path,
+    };
     use g7_state::owned_files::{OWNED_FILES_PATH, OwnedFiles, write_owned_files};
     use g7_system::SystemProbe;
     use g7_system::command::{CommandError, CommandOutput, FakeCommandRunner};
@@ -980,6 +1043,43 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn account_delete_retries_after_userdel_reports_active_process()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::failure(1, "no process"));
+        runner.push_output(CommandOutput::failure(1, "no process"));
+        runner.push_output(CommandOutput::failure(
+            8,
+            "user is currently used by process 123",
+        ));
+        runner.push_output(CommandOutput::success("terminated"));
+        runner.push_output(CommandOutput::failure(1, "no remaining process"));
+        runner.push_output(CommandOutput::success("deleted"));
+        let probe = SystemProbe::new(runner);
+
+        let actions = delete_site_user_account(&probe, "g7")?;
+
+        assert!(actions.iter().any(|action| {
+            action.name == "account-processes:g7" && action.status == "terminated"
+        }));
+        assert!(
+            actions
+                .iter()
+                .any(|action| action.name == "account:g7" && action.status == "deleted")
+        );
+        assert_eq!(
+            probe
+                .runner()
+                .recorded()
+                .iter()
+                .filter(|spec| spec.program == "userdel")
+                .count(),
+            2
+        );
+        Ok(())
+    }
 
     #[test]
     fn reset_allows_installer_php_runtime_configs() {
@@ -1359,6 +1459,8 @@ mod tests {
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success("terminated"));
+        runner.push_output(CommandOutput::failure(1, "no remaining process"));
         runner.push_output(CommandOutput::success("0\n"));
         runner.push_output(CommandOutput::success("install ok installed"));
         runner.push_output(CommandOutput::success("install ok installed"));
@@ -1433,6 +1535,15 @@ mod tests {
                     sql.contains("DROP DATABASE IF EXISTS `g7_example`;")
                         && sql.contains("DROP USER IF EXISTS 'g7_user'@'localhost';")
                 })
+        }));
+        assert!(recorded.iter().any(|spec| {
+            spec.program == "pkill"
+                && spec.args
+                    == vec![
+                        OsString::from("-TERM"),
+                        OsString::from("-u"),
+                        OsString::from("g7"),
+                    ]
         }));
         assert!(recorded.iter().any(|spec| {
             spec.program == "userdel"

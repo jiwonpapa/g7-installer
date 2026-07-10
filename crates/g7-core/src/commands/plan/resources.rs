@@ -134,10 +134,7 @@ pub(super) fn packages(input: PackageInput<'_>) -> Vec<PlanPackage> {
         },
     ]);
 
-    if matches!(
-        input.app_profile.id,
-        "gnuboard7" | "gnuboard7-octane" | "laravel" | "laravel-octane"
-    ) {
+    if matches!(input.app_profile.id, "laravel" | "laravel-octane") {
         packages.push(PlanPackage {
             name: "git composer nodejs npm".to_string(),
             description: "앱 소스 내려받기와 PHP/프론트엔드 빌드에 필요한 도구입니다.",
@@ -241,7 +238,11 @@ pub(super) fn files(
         ),
         PlanFile::new(
             app_config_file(app_profile, web_root),
-            "create app config with DB/cache/mail settings using root-only secret handling",
+            if matches!(app_profile.id, "gnuboard7" | "gnuboard7-octane") {
+                "created by the official G7 browser installer"
+            } else {
+                "create app config with DB/cache/mail settings using root-only secret handling"
+            },
         ),
         web_server_available_file(web_server),
         web_server_enabled_file(web_server),

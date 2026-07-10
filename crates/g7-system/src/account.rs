@@ -38,6 +38,19 @@ pub fn delete_login_user<R: CommandRunner>(
     runner.run(&CommandSpec::new("userdel").arg("-r").arg(user))
 }
 
+pub fn signal_login_user_processes<R: CommandRunner>(
+    runner: &R,
+    signal: &str,
+    user: &str,
+) -> Result<CommandOutput, CommandError> {
+    runner.run(
+        &CommandSpec::new("pkill")
+            .arg(format!("-{signal}"))
+            .arg("-u")
+            .arg(user),
+    )
+}
+
 pub fn chown_recursive<R: CommandRunner>(
     runner: &R,
     owner_group: &str,
@@ -71,7 +84,7 @@ pub fn chmod_path<R: CommandRunner>(
 mod tests {
     use super::{
         chmod_path, chmod_recursive, chown_recursive, create_login_user, delete_login_user,
-        set_login_password, user_exists,
+        set_login_password, signal_login_user_processes, user_exists,
     };
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
@@ -83,6 +96,8 @@ mod tests {
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::failure(1, "no remaining process"));
+        runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
@@ -93,6 +108,8 @@ mod tests {
         chown_recursive(&runner, "g7:www-data", "/home/g7/public_html")?;
         chmod_recursive(&runner, "0755", "/home/g7/public_html")?;
         chmod_path(&runner, "0711", "/home/g7")?;
+        signal_login_user_processes(&runner, "TERM", "g7")?;
+        signal_login_user_processes(&runner, "KILL", "g7")?;
         delete_login_user(&runner, "g7")?;
 
         let recorded = runner.recorded();
@@ -108,9 +125,19 @@ mod tests {
             recorded[5].args,
             vec![OsString::from("0711"), OsString::from("/home/g7")]
         );
-        assert_eq!(recorded[6].program, OsString::from("userdel"));
+        assert_eq!(recorded[6].program, OsString::from("pkill"));
         assert_eq!(
             recorded[6].args,
+            vec![
+                OsString::from("-TERM"),
+                OsString::from("-u"),
+                OsString::from("g7"),
+            ]
+        );
+        assert_eq!(recorded[7].program, OsString::from("pkill"));
+        assert_eq!(recorded[8].program, OsString::from("userdel"));
+        assert_eq!(
+            recorded[8].args,
             vec![OsString::from("-r"), OsString::from("g7")]
         );
         Ok(())

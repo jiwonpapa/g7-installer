@@ -20,6 +20,20 @@ pub fn download_file<R: CommandRunner>(
     )
 }
 
+pub fn fetch_text<R: CommandRunner>(runner: &R, url: &str) -> Result<CommandOutput, CommandError> {
+    runner.run(
+        &CommandSpec::new("curl")
+            .arg("-fsSL")
+            .arg("--max-time")
+            .arg("30")
+            .arg("--header")
+            .arg("Accept: application/vnd.github+json")
+            .arg("--user-agent")
+            .arg("g7inst")
+            .arg(url),
+    )
+}
+
 pub fn unzip_archive<R: CommandRunner>(
     runner: &R,
     archive_path: &str,
@@ -140,9 +154,9 @@ pub fn test_dir<R: CommandRunner>(runner: &R, path: &str) -> Result<CommandOutpu
 #[cfg(test)]
 mod tests {
     use super::{
-        copy_dir_contents, download_file, git_clone, git_diff_index_clean, git_fsck_full,
-        git_ls_files_error_unmatch, git_rev_parse_head, test_dir, test_file, unzip_archive,
-        unzip_test,
+        copy_dir_contents, download_file, fetch_text, git_clone, git_diff_index_clean,
+        git_fsck_full, git_ls_files_error_unmatch, git_rev_parse_head, test_dir, test_file,
+        unzip_archive, unzip_test,
     };
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
@@ -165,6 +179,34 @@ mod tests {
                 OsString::from("-o"),
                 OsString::from("/tmp/app.zip"),
                 OsString::from("https://example.com/app.zip"),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn fetch_text_is_shell_free() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success(r#"{"tag_name":"7.0.2"}"#));
+
+        fetch_text(
+            &runner,
+            "https://api.github.com/repos/gnuboard/g7/releases/latest",
+        )?;
+        let recorded = runner.recorded();
+
+        assert_eq!(recorded[0].program, OsString::from("curl"));
+        assert_eq!(
+            recorded[0].args,
+            vec![
+                OsString::from("-fsSL"),
+                OsString::from("--max-time"),
+                OsString::from("30"),
+                OsString::from("--header"),
+                OsString::from("Accept: application/vnd.github+json"),
+                OsString::from("--user-agent"),
+                OsString::from("g7inst"),
+                OsString::from("https://api.github.com/repos/gnuboard/g7/releases/latest"),
             ]
         );
         Ok(())

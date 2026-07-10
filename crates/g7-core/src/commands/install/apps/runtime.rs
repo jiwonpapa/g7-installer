@@ -2,8 +2,6 @@ use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum LaravelRuntimeKind {
-    Gnuboard7,
-    Gnuboard7Octane,
     Laravel,
     LaravelOctane,
 }
@@ -27,16 +25,6 @@ impl LaravelRuntimeOptions {
             enable_services: true,
         }
     }
-
-    pub(super) fn browser_installer() -> Self {
-        Self {
-            run_migrations: false,
-            run_optimize: false,
-            verify_about: false,
-            write_services: true,
-            enable_services: false,
-        }
-    }
 }
 
 pub(super) struct AppSystemdUnit {
@@ -53,19 +41,8 @@ pub(super) fn laravel_runtime_kind(plan: &plan::InstallPlan) -> LaravelRuntimeKi
     }
 }
 
-pub(super) fn gnuboard7_runtime_kind(plan: &plan::InstallPlan) -> LaravelRuntimeKind {
-    if plan.app_profile == "gnuboard7-octane" {
-        LaravelRuntimeKind::Gnuboard7Octane
-    } else {
-        LaravelRuntimeKind::Gnuboard7
-    }
-}
-
 pub(super) fn is_octane_runtime(kind: LaravelRuntimeKind) -> bool {
-    matches!(
-        kind,
-        LaravelRuntimeKind::Gnuboard7Octane | LaravelRuntimeKind::LaravelOctane
-    )
+    matches!(kind, LaravelRuntimeKind::LaravelOctane)
 }
 
 pub(super) fn configure_laravel_runtime<R: CommandRunner>(
@@ -379,60 +356,26 @@ pub(super) fn run_artisan_step<R: CommandRunner, const N: usize>(
 
 pub(super) fn app_systemd_units(
     plan: &plan::InstallPlan,
-    kind: LaravelRuntimeKind,
+    _kind: LaravelRuntimeKind,
 ) -> Vec<AppSystemdUnit> {
-    let prefix = match kind {
-        LaravelRuntimeKind::Gnuboard7 | LaravelRuntimeKind::Gnuboard7Octane => "g7",
-        LaravelRuntimeKind::Laravel | LaravelRuntimeKind::LaravelOctane => "laravel",
-    };
-    let mut units = vec![
+    let prefix = "laravel";
+    vec![
         AppSystemdUnit {
-            name: match kind {
-                LaravelRuntimeKind::Gnuboard7 => "g7-queue.service",
-                LaravelRuntimeKind::Gnuboard7Octane => "g7-queue.service",
-                LaravelRuntimeKind::Laravel | LaravelRuntimeKind::LaravelOctane => {
-                    "laravel-queue.service"
-                }
-            },
+            name: "laravel-queue.service",
             content: queue_service_content(plan),
             enable_now: true,
         },
         AppSystemdUnit {
-            name: match kind {
-                LaravelRuntimeKind::Gnuboard7 => "g7-scheduler.service",
-                LaravelRuntimeKind::Gnuboard7Octane => "g7-scheduler.service",
-                LaravelRuntimeKind::Laravel | LaravelRuntimeKind::LaravelOctane => {
-                    "laravel-scheduler.service"
-                }
-            },
+            name: "laravel-scheduler.service",
             content: scheduler_service_content(plan, prefix),
             enable_now: false,
         },
         AppSystemdUnit {
-            name: match kind {
-                LaravelRuntimeKind::Gnuboard7 => "g7-scheduler.timer",
-                LaravelRuntimeKind::Gnuboard7Octane => "g7-scheduler.timer",
-                LaravelRuntimeKind::Laravel | LaravelRuntimeKind::LaravelOctane => {
-                    "laravel-scheduler.timer"
-                }
-            },
+            name: "laravel-scheduler.timer",
             content: scheduler_timer_content(prefix),
             enable_now: true,
         },
-    ];
-
-    if matches!(
-        kind,
-        LaravelRuntimeKind::Gnuboard7 | LaravelRuntimeKind::Gnuboard7Octane
-    ) {
-        units.push(AppSystemdUnit {
-            name: "g7-reverb.service",
-            content: reverb_service_content(plan),
-            enable_now: true,
-        });
-    }
-
-    units
+    ]
 }
 
 pub(super) fn queue_service_content(plan: &plan::InstallPlan) -> String {
@@ -460,15 +403,6 @@ pub(super) fn scheduler_timer_content(prefix: &str) -> String {
     )
 }
 
-pub(super) fn reverb_service_content(plan: &plan::InstallPlan) -> String {
-    format!(
-        "[Unit]\nDescription=Gnuboard7 Reverb websocket server\nAfter=network.target {}\n\n[Service]\nType=simple\nUser={}\nGroup=www-data\nWorkingDirectory={}\nExecStart=/usr/bin/php artisan reverb:start --host=127.0.0.1 --port=8080\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=multi-user.target\n",
-        database_service_name(plan),
-        plan.site_user,
-        plan.web_root,
-    )
-}
-
 pub(in crate::commands::install) fn systemd_unit_path(unit: &str) -> String {
     format!("/etc/systemd/system/{unit}")
 }
@@ -477,12 +411,6 @@ pub(in crate::commands::install) fn app_runtime_unit_names(
     plan: &plan::InstallPlan,
 ) -> &'static [&'static str] {
     match plan.app_profile.as_str() {
-        "gnuboard7" | "gnuboard7-octane" => &[
-            "g7-queue.service",
-            "g7-scheduler.service",
-            "g7-scheduler.timer",
-            "g7-reverb.service",
-        ],
         "laravel" | "laravel-octane" => &[
             "laravel-queue.service",
             "laravel-scheduler.service",
@@ -567,25 +495,6 @@ pub(super) fn laravel_env_content(
         if redis_enabled { "redis" } else { "database" },
     );
     env.push_str(&mail_env_content(plan));
-    if matches!(
-        kind,
-        LaravelRuntimeKind::Gnuboard7 | LaravelRuntimeKind::Gnuboard7Octane
-    ) {
-        let public_reverb_port = if app_url.starts_with("https://") {
-            "443"
-        } else {
-            "80"
-        };
-        let public_reverb_scheme = if app_url.starts_with("https://") {
-            "https"
-        } else {
-            "http"
-        };
-        env.push_str(&format!(
-            "\nBROADCAST_CONNECTION=reverb\nREVERB_APP_ID=g7\nREVERB_APP_KEY=g7-local\nREVERB_APP_SECRET=g7-local-secret\nREVERB_SERVER_HOST=127.0.0.1\nREVERB_SERVER_PORT=8080\nREVERB_HOST=127.0.0.1\nREVERB_PORT=8080\nREVERB_SCHEME=http\nVITE_REVERB_APP_KEY=g7-local\nVITE_REVERB_HOST={}\nVITE_REVERB_PORT={public_reverb_port}\nVITE_REVERB_SCHEME={public_reverb_scheme}\n",
-            primary_http_host(plan)
-        ));
-    }
     if is_octane_runtime(kind) {
         let octane_https = if app_url.starts_with("https://") {
             "true"

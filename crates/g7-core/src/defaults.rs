@@ -4,7 +4,8 @@
 
 pub(crate) const PHP_READY_FILENAME: &str = "g7inst-ready.php";
 pub(crate) const GNUBOARD7_REPO_URL: &str = "https://github.com/gnuboard/g7.git";
-pub(crate) const GNUBOARD7_RELEASE_REF: &str = "7.0.1";
+pub(crate) const GNUBOARD7_LATEST_RELEASE_API_URL: &str =
+    "https://api.github.com/repos/gnuboard/g7/releases/latest";
 pub(crate) const LARAVEL_REPO_URL: &str = "https://github.com/laravel/laravel.git";
 pub(crate) const LARAVEL_RELEASE_REF: &str = "12.x";
 pub(crate) const APP_SOURCE_DIR: &str = "/var/lib/g7-installer/app-source";
@@ -29,7 +30,6 @@ pub(crate) const FRANKENPHP_SERVICE_PATH: &str = "/etc/systemd/system/g7-franken
 pub(crate) const FRANKENPHP_HOST: &str = "127.0.0.1";
 pub(crate) const FRANKENPHP_PORT: &str = "7080";
 pub(crate) const FRANKENPHP_LISTEN: &str = "127.0.0.1:7080";
-pub(crate) const GNUBOARD7_DRIVER_SETTINGS_PATH: &str = "storage/app/settings/drivers.json";
 pub(crate) const GNUBOARD7_REQUIRED_FILES: &[&str] = &[
     "artisan",
     "composer.json",

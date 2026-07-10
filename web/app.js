@@ -3527,7 +3527,8 @@ function recoveryConfirmContent(action) {
     message: "신규 VPS 전용 작업입니다. 설치기가 만든 계정, DB, 서비스, 웹루트/설정 파일, 패키지, 메타데이터를 정리합니다. Let's Encrypt 인증서는 보존합니다.",
     yesClass: "btn btn-primary icon-button",
     rows: [
-      ["대상", "installer가 생성한 사이트 계정, DB/DB 계정, 서비스, 웹루트/설정 파일, 새 패키지, 상태 파일"],
+      ["대상", "installer가 생성한 사이트 계정과 해당 계정의 프로세스/로그인 세션, DB/DB 계정, 서비스, 웹루트/설정 파일, 새 패키지, 상태 파일"],
+      ["보존", "현재 설치기 웹 세션, Ubuntu SSH 접속, SSH 터널, Let's Encrypt 인증서"],
       ["보존", "설치 전부터 있던 패키지, 운영자가 만든 파일, Let's Encrypt 인증서"],
       ["실행 후", "서버 점검 단계로 돌아가 다시 설치할 수 있습니다."],
     ],

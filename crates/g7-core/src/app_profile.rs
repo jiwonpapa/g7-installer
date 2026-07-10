@@ -149,71 +149,41 @@ const WORDPRESS_PROFILE: AppProfile = AppProfile {
 const GNUBOARD7_PROFILE: AppProfile = AppProfile {
     id: "gnuboard7",
     label: "Gnuboard 7",
-    summary: "Laravel-based G7 application with Composer, Node build, Redis, queue, scheduler, and Reverb.",
+    summary: "Official G7 release handed off to its browser installer after VPS preparation.",
     min_php: "8.2",
     database_requirement: "MySQL 8.0+ or MariaDB 10.3+",
     document_root: DocumentRootStrategy::PublicSubdir,
     php_extensions: GNUBOARD7_EXTENSIONS,
-    system_packages: &["composer", "nodejs", "npm"],
-    services: &[
-        "g7-queue.service",
-        "g7-scheduler.service",
-        "g7-scheduler.timer",
-        "g7-reverb.service",
-    ],
+    system_packages: &["git", "composer"],
+    services: &[],
     writable_paths: &["storage", "bootstrap/cache"],
     post_install_steps: &[
-        "download G7 release",
-        "run composer install",
-        "build frontend assets",
-        "create .env and APP_KEY",
-        "link storage",
-        "open browser installer at /install",
-        "run migrations and optimization after browser install",
-        "enable queue, scheduler, and Reverb after browser install",
+        "resolve and download the latest stable G7 release",
+        "verify the Git checkout and bundled public assets",
+        "open the official browser installer at /install",
+        "let the official installer configure Vendor, .env, admin, extensions, and migrations",
     ],
-    health_checks: &[
-        "GET /",
-        "php artisan about",
-        "queue worker active",
-        "scheduler active",
-    ],
+    health_checks: &["GET /install", "official installer requirements pass"],
 };
 
 const GNUBOARD7_OCTANE_PROFILE: AppProfile = AppProfile {
     id: "gnuboard7-octane",
     label: "Gnuboard 7 Octane",
-    summary: "Experimental Gnuboard 7 profile served by Laravel Octane workers on FrankenPHP.",
+    summary: "Experimental G7 web-server profile that still hands app setup to the official installer.",
     min_php: "8.2",
     database_requirement: "MySQL 8.0+ or MariaDB 10.3+",
     document_root: DocumentRootStrategy::PublicSubdir,
     php_extensions: GNUBOARD7_EXTENSIONS,
-    system_packages: &["composer", "nodejs", "npm"],
-    services: &[
-        "g7-queue.service",
-        "g7-scheduler.service",
-        "g7-scheduler.timer",
-        "g7-reverb.service",
-    ],
+    system_packages: &["git", "composer"],
+    services: &[],
     writable_paths: &["storage", "bootstrap/cache"],
     post_install_steps: &[
-        "download G7 release",
-        "run composer install",
-        "install Laravel Octane with FrankenPHP",
-        "build frontend assets",
-        "create .env and APP_KEY",
-        "link storage",
-        "open browser installer at /install through Octane",
-        "run migrations and optimization after browser install",
-        "enable queue, scheduler, and Reverb after browser install",
+        "resolve and download the latest stable G7 release",
+        "verify the Git checkout and bundled public assets",
+        "open the official browser installer at /install",
+        "configure optional long-running services only after app installation",
     ],
-    health_checks: &[
-        "GET /install",
-        "php artisan about",
-        "g7-frankenphp Octane service active",
-        "queue worker active",
-        "scheduler active",
-    ],
+    health_checks: &["GET /install", "official installer requirements pass"],
 };
 
 const LARAVEL_PROFILE: AppProfile = AppProfile {
@@ -325,6 +295,7 @@ mod tests {
         assert_eq!(profile.document_root, DocumentRootStrategy::PublicSubdir);
         assert!(profile.php_extensions.contains(&"redis"));
         assert!(profile.system_packages.contains(&"composer"));
+        assert!(!profile.system_packages.contains(&"npm"));
         Ok(())
     }
 
@@ -376,12 +347,13 @@ mod tests {
             "/home/g7/public_html/public"
         );
         assert!(profile.php_extensions.contains(&"pcntl"));
-        assert!(profile.services.contains(&"g7-reverb.service"));
+        assert!(profile.services.is_empty());
+        assert!(!profile.system_packages.contains(&"npm"));
         assert!(
             profile
                 .post_install_steps
                 .iter()
-                .any(|step| step.contains("Octane"))
+                .any(|step| step.contains("official browser installer"))
         );
         Ok(())
     }

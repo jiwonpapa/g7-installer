@@ -66,9 +66,9 @@ pub(super) fn apply_site_phase<R: CommandRunner>(
         .chown_recursive(&owner_group, &plan.web_root)
         .map_err(|err| command_error("web-root-owner", &command, err))?;
     require_success("web-root-owner", command, output)?;
-    let command = format!("chmod -R 0755 {}", plan.web_root);
+    let command = format!("chmod 0755 {}", plan.web_root);
     let output = probe
-        .chmod_recursive("0755", &plan.web_root)
+        .chmod_path("0755", &plan.web_root)
         .map_err(|err| command_error("web-root-permissions", &command, err))?;
     require_success("web-root-permissions", command, output)?;
     let site_home = site_home_path(plan);

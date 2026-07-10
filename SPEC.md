@@ -31,8 +31,7 @@ jiwonpapa/g7-installer
 
 G7 본체와의 관계:
 
-- 설치기는 G7 앱 소스를 받아 Composer/NPM 준비, `.env`, APP_KEY, storage link, systemd unit 파일 준비를 수행합니다.
-- 브라우저 `/install` 완료 뒤 migration/optimize, queue, scheduler, Reverb 실행 여부는 세부 설정 액션 패널과 설정 안내서에서 확인합니다.
+- 그누보드7은 GitHub 공식 최신 안정 Release를 조회·clone하고 배포 후 Git 필수 파일을 재검증한 뒤 공식 브라우저 `/install`로 인계합니다. Composer/Vendor, `.env`, 관리자 계정, 확장과 마이그레이션은 G7 공식 설치기가 담당합니다.
 - WordPress는 최신 배포 zip을 받아 설치 화면으로 연결합니다.
 - 각 앱 본체 레포를 직접 수정하지 않습니다.
 
@@ -164,7 +163,7 @@ sudo g7inst reset --yes
 16. 선택 DB 설치
 17. DB 및 DB 사용자 생성, 앱 DB 비밀번호 적용
 18. 선택 앱 소스 다운로드
-19. 그누보드7 Composer/NPM 준비 또는 WordPress 설치 화면 준비
+19. 그누보드7 최신 안정 Release 검증·공식 `/install` 인계 또는 WordPress 최신 설치 화면 준비
 20. 선택한 웹루트(`/home/<site-user>/public_html`, `/home/<site-user>/www`, `/var/www/<domain>`, custom)에 배치
 21. `.env` 생성 및 앱 런타임 설정
 22. 메일 발송 설정 반영
@@ -227,15 +226,10 @@ g7inst doctor
 /var/log/g7-installer/setup-guide.md
 /var/backups/g7-installer
 /home/<site-user>/public_html
-/home/<site-user>/public_html/.env
 /etc/nginx/sites-available/g7.conf
 /etc/nginx/sites-enabled/g7.conf
 /etc/apache2/sites-available/g7.conf
 /etc/apache2/sites-enabled/g7.conf
-/etc/systemd/system/g7-queue.service
-/etc/systemd/system/g7-scheduler.service
-/etc/systemd/system/g7-scheduler.timer
-/etc/systemd/system/g7-reverb.service
 ```
 
 `owned-files.json`은 installer가 만든 파일만 추적합니다. 추적되지 않은 운영 파일은 자동 수정하지 않습니다.
@@ -353,8 +347,6 @@ crates/
     src/templates.rs
 templates/
   nginx/g7.conf.tera
-  systemd/g7-queue.service.tera
-  systemd/g7-reverb.service.tera
 scripts/
   bootstrap.sh
   lightsail-init.sh

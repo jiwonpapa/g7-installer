@@ -4,13 +4,13 @@ use std::path::{Path, PathBuf};
 
 use crate::account::{
     chmod_path, chmod_recursive, chown_recursive, create_login_user, delete_login_user,
-    set_login_password, user_exists,
+    set_login_password, signal_login_user_processes, user_exists,
 };
 use crate::apache::{config_test as apache_config_test, enable_module as apache_enable_module};
 use crate::app::{artisan, composer_install, composer_require, npm_install, npm_run_build};
 use crate::apt::{apt_add_repository, apt_candidate_available, apt_install, apt_purge, apt_update};
 use crate::archive::{
-    copy_dir_contents, download_file, git_clone, git_diff_index_clean, git_fsck_full,
+    copy_dir_contents, download_file, fetch_text, git_clone, git_diff_index_clean, git_fsck_full,
     git_ls_files_error_unmatch, git_rev_parse_head, test_dir, test_file, unzip_archive, unzip_test,
 };
 use crate::certbot::{certonly_webroot, delete_cert, renew_dry_run};
@@ -233,6 +233,10 @@ impl<R: CommandRunner> SystemProbe<R> {
         download_file(&self.runner, url, output_path).map_err(SystemProbeError::Command)
     }
 
+    pub fn fetch_text(&self, url: &str) -> Result<CommandOutput, SystemProbeError> {
+        fetch_text(&self.runner, url).map_err(SystemProbeError::Command)
+    }
+
     pub fn unzip_archive(
         &self,
         archive_path: &str,
@@ -337,6 +341,14 @@ impl<R: CommandRunner> SystemProbe<R> {
 
     pub fn delete_login_user(&self, user: &str) -> Result<CommandOutput, SystemProbeError> {
         delete_login_user(&self.runner, user).map_err(SystemProbeError::Command)
+    }
+
+    pub fn signal_login_user_processes(
+        &self,
+        signal: &str,
+        user: &str,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        signal_login_user_processes(&self.runner, signal, user).map_err(SystemProbeError::Command)
     }
 
     pub fn chown_recursive(

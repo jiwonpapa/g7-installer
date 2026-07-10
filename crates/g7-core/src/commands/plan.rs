@@ -74,6 +74,18 @@ mod tests {
 
         assert!(plan.fresh_server_only);
         assert!(plan.packages.iter().any(|package| package.name == "nginx"));
+        assert!(plan.packages.iter().any(|package| package.name == "git"));
+        assert!(
+            plan.packages
+                .iter()
+                .any(|package| package.name == "composer")
+        );
+        assert!(plan.packages.iter().all(|package| {
+            !package
+                .name
+                .split_whitespace()
+                .any(|name| matches!(name, "nodejs" | "npm"))
+        }));
         assert!(
             plan.packages
                 .iter()
