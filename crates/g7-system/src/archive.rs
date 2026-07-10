@@ -92,16 +92,20 @@ pub fn git_fsck_full<R: CommandRunner>(
     runner.run(&git_repo_command(repo_dir).arg("fsck").arg("--full"))
 }
 
-pub fn git_diff_index_clean<R: CommandRunner>(
+pub fn git_tracked_files_status<R: CommandRunner>(
     runner: &R,
     repo_dir: &str,
 ) -> Result<CommandOutput, CommandError> {
     runner.run(
-        &git_repo_command(repo_dir)
-            .arg("diff-index")
-            .arg("--quiet")
-            .arg("HEAD")
-            .arg("--"),
+        &CommandSpec::new("git")
+            .arg("--no-optional-locks")
+            .arg("-c")
+            .arg(format!("safe.directory={repo_dir}"))
+            .arg("-C")
+            .arg(repo_dir)
+            .arg("status")
+            .arg("--porcelain=v1")
+            .arg("--untracked-files=no"),
     )
 }
 
@@ -150,9 +154,9 @@ pub fn test_dir<R: CommandRunner>(runner: &R, path: &str) -> Result<CommandOutpu
 #[cfg(test)]
 mod tests {
     use super::{
-        copy_dir_contents, download_file, fetch_text, git_clone, git_diff_index_clean,
-        git_fsck_full, git_ls_files_error_unmatch, git_rev_parse_head, test_dir, test_file,
-        unzip_archive, unzip_test,
+        copy_dir_contents, download_file, fetch_text, git_clone, git_fsck_full,
+        git_ls_files_error_unmatch, git_rev_parse_head, git_tracked_files_status, test_dir,
+        test_file, unzip_archive, unzip_test,
     };
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
@@ -284,7 +288,7 @@ mod tests {
 
         git_rev_parse_head(&runner, "/tmp/g7")?;
         git_fsck_full(&runner, "/tmp/g7")?;
-        git_diff_index_clean(&runner, "/tmp/g7")?;
+        git_tracked_files_status(&runner, "/tmp/g7")?;
         git_ls_files_error_unmatch(&runner, "/tmp/g7", "public/index.php")?;
         let recorded = runner.recorded();
 
@@ -315,14 +319,14 @@ mod tests {
         assert_eq!(
             recorded[2].args,
             vec![
+                OsString::from("--no-optional-locks"),
                 OsString::from("-c"),
                 OsString::from("safe.directory=/tmp/g7"),
                 OsString::from("-C"),
                 OsString::from("/tmp/g7"),
-                OsString::from("diff-index"),
-                OsString::from("--quiet"),
-                OsString::from("HEAD"),
-                OsString::from("--"),
+                OsString::from("status"),
+                OsString::from("--porcelain=v1"),
+                OsString::from("--untracked-files=no"),
             ]
         );
         assert_eq!(

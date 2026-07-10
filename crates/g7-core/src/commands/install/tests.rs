@@ -179,7 +179,7 @@ fn install_writes_prepared_state_and_owned_files()
         .skip(app_copy_index + 1)
         .find(|(_, spec)| {
             spec.display()
-                == "git -c safe.directory=/home/g7/public_html -C /home/g7/public_html diff-index --quiet HEAD --"
+                == "git --no-optional-locks -c safe.directory=/home/g7/public_html -C /home/g7/public_html status --porcelain=v1 --untracked-files=no"
         })
         .map(|(index, _)| index)
         .ok_or_else(|| std::io::Error::other("missing final deployed Git check"))?;

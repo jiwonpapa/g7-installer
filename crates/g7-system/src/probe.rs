@@ -10,8 +10,9 @@ use crate::apache::{config_test as apache_config_test, enable_module as apache_e
 use crate::app::{artisan, composer_install, composer_require, npm_install, npm_run_build};
 use crate::apt::{apt_add_repository, apt_candidate_available, apt_install, apt_purge, apt_update};
 use crate::archive::{
-    copy_dir_contents, download_file, fetch_text, git_clone, git_diff_index_clean, git_fsck_full,
-    git_ls_files_error_unmatch, git_rev_parse_head, test_dir, test_file, unzip_archive, unzip_test,
+    copy_dir_contents, download_file, fetch_text, git_clone, git_fsck_full,
+    git_ls_files_error_unmatch, git_rev_parse_head, git_tracked_files_status, test_dir, test_file,
+    unzip_archive, unzip_test,
 };
 use crate::certbot::{certonly_webroot, delete_cert, renew_dry_run};
 use crate::command::CommandSpec;
@@ -270,8 +271,11 @@ impl<R: CommandRunner> SystemProbe<R> {
         git_fsck_full(&self.runner, repo_dir).map_err(SystemProbeError::Command)
     }
 
-    pub fn git_diff_index_clean(&self, repo_dir: &str) -> Result<CommandOutput, SystemProbeError> {
-        git_diff_index_clean(&self.runner, repo_dir).map_err(SystemProbeError::Command)
+    pub fn git_tracked_files_status(
+        &self,
+        repo_dir: &str,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        git_tracked_files_status(&self.runner, repo_dir).map_err(SystemProbeError::Command)
     }
 
     pub fn git_ls_files_error_unmatch(

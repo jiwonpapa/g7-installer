@@ -219,18 +219,19 @@ pub(super) fn verify_git_checkout<R: CommandRunner>(
         format!("{app_key} Git object 무결성을 확인했습니다."),
     ));
 
-    let output = probe.git_diff_index_clean(source_dir).map_err(|err| {
-        command_error(
-            error_step,
-            format!("git -C {source_dir} diff-index --quiet HEAD --"),
-            err,
-        )
-    })?;
-    require_success(
-        error_step,
-        format!("git -C {source_dir} diff-index --quiet HEAD --"),
-        output,
-    )?;
+    let status_command = format!(
+        "git --no-optional-locks -C {source_dir} status --porcelain=v1 --untracked-files=no"
+    );
+    let output = probe
+        .git_tracked_files_status(source_dir)
+        .map_err(|err| command_error(error_step, &status_command, err))?;
+    let tracked_changes = short_text(&output.stdout);
+    require_success(error_step, status_command, output)?;
+    if !tracked_changes.is_empty() {
+        return Err(Error::InstallVerificationFailed {
+            checks: format!("{app_key} checkout의 추적 파일이 HEAD와 다릅니다: {tracked_changes}"),
+        });
+    }
     checks.push(InstallCheck::pass(
         format!("{app_key}-git-clean"),
         format!("{app_key} checkout 작업트리가 HEAD와 일치합니다."),
@@ -389,5 +390,29 @@ pub(super) fn remove_existing_path(paths: &InstallPaths, path: &str) -> Result<(
             path: path.to_string(),
             source,
         })
+    }
+}
+
+#[cfg(test)]
+mod git_checkout_tests {
+    use super::*;
+    use g7_system::command::{CommandOutput, FakeCommandRunner};
+
+    #[test]
+    fn tracked_file_changes_fail_checkout_verification() {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success("deadbeef\n"));
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(" M README.md\n"));
+        let probe = SystemProbe::new(runner);
+
+        let error = verify_git_checkout(&probe, "gnuboard7", "/tmp/g7", &[])
+            .expect_err("tracked file changes must fail verification");
+
+        assert!(matches!(
+            error,
+            Error::InstallVerificationFailed { checks }
+                if checks.contains("M README.md")
+        ));
     }
 }
