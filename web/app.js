@@ -22,7 +22,6 @@ const state = {
   provisionActionResults: {},
   planPackages: [],
   packageTicker: null,
-  liveLogEntries: [],
   resourceDefaultsApplied: false,
   theme: localStorage.getItem("g7inst-theme") || "light",
 };
@@ -67,8 +66,6 @@ const nodes = {
   activityCurrentStage: document.querySelector("#activity-current-stage"),
   activityCurrentMessage: document.querySelector("#activity-current-message"),
   activityProgressLabel: document.querySelector("#activity-progress-label"),
-  activityLogCount: document.querySelector("#activity-log-count"),
-  installLiveLog: document.querySelector("#install-live-log"),
   reportProgress: document.querySelector("#report-progress"),
   packageProgressList: document.querySelector("#package-progress-list"),
   packageProgressHelp: document.querySelector("#package-progress-help"),
@@ -443,25 +440,6 @@ async function withBusy(button, busyText, task) {
   }
 }
 
-function renderActivityLog() {
-  if (!nodes.installLiveLog) {
-    return;
-  }
-
-  const recent = state.liveLogEntries.slice(-8);
-  nodes.installLiveLog.innerHTML = recent.length
-    ? recent.map((entry) => `
-      <li>
-        <time>${escapeHtml(entry.timestamp)}</time>${escapeHtml(entry.message)}
-      </li>
-    `).join("")
-    : "<li>아직 실행 로그가 없습니다.</li>";
-
-  if (nodes.activityLogCount) {
-    nodes.activityLogCount.textContent = `${state.liveLogEntries.length}줄`;
-  }
-}
-
 function setActivityStatus(stageLabel, message = "", percent = null) {
   if (nodes.activityCurrentStage && stageLabel) {
     nodes.activityCurrentStage.textContent = stageLabel;
@@ -476,18 +454,12 @@ function setActivityStatus(stageLabel, message = "", percent = null) {
 }
 
 function clearActivityLog() {
-  state.liveLogEntries = [];
-  renderActivityLog();
   setActivityStatus("대기 중", "기본 구성을 시작하면 서버 작업 로그와 단계별 결과가 이곳에 표시됩니다.", 0);
 }
 
 function log(message) {
   const timestamp = new Date().toLocaleTimeString();
   const localizedMessage = localizeMessage(message || "");
-  state.liveLogEntries.push({ timestamp, message: localizedMessage });
-  if (state.liveLogEntries.length > 200) {
-    state.liveLogEntries = state.liveLogEntries.slice(-200);
-  }
   if (nodes.log) {
     if (nodes.log.textContent.trim() === "웹 컨트롤러를 불러오는 중...") {
       nodes.log.textContent = "";
@@ -495,7 +467,6 @@ function log(message) {
     nodes.log.textContent += `\n[${timestamp}] ${localizedMessage}`;
     nodes.log.scrollTop = nodes.log.scrollHeight;
   }
-  renderActivityLog();
 }
 
 function formatError(error) {

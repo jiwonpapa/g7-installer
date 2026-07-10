@@ -236,6 +236,8 @@ test("wizard routes render report, downloads, and provision cards", async ({ pag
   try {
     await page.goto(`${baseUrl}/setup/result?token=e2e`);
     await expect(page.getByRole("heading", { name: "결과 리포트" })).toBeVisible();
+    await expect(page.locator("#live-log")).toHaveCount(1);
+    await expect(page.locator("#install-live-log")).toHaveCount(0);
     await expect(page.getByText("설치 완료 상태")).toBeVisible();
     await expect(page.getByRole("button", { name: /리포트 JSON/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /설정 안내서 MD/ })).toBeVisible();
