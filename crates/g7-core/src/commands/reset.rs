@@ -786,6 +786,7 @@ fn reset_database<R: CommandRunner>(
     let sql = database_reset_sql(database_name, database_user);
     match probe.database_apply_sql(engine, &sql) {
         Ok(output) => {
+            let output = retry_database_reset_after_start(probe, engine, &sql, output)?;
             require_success("database-drop", "database root sql", output)?;
             Ok(ResetAction::new(
                 "database",
@@ -802,6 +803,35 @@ fn reset_database<R: CommandRunner>(
         )),
         Err(error) => Err(command_error(error)),
     }
+}
+
+fn retry_database_reset_after_start<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    engine: DatabaseEngine,
+    sql: &str,
+    output: CommandOutput,
+) -> Result<CommandOutput> {
+    if output.status == 0 {
+        return Ok(output);
+    }
+
+    let service = match engine {
+        DatabaseEngine::MariaDb => "mariadb",
+        DatabaseEngine::MySql => "mysql",
+    };
+    if probe.service_activity(service).map_err(command_error)?
+        != g7_system::service::ServiceActivity::Inactive
+    {
+        return Ok(output);
+    }
+
+    let start_output = probe.start_service(service).map_err(command_error)?;
+    require_success(
+        "database-start-for-reset",
+        format!("systemctl start {service}"),
+        start_output,
+    )?;
+    probe.database_apply_sql(engine, sql).map_err(command_error)
 }
 
 fn database_reset_sql(database_name: Option<&str>, database_user: Option<&str>) -> String {
@@ -1032,11 +1062,13 @@ fn files_contain_systemd_units(files: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        ResetPaths, delete_site_user_account, run_with_probe_and_paths, validate_reset_path,
+        ResetPaths, delete_site_user_account, reset_database, run_with_probe_and_paths,
+        validate_reset_path,
     };
     use g7_state::owned_files::{OWNED_FILES_PATH, OwnedFiles, write_owned_files};
     use g7_system::SystemProbe;
     use g7_system::command::{CommandError, CommandOutput, FakeCommandRunner};
+    use g7_system::database::DatabaseEngine;
     use std::ffi::OsString;
     use std::fs;
     use std::path::PathBuf;
@@ -1078,6 +1110,48 @@ mod tests {
                 .count(),
             2
         );
+        Ok(())
+    }
+
+    #[test]
+    fn database_reset_starts_inactive_service_and_retries()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::failure(
+            1,
+            "Can't connect to local MySQL server through socket",
+        ));
+        runner.push_output(CommandOutput {
+            status: 3,
+            stdout: "inactive\n".to_string(),
+            stderr: String::new(),
+        });
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
+        let probe = SystemProbe::new(runner);
+
+        let action = reset_database(
+            &probe,
+            DatabaseEngine::MySql,
+            Some("g7devops"),
+            Some("g7devops"),
+        )?;
+
+        assert_eq!(action.status, "dropped");
+        let recorded = probe.runner().recorded();
+        assert_eq!(recorded.len(), 4);
+        assert_eq!(recorded[0].program, OsString::from("mysql"));
+        assert_eq!(recorded[1].program, OsString::from("systemctl"));
+        assert_eq!(
+            recorded[1].args,
+            vec![OsString::from("is-active"), OsString::from("mysql")]
+        );
+        assert_eq!(recorded[2].program, OsString::from("systemctl"));
+        assert_eq!(
+            recorded[2].args,
+            vec![OsString::from("start"), OsString::from("mysql")]
+        );
+        assert_eq!(recorded[3].program, OsString::from("mysql"));
         Ok(())
     }
 

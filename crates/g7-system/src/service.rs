@@ -50,6 +50,10 @@ pub fn disable_now<R: CommandRunner>(
     )
 }
 
+pub fn start<R: CommandRunner>(runner: &R, service: &str) -> Result<CommandOutput, CommandError> {
+    runner.run(&CommandSpec::new("systemctl").arg("start").arg(service))
+}
+
 pub fn reload<R: CommandRunner>(runner: &R, service: &str) -> Result<CommandOutput, CommandError> {
     runner.run(&CommandSpec::new("systemctl").arg("reload").arg(service))
 }
@@ -60,7 +64,7 @@ pub fn restart<R: CommandRunner>(runner: &R, service: &str) -> Result<CommandOut
 
 #[cfg(test)]
 mod tests {
-    use super::{ServiceActivity, disable_now, is_active, reload, restart};
+    use super::{ServiceActivity, disable_now, is_active, reload, restart, start};
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
 
@@ -135,6 +139,22 @@ mod tests {
         assert_eq!(
             recorded[0].args,
             vec![OsString::from("restart"), OsString::from("mysql")]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn starts_service_without_enabling_it() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success(""));
+
+        start(&runner, "mysql")?;
+        let recorded = runner.recorded();
+
+        assert_eq!(recorded[0].program, OsString::from("systemctl"));
+        assert_eq!(
+            recorded[0].args,
+            vec![OsString::from("start"), OsString::from("mysql")]
         );
         Ok(())
     }

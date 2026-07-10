@@ -27,7 +27,7 @@ use crate::os::{OsRelease, OsReleaseError, read_os_release};
 use crate::package::{PackageStatus, package_status};
 use crate::port::{PortStatus, tcp_port_status};
 use crate::privilege::{Privilege, current_privilege};
-use crate::service::{ServiceActivity, disable_now, enable_now, is_active, reload, restart};
+use crate::service::{ServiceActivity, disable_now, enable_now, is_active, reload, restart, start};
 use crate::systemd::daemon_reload;
 use std::net::IpAddr;
 
@@ -203,6 +203,10 @@ impl<R: CommandRunner> SystemProbe<R> {
 
     pub fn disable_service_now(&self, service: &str) -> Result<CommandOutput, SystemProbeError> {
         disable_now(&self.runner, service).map_err(SystemProbeError::Command)
+    }
+
+    pub fn start_service(&self, service: &str) -> Result<CommandOutput, SystemProbeError> {
+        start(&self.runner, service).map_err(SystemProbeError::Command)
     }
 
     pub fn reload_service(&self, service: &str) -> Result<CommandOutput, SystemProbeError> {
