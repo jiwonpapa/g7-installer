@@ -112,6 +112,15 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         return Err(Error::RollbackConfirmationRequired);
     }
 
+    let _operation_lock = g7_state::lock::InstallerLock::acquire(
+        &paths.resolve(g7_state::lock::LOCK_PATH),
+        "rollback",
+    )
+    .map_err(|source| Error::OperationLocked {
+        operation: "rollback",
+        source,
+    })?;
+
     require_root(probe)?;
     let state_path = paths.resolve(STATE_PATH);
     let state = read_state_file(&state_path).map_err(|source| Error::FileReadFailed {

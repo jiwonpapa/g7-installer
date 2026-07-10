@@ -362,7 +362,7 @@ mod tests {
         let options = PlanOptions {
             database_name: Some("custom_g7".to_string()),
             database_user: Some("custom_user".to_string()),
-            database_password: Some("0808dong!!".to_string()),
+            database_password: Some("Test-only_9x!".to_string()),
             ..PlanOptions::default()
         };
         let plan = build_with_options("example.com".to_string(), options)?;

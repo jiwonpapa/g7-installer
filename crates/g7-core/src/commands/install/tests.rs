@@ -1111,7 +1111,7 @@ fn install_sets_site_account_password_when_requested()
     let os_release_path = write_temp_os_release()?;
     let fs_root = create_temp_fs_root()?;
     let options = super::plan::PlanOptions {
-        site_user_password: Some("0808dong!!".to_string()),
+        site_user_password: Some("Test-only_9x!".to_string()),
         ..super::plan::PlanOptions::default()
     };
     let probe = clean_root_probe_for_options(&os_release_path, &fs_root, "example.com", &options)?;
@@ -1668,4 +1668,55 @@ fn strip_root(path: &str) -> &str {
         Some(stripped) => stripped,
         None => path,
     }
+}
+
+#[test]
+fn resume_reconstructs_install_options_from_report() {
+    let report = serde_json::json!({
+        "deployment_mode": "public",
+        "app_profile": "wordpress",
+        "web_server": "apache",
+        "php_version": "8.3",
+        "php_source": "ubuntu",
+        "database": "mariadb",
+        "database_name": "site_db",
+        "database_user": "site_user",
+        "site_user": "site",
+        "web_root_mode": "custom",
+        "web_root": "/srv/site",
+        "www_mode": "redirect-to-root",
+        "redis": "disable",
+        "mail_mode": "none",
+        "dns_check": true,
+        "security_profile": "standard",
+        "ssh_policy": "audit-only"
+    });
+
+    let options = super::plan_options_from_report(&report).expect("resume options");
+
+    assert_eq!(options.app_profile, "wordpress");
+    assert_eq!(options.web_server, "apache");
+    assert_eq!(options.database_engine, "mariadb");
+    assert_eq!(options.custom_web_root.as_deref(), Some("/srv/site"));
+    assert!(!options.local_test);
+}
+
+#[test]
+fn resume_rejects_report_without_required_identity() {
+    let report = serde_json::json!({"deployment_mode": "public"});
+
+    let error = super::plan_options_from_report(&report).expect_err("missing app profile");
+
+    assert!(matches!(error, Error::ResumeUnavailable { .. }));
+}
+
+#[test]
+fn resume_completion_requires_both_step_and_app_source_pass() {
+    let step = vec!["app-source-prepared".to_string()];
+    let passed = vec![super::InstallCheck::pass("app-source", "ready")];
+    let failed = vec![super::InstallCheck::fail("app-source", "failed")];
+
+    assert!(super::app_is_ready(&step, &passed));
+    assert!(!super::app_is_ready(&[], &passed));
+    assert!(!super::app_is_ready(&step, &failed));
 }

@@ -3,6 +3,8 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+use crate::atomic::atomic_write;
+
 pub const OWNED_FILES_PATH: &str = "/var/lib/g7-installer/owned-files.json";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,7 +24,7 @@ impl Default for OwnedFiles {
 
 pub fn write_owned_files(path: &Path, owned_files: &OwnedFiles) -> io::Result<()> {
     let payload = serde_json::to_vec_pretty(owned_files).map_err(io::Error::other)?;
-    fs::write(path, payload)
+    atomic_write(path, &payload)
 }
 
 pub fn read_owned_files(path: &Path) -> io::Result<OwnedFiles> {

@@ -53,6 +53,26 @@ pub enum Error {
     )]
     PrivilegeRequired,
 
+    #[error("another installer operation is already running: {operation}")]
+    #[diagnostic(
+        code(g7::operation::locked),
+        help("Wait for the current install/reset/rollback action to finish, then retry.")
+    )]
+    OperationLocked {
+        operation: &'static str,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("installer resume is not available: {reason}")]
+    #[diagnostic(
+        code(g7::install::resume_unavailable),
+        help(
+            "Use g7inst status to inspect the phase, then retry resume or use reset/rollback as reported."
+        )
+    )]
+    ResumeUnavailable { reason: String },
+
     #[error("install blocked by preflight checks: {checks}")]
     #[diagnostic(
         code(g7::install::blocked),

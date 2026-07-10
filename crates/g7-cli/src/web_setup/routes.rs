@@ -1,7 +1,10 @@
 use super::*;
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
 pub async fn run(config: WebSetupConfig) -> Result<()> {
-    ensure_setup_runs_as_root()?;
+    ensure_setup_runs_as_root_or_reexec()?;
 
     let bind = parse_bind(&config.bind)?;
     ensure_remote_binding_is_explicit(bind, config.allow_remote)?;
@@ -76,7 +79,19 @@ pub(super) fn ensure_remote_binding_is_explicit(
     ))
 }
 
-pub(super) fn ensure_setup_runs_as_root() -> Result<()> {
+pub(super) fn ensure_setup_runs_as_root_or_reexec() -> Result<()> {
+    if current_user_is_root()? {
+        return Ok(());
+    }
+
+    if std::env::var_os("G7INST_DISABLE_SUDO_REEXEC").is_some() {
+        return Err(setup_requires_root_error());
+    }
+
+    reexec_setup_with_sudo()
+}
+
+pub(super) fn current_user_is_root() -> Result<bool> {
     let output = Command::new("id")
         .arg("-u")
         .output()
@@ -91,13 +106,54 @@ pub(super) fn ensure_setup_runs_as_root() -> Result<()> {
     }
 
     let uid = String::from_utf8_lossy(&output.stdout);
-    if uid.trim() == "0" {
-        return Ok(());
+    Ok(uid.trim() == "0")
+}
+
+pub(super) fn setup_requires_root_error() -> miette::Report {
+    miette!(
+        "g7inst setup must be started with sudo/root.\nPreferred: sudo -v && sudo g7inst setup --domain example.com\nIf sudo asks for a password, type it in the SSH terminal before the web UI opens.\nIf sudo is not available, log in as root or run su - from the provider console, then run g7inst setup.\nServer account password input is not used in the web UI."
+    )
+}
+
+#[cfg(unix)]
+pub(super) fn reexec_setup_with_sudo() -> Result<()> {
+    let sudo_available = Command::new("sudo")
+        .arg("-V")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    match sudo_available {
+        Ok(status) if status.success() => {}
+        Ok(status) => {
+            return Err(miette!(
+                "sudo is installed but not usable: sudo -V exited with status {status}.\nLog in as root or run su - from the provider console, then run g7inst setup.\nServer account password input is not used in the web UI."
+            ));
+        }
+        Err(err) => {
+            return Err(miette!(
+                "sudo is not available: {err}.\nLog in as root or run su - from the provider console, then run g7inst setup.\nServer account password input is not used in the web UI."
+            ));
+        }
     }
 
-    Err(miette!(
-        "g7inst setup must be started with sudo/root.\nRun: sudo g7inst setup --domain example.com\nServer account password input is not used in the web UI."
-    ))
+    let exe = std::env::current_exe().into_diagnostic()?;
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+
+    eprintln!("g7inst setup requires sudo/root.");
+    eprintln!(
+        "Re-running with sudo now. If prompted, enter the server account password in this SSH terminal."
+    );
+    eprintln!("The web UI will not ask for the root/ubuntu password.");
+
+    let err = Command::new("sudo").arg("-E").arg(exe).args(args).exec();
+
+    Err(miette!("failed to re-run g7inst setup with sudo: {err}"))
+}
+
+#[cfg(not(unix))]
+pub(super) fn reexec_setup_with_sudo() -> Result<()> {
+    Err(setup_requires_root_error())
 }
 
 pub(super) fn is_loopback(ip: IpAddr) -> bool {
@@ -137,7 +193,9 @@ pub(super) fn print_startup(addr: SocketAddr, token: &str) {
     if !is_loopback(addr.ip()) {
         println!("Remote bind is enabled; keep this port firewalled.");
     }
-    println!("Server password: not required; this controller already runs with sudo/root.");
+    println!(
+        "Server password: handled in SSH/root shell before this controller starts; not used in the web UI."
+    );
     println!("Stop: Ctrl+C");
 }
 

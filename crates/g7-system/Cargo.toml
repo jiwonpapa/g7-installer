@@ -1,6 +1,6 @@
 [package]
 name = "g7-system"
-version = "0.2.29"
+version = "0.2.30"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -8,4 +8,6 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true

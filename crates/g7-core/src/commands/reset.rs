@@ -111,6 +111,13 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         return Err(Error::ResetConfirmationRequired);
     }
 
+    let _operation_lock =
+        g7_state::lock::InstallerLock::acquire(&paths.resolve(g7_state::lock::LOCK_PATH), "reset")
+            .map_err(|source| Error::OperationLocked {
+                operation: "reset",
+                source,
+            })?;
+
     require_root(probe)?;
     let metadata = reset_metadata(paths)?;
     let mut actions = Vec::new();

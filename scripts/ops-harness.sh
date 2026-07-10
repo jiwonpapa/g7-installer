@@ -14,14 +14,22 @@ SUDO="${G7_OPS_SUDO:-sudo -n}"
 VERIFY_REINSTALL="${G7_OPS_VERIFY_REINSTALL:-0}"
 CLEANUP="${G7_OPS_CLEANUP:-1}"
 CERTBOT_SCOPE="${G7_OPS_CERTBOT_SCOPE:-staging}"
-APP_SMOKE="${G7_OPS_APP_SMOKE:-0}"
+APP_SMOKE="${G7_OPS_APP_SMOKE:-1}"
+APP_PROFILE="${G7_OPS_APP:-gnuboard7}"
+WEB_SERVER="${G7_OPS_WEB_SERVER:-nginx}"
+PHP_VERSION="${G7_OPS_PHP_VERSION:-8.5}"
+PHP_SOURCE="${G7_OPS_PHP_SOURCE:-auto}"
+DATABASE="${G7_OPS_DATABASE:-mysql}"
+REDIS="${G7_OPS_REDIS:-enable}"
+MAIL_MODE="${G7_OPS_MAIL_MODE:-none}"
+WWW_MODE="${G7_OPS_WWW_MODE:-redirect-to-root}"
 STEPS="${G7_OPS_STEPS:-fresh-doctor,plan,install,report-contract,setup-guide,app-smoke,post-install-doctor,reset-dry-run,reset,fresh-doctor-after-reset}"
 STEPS="${STEPS// /}"
 PRE_CLEAN="${G7_OPS_PRE_CLEAN:-auto}"
 ALLOW_LOCAL_TEST="${G7_OPS_ALLOW_LOCAL_TEST:-0}"
 CONFIRM_DISPOSABLE="${G7_OPS_CONFIRM_DISPOSABLE:-0}"
 REPORT_DIR="${G7_OPS_REPORT_DIR:-${ROOT_DIR}/target/ops-harness/$(date +%Y%m%d-%H%M%S)}"
-BOOTSTRAP_URL="https://raw.githubusercontent.com/${REPO}/main/scripts/bootstrap.sh"
+BOOTSTRAP_URL="https://github.com/${REPO}/releases/download/${INSTALL_VERSION}/bootstrap.sh"
 
 case "${SOURCE}" in
   release)
@@ -179,9 +187,42 @@ assert_not_installed() {
   fi
 }
 
-assert_installer_paths_absent() {
+assert_installer_resources_absent() {
   local cycle="$1"
-  sudo_sh_capture "${cycle}-installer-paths-absent" "for path in /etc/g7-installer /var/lib/g7-installer /var/log/g7-installer /var/backups/g7-installer /home/g7/public_html; do test ! -e \"\${path}\" || exit 1; done"
+  local report_path="$2"
+  local site_user
+  local web_root
+  local services
+
+  read -r site_user web_root < <(python3 - "${report_path}" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+print(data["site_user"], data["web_root"])
+PY
+)
+  services="$(python3 - "${report_path}" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+services = {"redis-server"}
+services.add("apache2" if data.get("web_server") == "apache" else "nginx")
+services.add("mariadb" if data.get("database") == "mariadb" else "mysql")
+if data.get("web_server") == "frankenphp":
+    services.add("g7-frankenphp")
+for service in sorted(services):
+    print(service)
+PY
+)"
+
+  sudo_sh_capture "${cycle}-installer-paths-absent" "for path in /etc/g7-installer /var/lib/g7-installer /var/log/g7-installer /var/backups/g7-installer $(quote "${web_root}"); do test ! -e \"\${path}\" || exit 1; done"
+  sudo_sh_capture "${cycle}-site-account-absent" "! id -u $(quote "${site_user}") >/dev/null 2>&1"
+  while IFS= read -r service; do
+    [[ -n "${service}" ]] || continue
+    sudo_sh_capture "${cycle}-service-${service}-inactive" "! systemctl is-active --quiet $(quote "${service}")"
+  done <<<"${services}"
 }
 
 validate_report() {
@@ -194,6 +235,17 @@ path = sys.argv[1]
 with open(path, "r", encoding="utf-8") as handle:
     data = json.load(handle)
 
+if data.get("schema_version") != 1:
+    raise SystemExit(f"unsupported schema_version: {data.get('schema_version')}")
+
+required = (
+    "domain", "deployment_mode", "app_profile", "web_server", "php_version",
+    "database", "database_name", "database_user", "site_user", "web_root",
+)
+missing = [key for key in required if not data.get(key)]
+if missing:
+    raise SystemExit(f"missing required report fields: {', '.join(missing)}")
+
 if data.get("phase") != "completed":
     raise SystemExit(f"unexpected phase: {data.get('phase')}")
 
@@ -201,8 +253,15 @@ baseline = data.get("preinstall_package_checks") or []
 if not baseline:
     raise SystemExit("missing preinstall_package_checks")
 
-for section in ("package_checks", "service_checks", "port_checks", "vhost_checks", "runtime_checks", "database_checks"):
-    checks = data.get(section) or []
+sections = (
+    "safety_checks", "preinstall_package_checks", "package_checks", "service_checks",
+    "port_checks", "network_checks", "runtime_checks", "database_checks",
+    "firewall_checks", "mail_checks", "certbot_checks", "vhost_checks", "app_checks",
+)
+for section in sections:
+    checks = data.get(section)
+    if not isinstance(checks, list):
+        raise SystemExit(f"{section} is missing or is not a list")
     failed = [f"{item.get('name')}: {item.get('message')}" for item in checks if item.get("status") == "fail"]
     if failed:
         raise SystemExit(f"{section} failed: {', '.join(failed)}")
@@ -227,12 +286,14 @@ PY
 }
 
 install_args() {
+  local common
+  common="--app $(quote "${APP_PROFILE}") --web-server $(quote "${WEB_SERVER}") --php-version $(quote "${PHP_VERSION}") --php-source $(quote "${PHP_SOURCE}") --database $(quote "${DATABASE}") --redis $(quote "${REDIS}") --mail-mode $(quote "${MAIL_MODE}") --www-mode $(quote "${WWW_MODE}")"
   case "${CERTBOT_SCOPE}" in
     skip)
-      printf -- "--local-test --domain %s" "$(quote "${DOMAIN}")"
+      printf -- "--local-test --domain %s %s" "$(quote "${DOMAIN}")" "${common}"
       ;;
     staging|production)
-      printf -- "--domain %s" "$(quote "${DOMAIN}")"
+      printf -- "--domain %s %s" "$(quote "${DOMAIN}")" "${common}"
       ;;
   esac
 }
@@ -253,8 +314,8 @@ run_app_smoke() {
   local report_path="$2"
   local url
   local deployment_mode
-  local smoke_url
   local smoke_host
+  local smoke_port
 
   if [[ "${APP_SMOKE}" != "1" ]]; then
     log "${cycle}: app smoke skipped (set G7_OPS_APP_SMOKE=1 to enable)"
@@ -295,7 +356,11 @@ PY
     fi
     capture_remote "${cycle}-app-smoke" "curl -fsSL --max-time 15 --resolve $(quote "${smoke_host}:${smoke_port}:127.0.0.1") $(quote "${url}") >/dev/null"
   else
-    capture_remote "${cycle}-app-smoke" "curl -fsSL --max-time 15 $(quote "${url}") >/dev/null"
+    if [[ "${CERTBOT_SCOPE}" == "staging" ]]; then
+      capture_remote "${cycle}-app-smoke" "curl -kfsSL --max-time 15 $(quote "${url}") >/dev/null"
+    else
+      capture_remote "${cycle}-app-smoke" "curl -fsSL --max-time 15 $(quote "${url}") >/dev/null"
+    fi
   fi
 }
 
@@ -323,24 +388,22 @@ cleanup_previous_state() {
   remote_bin_q="$(quote "${REMOTE_BIN}")"
 
   log "cleaning previous installer state if present"
-  capture_remote "pre-clean" "if test -x ${remote_bin_q}; then ${SUDO} ${remote_bin_q} rollback --yes >/tmp/g7-ops-pre-rollback.log 2>&1 || true; ${SUDO} ${remote_bin_q} reset --yes >/tmp/g7-ops-pre-reset.log 2>&1 || true; fi"
+  capture_remote "pre-clean" "if test -x ${remote_bin_q}; then ${SUDO} ${remote_bin_q} rollback --yes >/tmp/g7-ops-pre-rollback.log 2>&1; rollback_status=\$?; ${SUDO} ${remote_bin_q} reset --yes >/tmp/g7-ops-pre-reset.log 2>&1; reset_status=\$?; printf 'rollback_status=%s reset_status=%s\\n' \"\${rollback_status}\" \"\${reset_status}\"; cat /tmp/g7-ops-pre-rollback.log /tmp/g7-ops-pre-reset.log; fi; true"
 }
 
 run_install_cycle() {
   local cycle="$1"
   local remote_bin_q
-  local domain_q
   local doctor_before
   local install_output
   local doctor_after_install
   local doctor_after_reset
   local report_json
-  local rollback_dry_run
-  local rollback_output
-  local doctor_after_rollback
   local reset_dry_run_output
   local report_path
   local package_list_path
+  local certificate_present="no"
+  local site_user
   local args
   local env_prefix
 
@@ -377,6 +440,14 @@ run_install_cycle() {
     report_json="$(sudo_capture "${cycle}-report-json" "cat /var/log/g7-installer/report.json")"
     printf '%s\n' "${report_json}" >"${report_path}"
     write_new_package_list "${report_path}" "${package_list_path}"
+    site_user="$(python3 - "${report_path}" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    print(json.load(handle).get("site_user") or "")
+PY
+)"
+    certificate_present="$(sudo_capture "${cycle}-certificate-before-reset" "if test -d $(quote "/etc/letsencrypt/live/${DOMAIN}"); then echo yes; else echo no; fi")"
   fi
 
   if step_enabled report-contract; then
@@ -421,11 +492,16 @@ run_install_cycle() {
       reset_output="$(sudo_capture "${cycle}-reset" "${remote_bin_q} reset --yes")"
       assert_contains "${cycle} reset" "${reset_output}" "G7 Installer Reset"
       assert_contains "${cycle} reset actions" "${reset_output}" "actions:"
+      assert_contains "${cycle} database reset" "${reset_output}" " database -"
+      assert_contains "${cycle} account reset" "${reset_output}" "account:${site_user}"
       while IFS= read -r package; do
         [[ -n "${package}" ]] || continue
         assert_not_installed "${cycle}" "${package}"
       done <"${package_list_path}"
-      assert_installer_paths_absent "${cycle}"
+      assert_installer_resources_absent "${cycle}" "${report_path}"
+      if [[ "${certificate_present}" == "yes" ]]; then
+        sudo_capture "${cycle}-certificate-preserved" "test -d $(quote "/etc/letsencrypt/live/${DOMAIN}")"
+      fi
     else
       log "${cycle}: reset skipped"
     fi
@@ -449,6 +525,7 @@ need_local python3
 mkdir -p "${REPORT_DIR}"
 log "writing artifacts to ${REPORT_DIR}"
 log "steps: ${STEPS}"
+log "profile: ${APP_PROFILE}; web: ${WEB_SERVER}; PHP: ${PHP_VERSION}/${PHP_SOURCE}; DB: ${DATABASE}"
 log "certbot scope: ${CERTBOT_SCOPE}; app smoke: ${APP_SMOKE}; pre-clean: ${PRE_CLEAN}"
 
 capture_remote "host-baseline" "uname -a; cat /etc/os-release; id"

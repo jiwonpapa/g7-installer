@@ -1,0 +1,5 @@
+* @jiwonpapa
+/.github/ @jiwonpapa
+/scripts/ @jiwonpapa
+/crates/g7-core/src/commands/reset.rs @jiwonpapa
+/crates/g7-core/src/commands/rollback.rs @jiwonpapa

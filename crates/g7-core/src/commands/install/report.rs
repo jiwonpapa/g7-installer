@@ -239,7 +239,32 @@ pub(super) fn persist_progress(
         REPORT_PATH,
         &report_content(plan, &state.phase, summary, problem)?,
     )?;
+    append_phase_log(progress.paths, &state.phase, problem.is_some())?;
     Ok(())
+}
+
+pub(super) fn append_phase_log(paths: &InstallPaths, phase: &str, failed: bool) -> Result<()> {
+    let path = paths.resolve(LOG_PATH);
+    let mut file = OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .map_err(|source| Error::FileWriteFailed {
+            path: LOG_PATH.to_string(),
+            source,
+        })?;
+    writeln!(
+        file,
+        "phase={phase} result={}",
+        if failed { "failed" } else { "recorded" }
+    )
+    .map_err(|source| Error::FileWriteFailed {
+        path: LOG_PATH.to_string(),
+        source,
+    })?;
+    file.sync_data().map_err(|source| Error::FileWriteFailed {
+        path: LOG_PATH.to_string(),
+        source,
+    })
 }
 
 pub(super) fn random_hex_secret() -> Result<String> {
@@ -370,6 +395,7 @@ pub(super) fn report_content(
     problem: Option<&str>,
 ) -> Result<String> {
     let mut value = serde_json::Map::new();
+    value.insert("schema_version".to_string(), serde_json::json!(1));
     value.insert("version".to_string(), serde_json::json!(1));
     value.insert("domain".to_string(), serde_json::json!(&plan.domain));
     value.insert("phase".to_string(), serde_json::json!(phase));

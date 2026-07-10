@@ -9,6 +9,7 @@ pub const LIB_DIR: &str = "/var/lib/g7-installer";
 pub const LOG_DIR: &str = "/var/log/g7-installer";
 pub const BACKUP_DIR: &str = "/var/backups/g7-installer";
 pub const LOG_PATH: &str = "/var/log/g7-installer/install.log";
+pub const COMMAND_AUDIT_LOG_PATH: &str = g7_system::command::COMMAND_AUDIT_LOG_PATH;
 pub const REPORT_PATH: &str = "/var/log/g7-installer/report.json";
 pub const ROLLBACK_PATH: &str = "/var/lib/g7-installer/rollback.json";
 pub const BACKUP_MANIFEST_PATH: &str = "/var/backups/g7-installer/manifest.json";

@@ -8,7 +8,9 @@ mod wordpress;
 use gnuboard7::*;
 use laravel::*;
 use runtime::*;
-pub(super) use runtime::{app_runtime_unit_names, app_writable_paths, systemd_unit_path};
+pub(super) use runtime::{
+    app_runtime_unit_names, app_writable_paths, read_database_password, systemd_unit_path,
+};
 use wordpress::*;
 
 pub(super) trait AppInstaller {

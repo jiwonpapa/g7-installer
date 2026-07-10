@@ -4,6 +4,9 @@
 //! `g7_core::commands::plan`. Do not add CLI-only defaults here; every server
 //! installation default must live in `plan.rs` first.
 
+#![deny(rustdoc::bare_urls)]
+#![deny(rustdoc::broken_intra_doc_links)]
+
 use clap::{Parser, Subcommand};
 use g7_core::commands::{
     DoctorCheckStatus, doctor, install, logs, plan, reset, rollback, self_update, status, update,
@@ -180,6 +183,8 @@ enum Command {
     },
     /// Show installed G7 and service status.
     Status,
+    /// Resume a previously interrupted install from a safe post-database phase.
+    Resume,
     /// Show installer log location.
     Logs,
     /// Remove installer-created app, DB, account, services, packages, and metadata for reinstall.
@@ -341,6 +346,9 @@ async fn main() -> Result<()> {
             );
         }
         Command::Status => print_status(status::read()),
+        Command::Resume => {
+            print_install(install::resume().map_err(miette::Report::new)?);
+        }
         Command::Logs => print_logs(logs::location()),
         Command::Reset { yes, dry_run } => {
             print_reset(reset::run(yes, dry_run).map_err(miette::Report::new)?);
@@ -552,9 +560,20 @@ pub(crate) fn format_plan(plan: &plan::InstallPlan) -> String {
 fn print_status(status: status::InstallerStatus) {
     println!("G7 Installer Status");
     println!("installed: {}", status.installed);
+    println!("domain: {}", status.domain.as_deref().unwrap_or("-"));
+    println!(
+        "phase: {}",
+        status.phase.as_deref().unwrap_or("not-started")
+    );
 
     for component in status.components {
         println!("- {}: {}", component.name, component.state);
+    }
+    if !status.problems.is_empty() {
+        println!("problems:");
+        for problem in status.problems {
+            println!("- {problem}");
+        }
     }
 }
 
@@ -634,7 +653,11 @@ fn print_install_checks(title: &str, checks: &[install::InstallCheck]) {
 }
 
 fn print_logs(location: logs::LogLocation) {
-    println!("{}", location.path.display());
+    println!("phase_log: {}", location.path.display());
+    println!(
+        "command_audit_log: {}",
+        location.command_audit_path.display()
+    );
 }
 
 fn print_reset(report: reset::ResetReport) {

@@ -1,3 +1,8 @@
+//! System adapters for apt, web servers, PHP, DB, network, and service checks.
+
+#![deny(rustdoc::bare_urls)]
+#![deny(rustdoc::broken_intra_doc_links)]
+
 pub mod account;
 pub mod apache;
 pub mod app;

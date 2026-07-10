@@ -253,12 +253,12 @@ test("plan route auto-generates a review after doctor pass", async ({ page }) =>
     await expect(page.locator('input[name="app_package"][value="laravel"]')).toHaveCount(0);
     await expect(page.locator('input[name="app_package"][value="laravel-octane"]')).toHaveCount(0);
     await expect(page.locator('select[name="web_server"] option[value="frankenphp"]')).toHaveCount(0);
-    await page.fill("#site-password", "0808dong!!");
-    await page.fill("#site-password-confirm", "0808dong!!");
+    await page.fill("#site-password", "Test-only_9x!");
+    await page.fill("#site-password-confirm", "Test-only_9x!");
     await page.fill("#database-name-input", "g7devops");
     await page.fill("#database-user-input", "g7devops");
-    await page.fill("#database-password", "0808dong!!");
-    await page.fill("#database-password-confirm", "0808dong!!");
+    await page.fill("#database-password", "Test-only_9x!");
+    await page.fill("#database-password-confirm", "Test-only_9x!");
     await page.getByRole("button", { name: "다음: 사양 확정" }).last().click();
 
     await expect(page).toHaveURL(/\/setup\/plan/);

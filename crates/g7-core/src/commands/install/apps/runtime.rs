@@ -516,7 +516,9 @@ pub(in crate::commands::install) fn app_writable_paths(
     }
 }
 
-pub(super) fn read_database_password(paths: &InstallPaths) -> Result<Option<String>> {
+pub(in crate::commands::install) fn read_database_password(
+    paths: &InstallPaths,
+) -> Result<Option<String>> {
     let target = paths.resolve(SECRETS_PATH);
     let content = match fs::read_to_string(&target) {
         Ok(content) => content,

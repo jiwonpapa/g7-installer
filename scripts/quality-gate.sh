@@ -9,13 +9,17 @@ cd "${ROOT_DIR}"
 echo "[quality-gate] quick gate"
 bash scripts/quick-gate.sh
 echo "[quality-gate] cargo test"
-cargo test
+cargo test --locked --workspace
 echo "[quality-gate] cargo clippy"
-cargo clippy --all-targets -- -D warnings
-echo "[quality-gate] cargo doc"
-cargo doc --no-deps
+cargo clippy --locked --workspace --all-targets -- -D warnings
+echo "[quality-gate] rustdoc gate"
+bash scripts/rustdoc-gate.sh
+echo "[quality-gate] cargo audit"
+cargo audit
+echo "[quality-gate] cargo deny"
+cargo deny check
 echo "[quality-gate] cargo llvm-cov"
-cargo llvm-cov --workspace --all-targets --summary-only --fail-under-lines "${COVERAGE_FLOOR}"
+cargo llvm-cov --locked --workspace --all-targets --summary-only --fail-under-lines "${COVERAGE_FLOOR}"
 
 echo "[quality-gate] web build"
 (cd web && bun install --frozen-lockfile && (bun run build || npm run build))

@@ -84,12 +84,12 @@ fn nginx_check(result: Result<ServiceActivity, SystemProbeError>) -> DoctorCheck
         },
         Ok(ServiceActivity::Unknown) => DoctorCheck {
             name: "nginx-service",
-            status: DoctorCheckStatus::Warn,
+            status: DoctorCheckStatus::Pending,
             message: "Could not determine Nginx service state.".to_string(),
         },
         Err(err) => DoctorCheck {
             name: "nginx-service",
-            status: DoctorCheckStatus::Warn,
+            status: DoctorCheckStatus::Pending,
             message: format!("Could not inspect Nginx service: {err}"),
         },
     }
@@ -159,12 +159,12 @@ fn apache_check(result: Result<ServiceActivity, SystemProbeError>) -> DoctorChec
         },
         Ok(ServiceActivity::Unknown) => DoctorCheck {
             name: "apache-service",
-            status: DoctorCheckStatus::Warn,
+            status: DoctorCheckStatus::Pending,
             message: "Could not determine Apache service state.".to_string(),
         },
         Err(err) => DoctorCheck {
             name: "apache-service",
-            status: DoctorCheckStatus::Warn,
+            status: DoctorCheckStatus::Pending,
             message: format!("Could not inspect Apache service: {err}"),
         },
     }
@@ -184,12 +184,12 @@ fn port_check(port: u16, result: Result<PortStatus, SystemProbeError>) -> Doctor
         },
         Ok(PortStatus::Unknown) => DoctorCheck {
             name: port_check_name(port),
-            status: DoctorCheckStatus::Warn,
+            status: DoctorCheckStatus::Pending,
             message: format!("Could not determine TCP port {port} state."),
         },
         Err(err) => DoctorCheck {
             name: port_check_name(port),
-            status: DoctorCheckStatus::Warn,
+            status: DoctorCheckStatus::Pending,
             message: format!("Could not inspect TCP port {port}: {err}"),
         },
     }
@@ -216,7 +216,7 @@ fn nginx_config_check<R: CommandRunner>(probe: &SystemProbe<R>) -> DoctorCheck {
             Err(err) => {
                 return DoctorCheck {
                     name: "nginx-config",
-                    status: DoctorCheckStatus::Warn,
+                    status: DoctorCheckStatus::Pending,
                     message: format!("Could not inspect {}: {err}", path.display()),
                 };
             }
@@ -255,7 +255,7 @@ fn apache_config_check<R: CommandRunner>(probe: &SystemProbe<R>) -> DoctorCheck 
             Err(err) => {
                 return DoctorCheck {
                     name: "apache-config",
-                    status: DoctorCheckStatus::Warn,
+                    status: DoctorCheckStatus::Pending,
                     message: format!("Could not inspect {}: {err}", path.display()),
                 };
             }
@@ -318,9 +318,11 @@ fn installer_state_check<R: CommandRunner>(probe: &SystemProbe<R>) -> DoctorChec
 fn g7_owned_files_check<R: CommandRunner>(probe: &SystemProbe<R>) -> DoctorCheck {
     let owned_files_path = Path::new(OWNED_FILES_PATH);
     let known_paths = [
+        Path::new("/etc/g7-installer"),
         Path::new("/etc/g7-installer/config.toml"),
         Path::new("/var/lib/g7-installer"),
         Path::new("/var/log/g7-installer"),
+        Path::new("/var/backups/g7-installer"),
         Path::new("/etc/nginx/sites-available/g7.conf"),
         Path::new("/etc/nginx/sites-enabled/g7.conf"),
         Path::new("/etc/apache2/sites-available/g7.conf"),
@@ -332,9 +334,9 @@ fn g7_owned_files_check<R: CommandRunner>(probe: &SystemProbe<R>) -> DoctorCheck
     if probe.path_exists(owned_files_path) {
         return DoctorCheck {
             name: "owned-files",
-            status: DoctorCheckStatus::Warn,
+            status: DoctorCheckStatus::Fail,
             message: format!(
-                "{OWNED_FILES_PATH} exists. Existing installer ownership metadata was found."
+                "{OWNED_FILES_PATH} exists. Use status/resume/reset instead of a fresh install."
             ),
         };
     }
@@ -398,9 +400,10 @@ fn plural_y(count: usize) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{DoctorCheckStatus, run_with_probe};
+    use super::{DoctorCheckStatus, port_check, run_with_probe};
     use g7_system::SystemProbe;
     use g7_system::command::{CommandOutput, FakeCommandRunner};
+    use g7_system::port::PortStatus;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -538,6 +541,34 @@ mod tests {
             check.name == "owned-files" && check.status == DoctorCheckStatus::Fail
         }));
         assert!(!report.install_allowed);
+        Ok(())
+    }
+
+    #[test]
+    fn doctor_blocks_when_critical_port_state_is_unknown() {
+        let check = port_check(80, Ok(PortStatus::Unknown));
+
+        assert_eq!(check.status, DoctorCheckStatus::Pending);
+    }
+
+    #[test]
+    fn doctor_blocks_when_owned_metadata_exists_without_state()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let os_release_path = write_temp_os_release()?;
+        let fs_root = create_temp_fs_root()?;
+        let metadata = fs_root.join("var/lib/g7-installer/owned-files.json");
+        fs::create_dir_all(metadata.parent().expect("metadata parent"))?;
+        fs::write(&metadata, "{\"version\":1,\"files\":[]}")?;
+        let probe = clean_probe(&os_release_path, &fs_root, "0\n")?;
+
+        let report = run_with_probe(&probe);
+
+        fs::remove_file(os_release_path)?;
+        fs::remove_dir_all(fs_root)?;
+        assert!(!report.install_allowed);
+        assert!(report.checks.iter().any(|check| {
+            check.name == "owned-files" && check.status == DoctorCheckStatus::Fail
+        }));
         Ok(())
     }
 

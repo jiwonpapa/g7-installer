@@ -1,0 +1,91 @@
+name: disposable VPS ops harness
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: DNS domain assigned to the disposable VPS
+        required: true
+        type: string
+      app:
+        description: Application profile
+        required: true
+        default: gnuboard7
+        type: choice
+        options: [gnuboard7, wordpress, laravel]
+      web_server:
+        description: Web server
+        required: true
+        default: nginx
+        type: choice
+        options: [nginx, apache]
+      certbot_scope:
+        description: Certificate test scope
+        required: true
+        default: staging
+        type: choice
+        options: [staging, skip]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: disposable-vps-ops-harness
+  cancel-in-progress: false
+
+jobs:
+  ops-harness:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: disposable-vps
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust target
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Configure approved SSH target
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.G7_OPS_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.G7_OPS_SSH_KNOWN_HOSTS }}
+          SSH_HOST: ${{ secrets.G7_OPS_HOST }}
+          SSH_USER: ${{ secrets.G7_OPS_USER }}
+        run: |
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "${SSH_PRIVATE_KEY}" > ~/.ssh/g7-ops
+          chmod 0600 ~/.ssh/g7-ops
+          printf '%s\n' "${SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 0600 ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host g7-ops
+            HostName ${SSH_HOST}
+            User ${SSH_USER}
+            IdentityFile ~/.ssh/g7-ops
+            IdentitiesOnly yes
+            BatchMode yes
+          EOF
+          chmod 0600 ~/.ssh/config
+
+      - name: Run destructive disposable VPS proof
+        env:
+          G7_OPS_HOST: g7-ops
+          G7_OPS_DOMAIN: ${{ inputs.domain }}
+          G7_OPS_APP: ${{ inputs.app }}
+          G7_OPS_WEB_SERVER: ${{ inputs.web_server }}
+          G7_OPS_CERTBOT_SCOPE: ${{ inputs.certbot_scope }}
+          G7_OPS_ALLOW_LOCAL_TEST: ${{ inputs.certbot_scope == 'skip' && '1' || '0' }}
+          G7_OPS_SOURCE: local
+          G7_OPS_CONFIRM_DISPOSABLE: "1"
+          G7_OPS_APP_SMOKE: "1"
+        run: bash scripts/ops-harness.sh
+
+      - name: Upload harness evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: disposable-vps-ops-evidence
+          path: target/ops-harness/
+          if-no-files-found: warn

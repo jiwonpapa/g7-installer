@@ -52,6 +52,8 @@ cleanup() {
 
 if [[ "$(id -u)" != "0" ]]; then
   echo "install requires root. Run with: curl -fsSL <bootstrap-url> | sudo bash" >&2
+  echo "If sudo asks for a password, enter it in the SSH terminal." >&2
+  echo "If sudo is unavailable, log in as root or run su - from the provider console, then run the bootstrap command." >&2
   exit 1
 fi
 
@@ -93,5 +95,5 @@ echo "Installed ${BIN_NAME} to ${INSTALL_DIR}/${BIN_NAME}"
 "${INSTALL_DIR}/${BIN_NAME}" --version
 echo
 echo "Next:"
-echo "  sudo ${BIN_NAME} setup"
+echo "  sudo ${BIN_NAME} setup --domain example.com"
 echo "  ${BIN_NAME} doctor"

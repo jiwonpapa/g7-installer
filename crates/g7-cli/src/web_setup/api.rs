@@ -336,7 +336,10 @@ pub(super) struct RollbackApiAction {
 pub(super) struct StatusApiReport {
     pub(super) installed: bool,
     pub(super) install_running: bool,
+    pub(super) domain: Option<String>,
+    pub(super) phase: Option<String>,
     pub(super) components: Vec<ComponentApiStatus>,
+    pub(super) problems: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -351,8 +354,8 @@ pub(super) struct RecoveryApiStatus {
 
 #[derive(Debug, Serialize)]
 pub(super) struct ComponentApiStatus {
-    pub(super) name: &'static str,
-    pub(super) state: &'static str,
+    pub(super) name: String,
+    pub(super) state: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -529,6 +532,14 @@ pub(super) async fn api_provision_action(
         ));
     }
 
+    let _operation_lock = g7_state::lock::InstallerLock::acquire(
+        std::path::Path::new(g7_state::lock::LOCK_PATH),
+        "provision",
+    )
+    .map_err(|error| {
+        ApiError::conflict(format!("another installer operation is running: {error}"))
+    })?;
+
     let report = read_saved_report_json()?;
     emit_log(&state, format!("후속 작업 실행 중: {}", request.action));
     let action_report = run_provision_action(&request.action, &report)?;
@@ -647,6 +658,8 @@ pub(super) async fn api_status(
     Ok(Json(StatusApiReport {
         installed: current.installed,
         install_running: state.install_running.load(Ordering::SeqCst),
+        domain: current.domain,
+        phase: current.phase,
         components: current
             .components
             .into_iter()
@@ -655,6 +668,7 @@ pub(super) async fn api_status(
                 state: component.state,
             })
             .collect(),
+        problems: current.problems,
     }))
 }
 

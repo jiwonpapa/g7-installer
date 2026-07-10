@@ -16,6 +16,8 @@ EOF
 fi
 
 if [[ "${G7_SMOKE_RESET:-0}" == "1" ]]; then
+  # The configured command is intentionally expanded locally and sent as one remote command.
+  # shellcheck disable=SC2029
   ssh "${RESET_HOST}" "${RESET_COMMAND}"
 fi
 

@@ -1,12 +1,12 @@
 # G7 Installer 개발 헌법 초안
 
 이 문서는 G7 Installer를 구현할 때 모든 코드 변경이 따라야 하는 기준이다.
-G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 root 권한 CLI이므로,
+G7 Installer는 새 Ubuntu VPS에 그누보드7/WordPress 운영 환경을 설치하는 root 권한 CLI이므로,
 편의성보다 안전성, 재현성, 복구 가능성을 우선한다.
 
 ## 1. 목적 우선 원칙
 
-- 이 프로젝트의 목적은 초보 사용자가 새 VPS에서 최소 명령으로 G7 설치를 완료하게 하는 것이다.
+- 이 프로젝트의 목적은 초보 사용자가 새 VPS에서 최소 명령으로 G7/WordPress 설치 기반을 완료하게 하는 것이다.
 - 기존 운영 서버를 자동으로 고치거나 병합하지 않는다.
 - 설치기는 G7 본체를 수정하지 않는다.
 - 설치기는 서버 자동화 도구이며, CMS 기능을 구현하지 않는다.
@@ -19,7 +19,7 @@ G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 ro
 - 변경 작업 전에는 반드시 plan을 만든다.
 - 변경 작업 후에는 반드시 state를 기록한다.
 - 중간 실패 후 재실행해도 서버를 더 망가뜨리면 안 된다.
-- `install`, `update`, `self-update` 외 명령은 가능한 읽기 전용으로 유지한다.
+- 서버를 변경하지 않는 명령은 가능한 읽기 전용으로 유지한다.
 
 ## 3. Rust 코드 원칙
 
@@ -27,6 +27,7 @@ G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 ro
 - 서버에는 Rust toolchain을 설치하지 않는다.
 - 배포물은 static binary를 목표로 한다.
 - 코드가 정본 문서다. 설치 정책, 기본값, 보안 기준은 먼저 Rust 코드와 rustdoc 주석에 존재해야 한다.
+- rustdoc는 `scripts/rustdoc-gate.sh`로 강제한다. 이 게이트는 `RUSTDOCFLAGS="-D warnings"`와 `--document-private-items`로 실행되어 rustdoc 경고를 실패로 취급한다.
 - `plan.rs`와 `app_profile.rs`는 설치 범위, 기본값, 앱 요구사항, 보안 정책, 파일/서비스/포트 계획의 SSOT이다. README/SPEC/웹 UI는 이를 설명하거나 표시만 한다.
 - 새 명령, 새 서버 변경, 새 보안 정책을 추가할 때 관련 Rust 모듈 상단에 `//!` module doc을 먼저 추가하거나 갱신한다.
 - `unwrap`, `expect`, `panic`은 금지한다.
@@ -54,8 +55,10 @@ G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 ro
 
 ## 6. 설치 상태 원칙
 
+- install/resume/reset/rollback/provision action은 동일한 OS 배타 잠금을 사용한다.
+- 상태와 소유권 메타데이터는 임시 파일 fsync, rename, 상위 디렉터리 fsync 순서로 원자 저장한다.
 - 설치 단계는 `state.json`에 기록한다.
-- 같은 domain 재실행은 이어서 진행할 수 있어야 한다.
+- 자동 재개는 DB 설정 이후 TLS/앱 단계처럼 검증된 경계에서만 허용한다.
 - 다른 domain 재실행은 중단해야 한다.
 - lock이 남아 있으면 stale 여부를 판단하고 사용자에게 다음 조치를 알려야 한다.
 - 완료된 step은 idempotent해야 한다.
@@ -82,8 +85,8 @@ G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 ro
 - 오류 메시지는 해결 가능한 다음 명령을 포함한다.
 - plan은 실제 변경될 패키지, 파일, 서비스, 포트를 보여준다.
 - install 완료 출력은 domain, 설치 경로, HTTPS 상태, 다음 접속 URL을 포함한다.
-- PHP는 기본 8.3으로 계획하고, 8.5는 apt 소스에 있을 때만 명시 옵션으로 사용한다.
-- 앱 선택은 `AppProfile`을 통해 WordPress/G7/Laravel 요구사항, 문서 루트, 후속 설치 단계를 드러내야 한다.
+- PHP는 기본 8.5로 계획하고, 8.5는 Ondrej PHP PPA, 8.3은 Ubuntu 기본 apt 소스를 사용한다.
+- 공개 앱 선택은 G7/WordPress를 기준으로 한다. 내부 실험 프로필이 있더라도 사용자 문서와 공개 UI에서는 지원 범위를 과장하지 않는다.
 - www canonical 정책은 설치 전 plan에 반드시 드러나야 한다.
 - Redis, 메일 발송, Certbot 자동갱신, DNS/IP 검증은 전체 기능 설치 프로필의 일부로 본다.
 - SMTP 비밀번호/API key 같은 비밀값은 CLI 인자와 로그에 남기지 않는다.
@@ -98,14 +101,17 @@ G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 ro
 - state resume은 중간 실패 case를 포함해 테스트한다.
 - 외부 명령은 fake runner로 통합 테스트한다.
 - 릴리스 전 Ubuntu 24.04 fresh VPS 또는 VM smoke test를 통과해야 한다.
+- reset/rollback은 인증서, DB, 사이트 계정, 웹루트, systemd, apt purge 보존·삭제 golden 테스트를 가진다.
+- 실제 VPS 하네스는 staging 인증서, 앱 스모크, 리포트 계약, reset, fresh doctor를 분리 증명한다.
 
 ## 11. 릴리스 원칙
 
 - release artifact는 target triple별로 만든다.
 - `checksums.txt`는 release artifact와 함께 배포한다.
+- 릴리스에는 CycloneDX SBOM과 GitHub build provenance를 함께 배포한다.
 - bootstrap은 latest release 감지, checksum 검증, `/usr/local/bin/g7inst` 설치만 담당한다.
 - `g7inst --version`은 설치기 버전과 build target을 출력한다.
-- self-update는 현재 바이너리 교체 실패 시 복구 가능해야 한다.
+- self-update를 공개 기능으로 구현할 때는 현재 바이너리 교체 실패 시 복구 가능해야 한다.
 
 ## 12. 개발 완료 기준
 
@@ -113,7 +119,9 @@ G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 ro
 
 - `cargo fmt --check` 통과
 - `cargo clippy --all-targets -- -D warnings` 통과
+- `bash scripts/rustdoc-gate.sh` 통과
 - `cargo test` 통과
+- `cargo audit`와 `cargo deny check` 통과
 - 관련 명령의 plan, state, log 동작 확인
 - root 권한 변경 작업은 fake runner 또는 VM smoke로 증명
 - 문서와 실제 동작이 어긋나지 않음

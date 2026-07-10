@@ -89,7 +89,7 @@ mod tests {
 
         assert!(!user_exists(&runner, "g7")?);
         create_login_user(&runner, "g7")?;
-        set_login_password(&runner, "g7", "0808dong!!")?;
+        set_login_password(&runner, "g7", "Test-only_9x!")?;
         chown_recursive(&runner, "g7:www-data", "/home/g7/public_html")?;
         chmod_recursive(&runner, "0755", "/home/g7/public_html")?;
         chmod_path(&runner, "0711", "/home/g7")?;
@@ -100,7 +100,7 @@ mod tests {
         assert_eq!(recorded[1].program, OsString::from("useradd"));
         assert_eq!(recorded[2].program, OsString::from("chpasswd"));
         assert_eq!(recorded[2].args, Vec::<OsString>::new());
-        assert_eq!(recorded[2].stdin, Some(b"g7:0808dong!!\n".to_vec()));
+        assert_eq!(recorded[2].stdin, Some(b"g7:Test-only_9x!\n".to_vec()));
         assert_eq!(recorded[3].program, OsString::from("chown"));
         assert_eq!(recorded[4].program, OsString::from("chmod"));
         assert_eq!(recorded[5].program, OsString::from("chmod"));

@@ -228,6 +228,10 @@ pub(super) fn files(
         ),
         PlanFile::new("/var/log/g7-installer/install.log", "create/append"),
         PlanFile::new(
+            "/var/log/g7-installer/commands.jsonl",
+            "append redacted external command audit records",
+        ),
+        PlanFile::new(
             "/var/log/g7-installer/report.json",
             "create/update problem report",
         ),

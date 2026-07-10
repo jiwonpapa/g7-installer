@@ -1,9 +1,17 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::ffi::OsString;
+use std::fs::OpenOptions;
 use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+use serde::Serialize;
+
+pub const COMMAND_AUDIT_LOG_PATH: &str = "/var/log/g7-installer/commands.jsonl";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandSpec {
@@ -79,6 +87,8 @@ pub struct RealCommandRunner;
 
 impl CommandRunner for RealCommandRunner {
     fn run(&self, spec: &CommandSpec) -> Result<CommandOutput, CommandError> {
+        let started = Instant::now();
+        append_audit_entry(AuditEntry::started(spec));
         let mut command = Command::new(&spec.program);
         command.args(&spec.args);
         if let Some(cwd) = &spec.cwd {
@@ -121,12 +131,160 @@ impl CommandRunner for RealCommandRunner {
             })?
         };
 
-        Ok(CommandOutput {
+        let output = CommandOutput {
             status: output.status.code().map_or(128, |code| code),
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        })
+        };
+        append_audit_entry(AuditEntry::finished(
+            spec,
+            &output,
+            started.elapsed().as_millis(),
+        ));
+        Ok(output)
     }
+}
+
+#[derive(Debug, Serialize)]
+struct AuditEntry {
+    timestamp_unix_ms: u128,
+    event: &'static str,
+    program: String,
+    args: Vec<String>,
+    cwd: Option<String>,
+    status: Option<i32>,
+    elapsed_ms: Option<u128>,
+    stdout: Option<String>,
+    stderr: Option<String>,
+}
+
+impl AuditEntry {
+    fn started(spec: &CommandSpec) -> Self {
+        Self::new(spec, "start", None, None, None, None)
+    }
+
+    fn finished(spec: &CommandSpec, output: &CommandOutput, elapsed_ms: u128) -> Self {
+        Self::new(
+            spec,
+            "finish",
+            Some(output.status),
+            Some(elapsed_ms),
+            Some(&output.stdout),
+            Some(&output.stderr),
+        )
+    }
+
+    fn new(
+        spec: &CommandSpec,
+        event: &'static str,
+        status: Option<i32>,
+        elapsed_ms: Option<u128>,
+        stdout: Option<&str>,
+        stderr: Option<&str>,
+    ) -> Self {
+        Self {
+            timestamp_unix_ms: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |duration| duration.as_millis()),
+            event,
+            program: spec.program.to_string_lossy().into_owned(),
+            args: redacted_args(&spec.args),
+            cwd: spec
+                .cwd
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned()),
+            status,
+            elapsed_ms,
+            stdout: stdout.map(redacted_excerpt),
+            stderr: stderr.map(redacted_excerpt),
+        }
+    }
+}
+
+fn append_audit_entry(entry: AuditEntry) {
+    let path = std::path::Path::new(COMMAND_AUDIT_LOG_PATH);
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    if !parent.exists() {
+        return;
+    }
+
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let Ok(mut file) = options.open(path) else {
+        return;
+    };
+    let Ok(payload) = serde_json::to_vec(&entry) else {
+        return;
+    };
+    if file.write_all(&payload).is_ok() && file.write_all(b"\n").is_ok() {
+        let _ = file.sync_data();
+    }
+}
+
+fn redacted_args(args: &[OsString]) -> Vec<String> {
+    let mut redact_next = false;
+    args.iter()
+        .map(|arg| {
+            let value = arg.to_string_lossy();
+            if redact_next {
+                redact_next = false;
+                return "******".to_string();
+            }
+            let lower = value.to_ascii_lowercase();
+            if is_sensitive_key(&lower) {
+                if let Some((key, _)) = value.split_once('=') {
+                    return format!("{key}=******");
+                }
+                redact_next = true;
+            }
+            value.into_owned()
+        })
+        .collect()
+}
+
+fn redacted_excerpt(value: &str) -> String {
+    let mut output = String::new();
+    for line in value.lines() {
+        let lower = line.to_ascii_lowercase();
+        let sanitized = if is_sensitive_key(&lower) {
+            line.split_once('=')
+                .or_else(|| line.split_once(':'))
+                .map_or_else(
+                    || "[redacted]".to_string(),
+                    |(key, _)| format!("{key}=******"),
+                )
+        } else {
+            line.to_string()
+        };
+        if !output.is_empty() {
+            output.push('\n');
+        }
+        output.push_str(&sanitized);
+        if output.chars().count() >= 2_000 {
+            output = output.chars().take(2_000).collect();
+            output.push_str("...");
+            break;
+        }
+    }
+    output
+}
+
+fn is_sensitive_key(value: &str) -> bool {
+    [
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "private_key",
+        "smtp_password",
+        "db_password",
+    ]
+    .iter()
+    .any(|key| value.contains(key))
 }
 
 #[derive(Debug, Default)]
@@ -186,7 +344,10 @@ fn display_os(value: &OsString) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{CommandOutput, CommandRunner, CommandSpec, FakeCommandRunner};
+    use super::{
+        CommandOutput, CommandRunner, CommandSpec, FakeCommandRunner, redacted_args,
+        redacted_excerpt,
+    };
     use std::ffi::OsString;
 
     #[test]
@@ -233,5 +394,22 @@ mod tests {
         assert_eq!(output.stdout, "ok\n");
         assert_eq!(runner.recorded(), vec![CommandSpec::new("true")]);
         Ok(())
+    }
+
+    #[test]
+    fn audit_redacts_secret_arguments_and_output() {
+        let args = vec![
+            OsString::from("--token"),
+            OsString::from("plain-secret"),
+            OsString::from("DB_PASSWORD=value"),
+        ];
+        assert_eq!(
+            redacted_args(&args),
+            vec!["--token", "******", "DB_PASSWORD=******"]
+        );
+        assert_eq!(
+            redacted_excerpt("ok\npassword=hunter2\nnext"),
+            "ok\npassword=******\nnext"
+        );
     }
 }

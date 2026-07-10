@@ -3,6 +3,8 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+use crate::atomic::atomic_write;
+
 pub const STATE_PATH: &str = "/var/lib/g7-installer/state.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,7 +86,7 @@ impl InstallerState {
 
 pub fn write_state_file(path: &Path, state: &InstallerState) -> io::Result<()> {
     let payload = serde_json::to_vec_pretty(state).map_err(io::Error::other)?;
-    fs::write(path, payload)
+    atomic_write(path, &payload)
 }
 
 pub fn read_state_file(path: &Path) -> io::Result<InstallerState> {

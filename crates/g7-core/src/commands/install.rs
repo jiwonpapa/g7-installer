@@ -26,12 +26,15 @@ use crate::commands::doctor::{self, DoctorCheckStatus};
 use crate::commands::plan;
 use crate::defaults::*;
 use crate::installer_paths::{
-    BACKUP_DIR, BACKUP_MANIFEST_PATH, CONFIG_PATH, ETC_DIR, LIB_DIR, LOCAL_HOSTS_PATH, LOG_DIR,
-    LOG_PATH, REPORT_PATH, ROLLBACK_PATH, SECRETS_PATH, SETUP_GUIDE_PATH,
+    BACKUP_DIR, BACKUP_MANIFEST_PATH, COMMAND_AUDIT_LOG_PATH, CONFIG_PATH, ETC_DIR, LIB_DIR,
+    LOCAL_HOSTS_PATH, LOG_DIR, LOG_PATH, REPORT_PATH, ROLLBACK_PATH, SECRETS_PATH,
+    SETUP_GUIDE_PATH,
 };
 use crate::{Error, Result};
-use g7_state::owned_files::{OWNED_FILES_PATH, OwnedFiles, write_owned_files};
-use g7_state::state::{InstallerPhase, InstallerState, STATE_PATH, write_state_file};
+use g7_state::owned_files::{OWNED_FILES_PATH, OwnedFiles, read_owned_files, write_owned_files};
+use g7_state::state::{
+    InstallerPhase, InstallerState, STATE_PATH, read_state_file, write_state_file,
+};
 use g7_system::SystemProbe;
 use g7_system::command::{CommandRunner, CommandSpec};
 use g7_system::database::DatabaseEngine;
@@ -49,7 +52,9 @@ mod site;
 mod tls;
 mod vhost;
 
-pub use orchestrator::{InstallPaths, run, run_with_probe_and_paths};
+pub use orchestrator::{
+    InstallPaths, resume, resume_with_probe_and_paths, run, run_with_probe_and_paths,
+};
 pub use report::{InstallCheck, InstallReport};
 
 use apps::*;

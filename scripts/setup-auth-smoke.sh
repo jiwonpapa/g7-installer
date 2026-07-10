@@ -45,7 +45,8 @@ reject_web_setup() {
   fi
 }
 
-need_web_setup "ensure_setup_runs_as_root"
+need_web_setup "ensure_setup_runs_as_root_or_reexec"
+need_web_setup "reexec_setup_with_sudo"
 need_web_setup "g7inst setup must be started with sudo/root"
 need_web_setup "Server account password input is not used in the web UI"
 need_web_setup "sudo-token"
@@ -62,7 +63,7 @@ if [[ "$(id -u)" == "0" ]]; then
 fi
 
 set +e
-output="$(cargo run -q -p g7-cli -- setup --domain example.com 2>&1)"
+output="$(G7INST_DISABLE_SUDO_REEXEC=1 cargo run -q -p g7-cli -- setup --domain example.com 2>&1)"
 status=$?
 set -e
 
