@@ -78,9 +78,7 @@ pub fn git_rev_parse_head<R: CommandRunner>(
     repo_dir: &str,
 ) -> Result<CommandOutput, CommandError> {
     runner.run(
-        &CommandSpec::new("git")
-            .arg("-C")
-            .arg(repo_dir)
+        &git_repo_command(repo_dir)
             .arg("rev-parse")
             .arg("--verify")
             .arg("HEAD"),
@@ -91,13 +89,7 @@ pub fn git_fsck_full<R: CommandRunner>(
     runner: &R,
     repo_dir: &str,
 ) -> Result<CommandOutput, CommandError> {
-    runner.run(
-        &CommandSpec::new("git")
-            .arg("-C")
-            .arg(repo_dir)
-            .arg("fsck")
-            .arg("--full"),
-    )
+    runner.run(&git_repo_command(repo_dir).arg("fsck").arg("--full"))
 }
 
 pub fn git_diff_index_clean<R: CommandRunner>(
@@ -105,9 +97,7 @@ pub fn git_diff_index_clean<R: CommandRunner>(
     repo_dir: &str,
 ) -> Result<CommandOutput, CommandError> {
     runner.run(
-        &CommandSpec::new("git")
-            .arg("-C")
-            .arg(repo_dir)
+        &git_repo_command(repo_dir)
             .arg("diff-index")
             .arg("--quiet")
             .arg("HEAD")
@@ -121,13 +111,19 @@ pub fn git_ls_files_error_unmatch<R: CommandRunner>(
     path: &str,
 ) -> Result<CommandOutput, CommandError> {
     runner.run(
-        &CommandSpec::new("git")
-            .arg("-C")
-            .arg(repo_dir)
+        &git_repo_command(repo_dir)
             .arg("ls-files")
             .arg("--error-unmatch")
             .arg(path),
     )
+}
+
+fn git_repo_command(repo_dir: &str) -> CommandSpec {
+    CommandSpec::new("git")
+        .arg("-c")
+        .arg(format!("safe.directory={repo_dir}"))
+        .arg("-C")
+        .arg(repo_dir)
 }
 
 pub fn copy_dir_contents<R: CommandRunner>(
@@ -296,6 +292,8 @@ mod tests {
         assert_eq!(
             recorded[0].args,
             vec![
+                OsString::from("-c"),
+                OsString::from("safe.directory=/tmp/g7"),
                 OsString::from("-C"),
                 OsString::from("/tmp/g7"),
                 OsString::from("rev-parse"),
@@ -306,6 +304,8 @@ mod tests {
         assert_eq!(
             recorded[1].args,
             vec![
+                OsString::from("-c"),
+                OsString::from("safe.directory=/tmp/g7"),
                 OsString::from("-C"),
                 OsString::from("/tmp/g7"),
                 OsString::from("fsck"),
@@ -315,6 +315,8 @@ mod tests {
         assert_eq!(
             recorded[2].args,
             vec![
+                OsString::from("-c"),
+                OsString::from("safe.directory=/tmp/g7"),
                 OsString::from("-C"),
                 OsString::from("/tmp/g7"),
                 OsString::from("diff-index"),
@@ -326,6 +328,8 @@ mod tests {
         assert_eq!(
             recorded[3].args,
             vec![
+                OsString::from("-c"),
+                OsString::from("safe.directory=/tmp/g7"),
                 OsString::from("-C"),
                 OsString::from("/tmp/g7"),
                 OsString::from("ls-files"),

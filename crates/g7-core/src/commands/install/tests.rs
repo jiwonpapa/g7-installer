@@ -178,7 +178,8 @@ fn install_writes_prepared_state_and_owned_files()
         .enumerate()
         .skip(app_copy_index + 1)
         .find(|(_, spec)| {
-            spec.display() == "git -C /home/g7/public_html diff-index --quiet HEAD --"
+            spec.display()
+                == "git -c safe.directory=/home/g7/public_html -C /home/g7/public_html diff-index --quiet HEAD --"
         })
         .map(|(index, _)| index)
         .ok_or_else(|| std::io::Error::other("missing final deployed Git check"))?;
