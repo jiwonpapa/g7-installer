@@ -1,7 +1,9 @@
+import { connectEventStream } from "/modules/event-stream.js";
+
 const state = {
   activeStep: "login",
   bootstrap: null,
-  socket: null,
+  eventStream: null,
   csrfToken: null,
   authenticated: false,
   doctorPassed: false,
@@ -21,6 +23,7 @@ const state = {
   planPackages: [],
   packageTicker: null,
   liveLogEntries: [],
+  resourceDefaultsApplied: false,
   theme: localStorage.getItem("g7inst-theme") || "light",
 };
 
@@ -42,6 +45,7 @@ const nodes = {
   templateAppStatus: document.querySelector("#template-app-status"),
   optionsPlanButtons: document.querySelectorAll('[data-view="options"] [data-next="plan"]'),
   mailMode: document.querySelector("#mail-mode"),
+  redisMode: document.querySelector('[name="redis"]'),
   databaseVersion: document.querySelector("#database-version"),
   smtpHost: document.querySelector("#smtp-host"),
   smtpPort: document.querySelector("#smtp-port"),
@@ -1217,9 +1221,9 @@ function refreshSitePasswordState(options = {}) {
   const combinedError = error || dbError || templateError;
   const hasInput = Boolean(payload.site_password || payload.site_password_confirm);
   const hasDbPasswordInput = Boolean(payload.database_password || payload.database_password_confirm);
-  const shouldShowStatus = Boolean(options.show || hasInput || state.activeStep === "options");
-  const shouldShowDbStatus = Boolean(options.show || dbIdentifierError || hasDbPasswordInput || state.activeStep === "options");
-  const shouldShowDbPasswordStatus = Boolean(options.show || hasDbPasswordInput || state.activeStep === "options");
+  const shouldShowStatus = Boolean(options.show || hasInput);
+  const shouldShowDbStatus = Boolean(options.show || hasDbPasswordInput);
+  const shouldShowDbPasswordStatus = Boolean(options.show || hasDbPasswordInput);
 
   if (nodes.sitePassword) {
     nodes.sitePassword.setCustomValidity(error || "");
@@ -1254,7 +1258,7 @@ function refreshSitePasswordState(options = {}) {
     nodes.databasePasswordStatus.textContent = dbError || "DB 이름, 계정, 비밀번호 확인이 통과했습니다.";
   }
   if (nodes.templateAppStatus) {
-    nodes.templateAppStatus.hidden = !templateError && state.activeStep !== "options";
+    nodes.templateAppStatus.hidden = !templateError;
     nodes.templateAppStatus.dataset.status = templateError ? "fail" : "pass";
     nodes.templateAppStatus.textContent = templateError || "설치 템플릿과 앱 조합이 맞습니다.";
   }
@@ -1539,6 +1543,13 @@ function renderRecoveryStatus(status) {
       : (status?.rollback_reason || "안전 조건을 만족하지 않아 되돌릴 수 없습니다.");
   });
 
+  recoveryActionButtons("resume").forEach((button) => {
+    button.disabled = !status?.can_resume;
+    button.title = status?.can_resume
+      ? "저장된 안전 단계부터 설치를 이어서 진행합니다."
+      : (status?.resume_reason || "현재 단계에서는 이어서 진행할 수 없습니다.");
+  });
+
   recoveryActionButtons("reset").forEach((button) => {
     button.disabled = !status?.can_reset;
     button.title = status?.can_reset
@@ -1593,8 +1604,26 @@ function renderDoctor(report) {
     `;
     nodes.doctorResults.append(item);
   });
+  applyResourceDefaults(report.resources);
   renderRecoveryStatus(state.recoveryStatus);
   saveWizardState();
+}
+
+function applyResourceDefaults(resources) {
+  const totalMemoryMib = Number(resources?.total_memory_mib || 0);
+  if (state.resourceDefaultsApplied || !totalMemoryMib || totalMemoryMib > 1536) {
+    return;
+  }
+  if (nodes.redisMode?.value === "enable") {
+    nodes.redisMode.value = "disable";
+  }
+  if (nodes.mailMode?.value === "local-postfix") {
+    nodes.mailMode.value = "none";
+    refreshMailFields();
+  }
+  state.resourceDefaultsApplied = true;
+  log(`저사양 안전 기본값 적용: 메모리 ${totalMemoryMib} MiB, Redis와 로컬 Postfix 비활성화`);
+  setAlert(nodes.doctorStatus, "success", "서버 점검 통과", `메모리 ${totalMemoryMib} MiB 서버에 맞춰 Redis와 로컬 Postfix를 기본 비활성화했습니다. 설치 방식 단계에서 변경할 수 있습니다.`);
 }
 
 function auditDoctorReport(report) {
@@ -2062,41 +2091,60 @@ function handleProgressEvent(payload) {
 
 function connectEvents() {
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  const socket = new WebSocket(`${protocol}://${window.location.host}/api/events`);
-  state.socket = socket;
-
-  socket.addEventListener("open", () => {
-    setConnectionStatus("연결됨", "badge-success");
+  state.eventStream?.stop();
+  state.eventStream = connectEventStream({
+    url: `${protocol}://${window.location.host}/api/events`,
+    onOpen: () => setConnectionStatus("연결됨", "badge-success"),
+    onClose: () => setConnectionStatus("연결 끊김", "badge-warning"),
+    onError: () => setConnectionStatus("연결 오류", "badge-error"),
+    onInvalid: () => log("실시간 로그 메시지를 해석하지 못했습니다."),
+    onEvent: (payload) => {
+      if (payload.event_type === "log" || payload.event_type === "command") {
+        log(payload.message);
+      }
+      if (payload.event_type === "stage" && payload.stage && payload.status) {
+        markStage(payload.stage, payload.status);
+        log(payload.message);
+      }
+      if (payload.event_type === "progress") {
+        handleProgressEvent(payload);
+      }
+    },
   });
+}
 
-  socket.addEventListener("message", (event) => {
-    let payload;
-    try {
-      payload = JSON.parse(event.data);
-    } catch (_error) {
-      log("invalid event payload received");
-      return;
+async function runResumeAction(button, statusNode) {
+  if (!state.recoveryStatus?.can_resume) {
+    setAlert(statusNode, "warning", "이어서 진행 불가", state.recoveryStatus?.resume_reason || "현재 단계에서는 이어서 진행할 수 없습니다.");
+    return;
+  }
+  const originalText = buttonLabel(button);
+  try {
+    state.currentOperation = "resume";
+    setButtonLabel(button, "이어가는 중");
+    setOperationLocked(true);
+    setInstallRunning(true);
+    setAlert(statusNode, "info", "설치 이어서 진행", "저장된 안전 단계부터 서버 설정을 계속합니다. 실시간 로그에서 실행 내용을 확인할 수 있습니다.");
+    const report = await apiFetch("/api/install/resume", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    renderInstallReport(report);
+    await refreshRecoveryStatus();
+    setAlert(nodes.reportStatus, "success", "설치 이어서 진행 완료", "중단 지점 이후 설정과 검증을 완료했습니다.");
+    showStep("report", { force: true });
+  } catch (error) {
+    setAlert(statusNode, "error", "설치 이어서 진행 실패", formatError(error));
+    log(formatError(error));
+    await refreshRecoveryStatus();
+  } finally {
+    state.currentOperation = null;
+    setOperationLocked(false);
+    setInstallRunning(false);
+    if (button && originalText) {
+      setButtonLabel(button, originalText);
     }
-
-    if (payload.event_type === "log") {
-      log(payload.message);
-    }
-    if (payload.event_type === "stage" && payload.stage && payload.status) {
-      markStage(payload.stage, payload.status);
-      log(payload.message);
-    }
-    if (payload.event_type === "progress") {
-      handleProgressEvent(payload);
-    }
-  });
-
-  socket.addEventListener("close", () => {
-    setConnectionStatus("연결 끊김", "badge-warning");
-  });
-
-  socket.addEventListener("error", () => {
-    setConnectionStatus("연결 오류", "badge-error");
-  });
+  }
 }
 
 async function loadBootstrap() {
@@ -2903,9 +2951,9 @@ function provisioningActions(report = {}) {
         "smtp_password = ******",
       ],
     }),
-    provisioningAction("security", "보안/방화벽", [...(report.safety_checks || []), ...(report.firewall_checks || [])], {
-      summary: "신규 VPS 기준 보안 정책, SSH 정책, UFW/공개 포트 상태를 확인합니다.",
-      command: "sudo ufw status verbose && sudo systemctl is-active ssh",
+    provisioningAction("security", "보안 경계 안내", [...(report.safety_checks || []), ...(report.firewall_checks || [])], {
+      summary: "SSH 서비스와 외부 포트 운영 경계를 확인합니다. UFW/fail2ban은 설치하거나 변경하지 않습니다.",
+      command: "sudo systemctl is-active ssh",
       settings: [
         ["보안 수준", report.security_profile || "standard"],
         ["SSH 정책", report.ssh_policy || "audit-only"],
@@ -2914,8 +2962,6 @@ function provisioningActions(report = {}) {
       ],
       files: [
         configFile("/etc/ssh/sshd_config", "SSH 접속 정책"),
-        configFile("/etc/ufw/user.rules", "UFW IPv4 규칙"),
-        configFile("/etc/ufw/user6.rules", "UFW IPv6 규칙"),
       ],
       preview: [
         `security_profile = ${report.security_profile || "standard"}`,
@@ -3336,9 +3382,9 @@ function compactListCard(title, rows, emptyText = "없음") {
 function packagePlanCard(packages) {
   const rows = flattenPlanPackages(packages);
   return `
-    <section class="report-card">
-      <h3>설치할 패키지</h3>
-      <div class="package-plan-list">
+    <details class="report-card plan-details">
+      <summary><strong>설치할 패키지</strong><span>${rows.length}개</span></summary>
+      <div class="package-plan-list plan-details-body">
         ${rows.length ? rows.map((item) => `
           <div class="package-plan-item">
             <div>
@@ -3351,16 +3397,16 @@ function packagePlanCard(packages) {
           <div class="empty-state">설치할 패키지가 없습니다.</div>
         `}
       </div>
-    </section>
+    </details>
   `;
 }
 
 function provisioningPlanCard(provisioning) {
   const sections = Array.isArray(provisioning) ? provisioning : [];
   return `
-    <section class="report-card">
-      <h3>서버 설정 계획</h3>
-      <div class="result-list mt-3">
+    <details class="report-card plan-details">
+      <summary><strong>서버 설정 계획</strong><span>${sections.length}개 영역</span></summary>
+      <div class="result-list mt-3 plan-details-body">
         ${sections.length ? sections.map((section) => {
           const settings = Array.isArray(section.settings) && section.settings.length
             ? section.settings.slice(0, 4).map((item) => `${item.key}: ${item.value}`).join(" / ")
@@ -3378,7 +3424,19 @@ function provisioningPlanCard(provisioning) {
           <div class="empty-state">추가 서버 설정 계획이 없습니다.</div>
         `}
       </div>
-    </section>
+    </details>
+  `;
+}
+
+function compactPlanDetails(title, rows, emptyText = "없음") {
+  const items = Array.isArray(rows) && rows.length ? rows : [emptyText];
+  return `
+    <details class="report-card plan-details">
+      <summary><strong>${escapeHtml(title)}</strong><span>${items.length}개</span></summary>
+      <ul class="report-list plan-details-body">
+        ${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+      </ul>
+    </details>
   `;
 }
 
@@ -3410,15 +3468,17 @@ function renderPlanReport(report) {
     ], "이 사양이 맞으면 아래 설치 패키지와 변경 항목을 확인한 뒤 진행하세요. 다르면 이전으로 돌아가 사양을 수정하세요."),
     packagePlanCard(report.packages),
     provisioningPlanCard(report.provisioning),
-    compactListCard("생성/변경 예정 파일", files),
-    compactListCard("서비스 계획", services),
-    compactListCard("포트 계획", ports),
+    `<div class="plan-detail-grid">
+      ${compactPlanDetails("생성/변경 예정 파일", files)}
+      ${compactPlanDetails("서비스 계획", services)}
+      ${compactPlanDetails("포트 계획", ports)}
+      ${stopConditions.length ? compactPlanDetails("중단 조건", stopConditions) : ""}
+    </div>`,
     compactListCard("진행 전 확인", [
       "맞으면 이 사양으로 진행을 눌러 5단계 기본 구성을 시작합니다.",
       "안 맞으면 이전을 눌러 3단계 설치 방식에서 사양을 수정합니다.",
       "수정 후 4단계로 돌아오면 계획은 자동으로 다시 생성됩니다.",
     ]),
-    stopConditions.length ? compactListCard("중단 조건", stopConditions) : "",
   ].join("");
 }
 
@@ -3675,6 +3735,11 @@ async function runRecoveryAction(action, button) {
     ? nodes.installStatus
     : (state.activeStep === "check" ? nodes.doctorStatus : nodes.reportStatus);
 
+  if (action === "resume") {
+    await runResumeAction(button, statusNode);
+    return;
+  }
+
   if (action === "rollback" && !state.recoveryStatus?.can_rollback) {
     setAlert(statusNode, "warning", "되돌리기 불가", state.recoveryStatus?.rollback_reason || "안전 조건을 만족하지 않습니다.");
     return;
@@ -3826,6 +3891,25 @@ function bindHelpTooltips() {
     button.addEventListener("focus", () => showTooltip(button));
     button.addEventListener("pointerleave", hideTooltip);
     button.addEventListener("blur", hideTooltip);
+  });
+
+  document.querySelectorAll(".field").forEach((field, index) => {
+    const control = field.querySelector("input, select, textarea");
+    const label = field.querySelector(".field-label");
+    const help = field.querySelector(".help-text");
+    if (!control || !label) {
+      return;
+    }
+    const labelClone = label.cloneNode(true);
+    labelClone.querySelectorAll(".help-wrap").forEach((node) => node.remove());
+    const labelText = labelClone.textContent.trim();
+    if (labelText && !control.getAttribute("aria-label")) {
+      control.setAttribute("aria-label", labelText);
+    }
+    if (help) {
+      help.id ||= `field-help-${index + 1}`;
+      control.setAttribute("aria-describedby", help.id);
+    }
   });
 
   window.addEventListener("resize", hideTooltip);

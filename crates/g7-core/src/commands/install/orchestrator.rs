@@ -416,6 +416,26 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     append_phase_log(paths, &state.phase, false)?;
     completed_steps.push("state-written".to_string());
 
+    let sizing = detected_memory_sizing(probe);
+    let early_runtime_checks =
+        apply_swap_configuration(probe, paths, &sizing, &mut owned_file_list)?;
+    completed_steps.push("swap-configured-before-packages".to_string());
+    owned_file_list.sort();
+    owned_file_list.dedup();
+    owned_files.files = owned_file_list.clone();
+    write_owned_files(&owned_files_path, &owned_files).map_err(|source| {
+        Error::FileWriteFailed {
+            path: OWNED_FILES_PATH.to_string(),
+            source,
+        }
+    })?;
+    write_existing_file(paths, ROLLBACK_PATH, &rollback_content(&owned_file_list))?;
+    state.completed_steps = completed_steps.clone();
+    write_state_file(&state_path, &state).map_err(|source| Error::FileWriteFailed {
+        path: STATE_PATH.to_string(),
+        source,
+    })?;
+
     let mut apply_summary = match apply_package_phase(probe, &install_plan) {
         Ok(summary) => summary,
         Err(failure) => {
@@ -443,6 +463,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             return Err(err);
         }
     };
+    apply_summary.runtime_checks.extend(early_runtime_checks);
 
     completed_steps.push("apt-updated".to_string());
     if install_plan.php_source == g7_system::php::PHP_SOURCE_ONDREJ {
@@ -645,7 +666,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
 
     match apply_runtime_phase(probe, paths, &install_plan, &mut owned_file_list) {
         Ok(runtime_checks) => {
-            apply_summary.runtime_checks = runtime_checks;
+            apply_summary.runtime_checks.extend(runtime_checks);
             if let Some(message) = blocking_runtime_failure(&apply_summary.runtime_checks) {
                 state.completed_steps = completed_steps.clone();
                 persist_progress(

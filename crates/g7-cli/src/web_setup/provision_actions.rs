@@ -222,12 +222,12 @@ pub(super) fn provision_security(report: &serde_json::Value) -> Vec<InstallApiCh
         &["is-active", "--quiet", "ssh"],
         None,
     ));
-    checks.push(run_command_check(
-        "ufw-status",
-        "ufw",
-        &["status", "verbose"],
-        None,
-    ));
+    checks.push(InstallApiCheck {
+        name: "firewall-scope".to_string(),
+        status: "manual".to_string(),
+        message: "UFW/fail2ban 설치와 규칙 변경은 이 설치기의 범위가 아닙니다. VPS 제공자 방화벽 또는 별도 유지보수 앱에서 관리하세요."
+            .to_string(),
+    });
     checks
 }
 

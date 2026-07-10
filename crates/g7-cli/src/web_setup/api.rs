@@ -13,6 +13,8 @@ pub(super) struct WebState {
     pub(super) domain: Option<String>,
     pub(super) local_test: bool,
     pub(super) events: broadcast::Sender<WebEvent>,
+    pub(super) event_history: Arc<Mutex<VecDeque<WebEvent>>>,
+    pub(super) event_sequence: Arc<AtomicU64>,
     pub(super) install_running: Arc<AtomicBool>,
     pub(super) sessions: Arc<Mutex<HashMap<String, Session>>>,
     pub(super) allowed_client_ip: Arc<Mutex<Option<IpAddr>>>,
@@ -29,12 +31,26 @@ pub(super) struct Session {
 
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct WebEvent {
+    pub(super) seq: u64,
+    pub(super) timestamp_unix_ms: u128,
     pub(super) event_type: &'static str,
     pub(super) message: String,
     pub(super) stage: Option<&'static str>,
     pub(super) status: Option<&'static str>,
     pub(super) operation: Option<&'static str>,
     pub(super) percent: Option<u8>,
+    pub(super) operation_id: Option<String>,
+    pub(super) stream: Option<&'static str>,
+    pub(super) command: Option<String>,
+    pub(super) elapsed_ms: Option<u128>,
+}
+
+struct InstallRunningGuard(Arc<AtomicBool>);
+
+impl Drop for InstallRunningGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -143,6 +159,16 @@ pub(super) struct ApiError {
 pub(super) struct DoctorApiReport {
     pub(super) install_allowed: bool,
     pub(super) checks: Vec<DoctorApiCheck>,
+    pub(super) resources: DoctorApiResources,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct DoctorApiResources {
+    pub(super) total_memory_mib: Option<u64>,
+    pub(super) available_memory_mib: Option<u64>,
+    pub(super) swap_total_mib: Option<u64>,
+    pub(super) root_available_mib: Option<u64>,
+    pub(super) root_inode_free_percent: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -344,13 +370,18 @@ pub(super) struct StatusApiReport {
 
 #[derive(Debug, Serialize)]
 pub(super) struct RecoveryApiStatus {
+    pub(super) can_resume: bool,
     pub(super) can_reset: bool,
     pub(super) can_rollback: bool,
     pub(super) recommended_action: &'static str,
     pub(super) message: String,
     pub(super) metadata_paths: Vec<String>,
     pub(super) rollback_reason: Option<String>,
+    pub(super) resume_reason: Option<String>,
 }
+
+#[derive(Debug, Deserialize)]
+pub(super) struct ResumeRequest {}
 
 #[derive(Debug, Serialize)]
 pub(super) struct ComponentApiStatus {
@@ -444,8 +475,30 @@ pub(super) async fn api_install_prepare(
         15,
         "install progress: running server install",
     );
-    let result = install::run(domain, options);
-    state.install_running.store(false, Ordering::SeqCst);
+    let operation_id = format!(
+        "install-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_millis())
+    );
+    let worker_state = state.clone();
+    let running = state.install_running.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let _running_guard = InstallRunningGuard(running);
+        let observer = Arc::new(WebCommandObserver::new(
+            worker_state,
+            "install",
+            operation_id,
+        ));
+        let probe = SystemProbe::new(RealCommandRunner::with_observer(observer));
+        install::run_with_probe_and_paths(domain, options, &probe, &install::InstallPaths::system())
+    })
+    .await
+    .map_err(|error| {
+        state.install_running.store(false, Ordering::SeqCst);
+        ApiError::bad_request(format!("설치 작업 실행기가 중단되었습니다: {error}"))
+            .with_hint("상태와 최근 실시간 로그를 확인한 뒤 이어서 진행하거나 초기화하세요.")
+    })?;
 
     match result {
         Ok(report) => {
@@ -517,6 +570,59 @@ pub(super) async fn api_install_prepare(
     }
 }
 
+pub(super) async fn api_resume(
+    axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(_request): Json<ResumeRequest>,
+) -> std::result::Result<impl IntoResponse, ApiError> {
+    let session = require_authenticated_session(&state, &headers, peer.ip())?;
+    require_csrf(&headers, &session)?;
+    if state.install_running.swap(true, Ordering::SeqCst) {
+        return Err(ApiError::conflict("another installer operation is running"));
+    }
+
+    emit_log(&state, "중단된 설치 이어서 진행");
+    emit_progress(&state, "resume", 5, "resume progress: starting");
+    let operation_id = format!(
+        "resume-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_millis())
+    );
+    let worker_state = state.clone();
+    let running = state.install_running.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let _running_guard = InstallRunningGuard(running);
+        let observer = Arc::new(WebCommandObserver::new(
+            worker_state,
+            "resume",
+            operation_id,
+        ));
+        let probe = SystemProbe::new(RealCommandRunner::with_observer(observer));
+        install::resume_with_probe_and_paths(&probe, &install::InstallPaths::system())
+    })
+    .await
+    .map_err(|error| {
+        state.install_running.store(false, Ordering::SeqCst);
+        ApiError::bad_request(format!("설치 이어서 진행 작업이 중단되었습니다: {error}"))
+    })?;
+
+    match result {
+        Ok(report) => {
+            emit_progress(&state, "resume", 100, "resume progress: completed");
+            emit_log(&state, "설치 이어서 진행 완료");
+            Ok(Json(install_to_api(report, "apt-default".to_string())))
+        }
+        Err(error) => {
+            emit_progress(&state, "resume", 100, "resume progress: failed");
+            emit_log(&state, format!("설치 이어서 진행 실패: {error}"));
+            Err(ApiError::bad_request(error)
+                .with_hint("최근 실시간 로그와 저장된 리포트의 실패 단계를 확인하세요."))
+        }
+    }
+}
+
 pub(super) async fn api_provision_action(
     axum::extract::State(state): axum::extract::State<WebState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -563,7 +669,7 @@ pub(super) async fn api_reset(
     let session = require_authenticated_session(&state, &headers, peer.ip())?;
     require_csrf(&headers, &session)?;
 
-    if state.install_running.load(Ordering::SeqCst) {
+    if state.install_running.swap(true, Ordering::SeqCst) {
         return Err(ApiError::conflict(
             "reset is blocked while install is running",
         ));
@@ -576,7 +682,27 @@ pub(super) async fn api_reset(
         10,
         "reset progress: starting full installer reset",
     );
-    let report = match reset::run(true, request.dry_run) {
+    let worker_state = state.clone();
+    let running = state.install_running.clone();
+    let dry_run = request.dry_run;
+    let operation_id = format!(
+        "reset-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_millis())
+    );
+    let report = tokio::task::spawn_blocking(move || {
+        let _running_guard = InstallRunningGuard(running);
+        let observer = Arc::new(WebCommandObserver::new(worker_state, "reset", operation_id));
+        let probe = SystemProbe::new(RealCommandRunner::with_observer(observer));
+        reset::run_with_probe_and_paths(true, dry_run, &probe, &reset::ResetPaths::system())
+    })
+    .await
+    .map_err(|error| {
+        state.install_running.store(false, Ordering::SeqCst);
+        ApiError::bad_request(format!("초기화 작업 실행기가 중단되었습니다: {error}"))
+    })?;
+    let report = match report {
         Ok(report) => report,
         Err(error) => {
             emit_progress(&state, "reset", 100, "reset progress: failed");
@@ -623,8 +749,35 @@ pub(super) async fn api_rollback(
         10,
         "rollback progress: starting rollback",
     );
-    let report = rollback::run(true, request.dry_run);
-    state.install_running.store(false, Ordering::SeqCst);
+    let worker_state = state.clone();
+    let running = state.install_running.clone();
+    let dry_run = request.dry_run;
+    let operation_id = format!(
+        "rollback-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_millis())
+    );
+    let report = tokio::task::spawn_blocking(move || {
+        let _running_guard = InstallRunningGuard(running);
+        let observer = Arc::new(WebCommandObserver::new(
+            worker_state,
+            "rollback",
+            operation_id,
+        ));
+        let probe = SystemProbe::new(RealCommandRunner::with_observer(observer));
+        rollback::run_with_probe_and_paths(
+            true,
+            dry_run,
+            &probe,
+            &rollback::RollbackPaths::system(),
+        )
+    })
+    .await
+    .map_err(|error| {
+        state.install_running.store(false, Ordering::SeqCst);
+        ApiError::bad_request(format!("되돌리기 작업 실행기가 중단되었습니다: {error}"))
+    })?;
 
     let report = match report {
         Ok(report) => report,

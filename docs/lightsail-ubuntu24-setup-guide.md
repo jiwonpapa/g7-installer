@@ -124,7 +124,7 @@ curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/latest/download/bo
 bash "$tmp"
 ```
 
-이 스크립트는 `g7inst` 설치까지만 합니다. OS 업데이트, swap, UFW, fail2ban, 웹서버, PHP, DB, Redis, Certbot, 앱 설치는 `g7inst setup` 웹 UI가 처리합니다.
+이 스크립트는 `g7inst` 설치까지만 합니다. OS 업데이트, swap, 웹서버, PHP, DB, Redis, Certbot, 앱 설치는 `g7inst setup` 웹 UI가 처리합니다. UFW·fail2ban은 별도 유지보수 영역이므로 설치하거나 변경하지 않습니다.
 
 Lightsail은 시작 스크립트를 자체 `/bin/sh` 스크립트 뒤에 붙여 실행할 수 있습니다. 그래서 `pipefail`과 `curl ... | bash`를 쓰지 않습니다.
 
@@ -168,7 +168,7 @@ Host g7installer
 ssh g7installer
 ```
 
-## 5. 방화벽 설정
+## 5. VPS 제공자 방화벽 설정 (설치기 범위 밖)
 
 메뉴 위치:
 
@@ -345,8 +345,8 @@ AWS에서 outbound 25 제한이 있으면 해제 요청이 필요합니다.
 | 사이트 계정 | 웹파일 소유자이자 SFTP로 파일을 올릴 Linux 계정 |
 | PHP 런타임 사용자 | PHP-FPM pool을 실행하는 계정. 기본은 사이트 계정 |
 | 시작 스크립트 | 서버 최초 생성 때 자동 실행되는 스크립트 |
-| UFW | Ubuntu 방화벽 |
-| fail2ban | 반복 로그인 공격 차단 도구 |
+| UFW | Ubuntu 방화벽. G7 Installer는 설치·변경하지 않음 |
+| fail2ban | 반복 로그인 공격 차단 도구. 별도 유지보수 앱 영역 |
 | PTR | IP에서 도메인을 확인하는 reverse DNS |
 | SPF/DKIM/DMARC | 메일 발송 인증용 DNS 레코드 |
 

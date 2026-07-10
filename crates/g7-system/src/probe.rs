@@ -14,6 +14,7 @@ use crate::archive::{
     git_ls_files_error_unmatch, git_rev_parse_head, test_dir, test_file, unzip_archive, unzip_test,
 };
 use crate::certbot::{certonly_webroot, delete_cert, renew_dry_run};
+use crate::command::CommandSpec;
 use crate::command::{CommandError, CommandOutput, CommandRunner, RealCommandRunner};
 use crate::database::{DatabaseEngine, apply_sql};
 use crate::mail::{postconf_set, postfix_preseed};
@@ -37,10 +38,26 @@ pub struct SystemProbe<R> {
     fs_root: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemoryInfo {
+    pub total_kib: u64,
+    pub available_kib: u64,
+    pub swap_total_kib: u64,
+    pub swap_free_kib: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FilesystemInfo {
+    pub total_kib: u64,
+    pub available_kib: u64,
+    pub total_inodes: u64,
+    pub available_inodes: u64,
+}
+
 impl SystemProbe<RealCommandRunner> {
     pub fn real() -> Self {
         Self {
-            runner: RealCommandRunner,
+            runner: RealCommandRunner::default(),
             os_release_path: PathBuf::from("/etc/os-release"),
             fs_root: PathBuf::from("/"),
         }
@@ -347,6 +364,10 @@ impl<R: CommandRunner> SystemProbe<R> {
     }
 
     pub fn total_memory_kib(&self) -> Result<Option<u64>, SystemProbeError> {
+        Ok(self.memory_info()?.map(|info| info.total_kib))
+    }
+
+    pub fn memory_info(&self) -> Result<Option<MemoryInfo>, SystemProbeError> {
         let path = self.resolve_path(Path::new("/proc/meminfo"));
         let payload = match fs::read_to_string(&path) {
             Ok(payload) => payload,
@@ -359,7 +380,39 @@ impl<R: CommandRunner> SystemProbe<R> {
             }
         };
 
-        Ok(payload.lines().find_map(parse_memtotal_line))
+        let value = |name: &str| parse_meminfo_value(&payload, name).unwrap_or(0);
+        let total_kib = value("MemTotal");
+        Ok((total_kib > 0).then_some(MemoryInfo {
+            total_kib,
+            available_kib: value("MemAvailable"),
+            swap_total_kib: value("SwapTotal"),
+            swap_free_kib: value("SwapFree"),
+        }))
+    }
+
+    pub fn root_filesystem_info(&self) -> Result<Option<FilesystemInfo>, SystemProbeError> {
+        if self.fs_root != Path::new("/") {
+            return Ok(None);
+        }
+        let blocks = self
+            .runner
+            .run(&CommandSpec::new("df").args(["-Pk", "--", "/"]))?;
+        let inodes = self
+            .runner
+            .run(&CommandSpec::new("df").args(["-Pi", "--", "/"]))?;
+        if blocks.status != 0 || inodes.status != 0 {
+            return Ok(None);
+        }
+        let (total_kib, available_kib) = parse_df_capacity(&blocks.stdout).unwrap_or((0, 0));
+        let (total_inodes, available_inodes) = parse_df_capacity(&inodes.stdout).unwrap_or((0, 0));
+        Ok(
+            (total_kib > 0 && total_inodes > 0).then_some(FilesystemInfo {
+                total_kib,
+                available_kib,
+                total_inodes,
+                available_inodes,
+            }),
+        )
     }
 
     pub fn vcpu_count(&self) -> Result<Option<usize>, SystemProbeError> {
@@ -420,10 +473,19 @@ impl<R: CommandRunner> SystemProbe<R> {
     }
 }
 
-fn parse_memtotal_line(line: &str) -> Option<u64> {
-    let line = line.trim();
-    let value = line.strip_prefix("MemTotal:")?.trim();
-    value.split_whitespace().next()?.parse().ok()
+fn parse_meminfo_value(payload: &str, name: &str) -> Option<u64> {
+    payload.lines().find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        (key.trim() == name)
+            .then(|| value.split_whitespace().next()?.parse().ok())
+            .flatten()
+    })
+}
+
+fn parse_df_capacity(payload: &str) -> Option<(u64, u64)> {
+    let line = payload.lines().rfind(|line| !line.trim().is_empty())?;
+    let columns = line.split_whitespace().collect::<Vec<_>>();
+    Some((columns.get(1)?.parse().ok()?, columns.get(3)?.parse().ok()?))
 }
 
 #[derive(Debug, thiserror::Error)]

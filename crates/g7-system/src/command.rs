@@ -2,11 +2,12 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::fs::OpenOptions;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Read, Write};
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -73,6 +74,20 @@ pub trait CommandRunner {
     fn run(&self, spec: &CommandSpec) -> Result<CommandOutput, CommandError>;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandEvent {
+    pub event: &'static str,
+    pub command: String,
+    pub stream: Option<&'static str>,
+    pub line: Option<String>,
+    pub status: Option<i32>,
+    pub elapsed_ms: Option<u128>,
+}
+
+pub trait CommandObserver: Send + Sync {
+    fn on_event(&self, event: CommandEvent);
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum CommandError {
     #[error("failed to execute command: {program}")]
@@ -82,67 +97,181 @@ pub enum CommandError {
     MissingFakeResponse { program: String },
 }
 
-#[derive(Debug, Default)]
-pub struct RealCommandRunner;
+#[derive(Clone, Default)]
+pub struct RealCommandRunner {
+    observer: Option<Arc<dyn CommandObserver>>,
+}
+
+impl std::fmt::Debug for RealCommandRunner {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RealCommandRunner")
+            .field("observer", &self.observer.is_some())
+            .finish()
+    }
+}
+
+impl RealCommandRunner {
+    pub fn with_observer(observer: Arc<dyn CommandObserver>) -> Self {
+        Self {
+            observer: Some(observer),
+        }
+    }
+
+    fn emit(&self, event: CommandEvent) {
+        if let Some(observer) = &self.observer {
+            observer.on_event(event);
+        }
+    }
+}
 
 impl CommandRunner for RealCommandRunner {
     fn run(&self, spec: &CommandSpec) -> Result<CommandOutput, CommandError> {
         let started = Instant::now();
         append_audit_entry(AuditEntry::started(spec));
+        let display = redacted_command(spec);
+        self.emit(CommandEvent {
+            event: "start",
+            command: display.clone(),
+            stream: None,
+            line: None,
+            status: None,
+            elapsed_ms: None,
+        });
         let mut command = Command::new(&spec.program);
         command.args(&spec.args);
         if let Some(cwd) = &spec.cwd {
             command.current_dir(cwd);
         }
 
-        let output = if let Some(stdin) = &spec.stdin {
-            let mut child = command
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .map_err(|err| CommandError::Execute {
-                    program: display_os(&spec.program),
-                    message: err.to_string(),
-                })?;
-
-            let mut child_stdin = child.stdin.take().ok_or_else(|| CommandError::Execute {
-                program: display_os(&spec.program),
-                message: "failed to open command stdin".to_string(),
-            })?;
-            child_stdin
-                .write_all(stdin)
-                .map_err(|err| CommandError::Execute {
-                    program: display_os(&spec.program),
-                    message: err.to_string(),
-                })?;
-            drop(child_stdin);
-
-            child
-                .wait_with_output()
-                .map_err(|err| CommandError::Execute {
-                    program: display_os(&spec.program),
-                    message: err.to_string(),
-                })?
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        if spec.stdin.is_some() {
+            command.stdin(Stdio::piped());
         } else {
-            command.output().map_err(|err| CommandError::Execute {
+            command.stdin(Stdio::null());
+        }
+
+        let mut child = command.spawn().map_err(|err| CommandError::Execute {
+            program: display_os(&spec.program),
+            message: err.to_string(),
+        })?;
+        let stdout = child.stdout.take().ok_or_else(|| CommandError::Execute {
+            program: display_os(&spec.program),
+            message: "failed to open command stdout".to_string(),
+        })?;
+        let stderr = child.stderr.take().ok_or_else(|| CommandError::Execute {
+            program: display_os(&spec.program),
+            message: "failed to open command stderr".to_string(),
+        })?;
+
+        let stdout_observer = self.observer.clone();
+        let stderr_observer = self.observer.clone();
+        let stdout_command = display.clone();
+        let stderr_command = display.clone();
+        let (status, stdout, stderr) = std::thread::scope(|scope| {
+            let stdout_reader = scope
+                .spawn(move || read_stream(stdout, "stdout", &stdout_command, stdout_observer));
+            let stderr_reader = scope
+                .spawn(move || read_stream(stderr, "stderr", &stderr_command, stderr_observer));
+
+            let stdin_result = if let Some(stdin) = &spec.stdin {
+                let mut child_stdin = child.stdin.take().ok_or_else(|| CommandError::Execute {
+                    program: display_os(&spec.program),
+                    message: "failed to open command stdin".to_string(),
+                })?;
+                child_stdin
+                    .write_all(stdin)
+                    .map_err(|err| CommandError::Execute {
+                        program: display_os(&spec.program),
+                        message: err.to_string(),
+                    })?;
+                drop(child_stdin);
+                Ok(())
+            } else {
+                Ok(())
+            };
+            stdin_result?;
+
+            let status = child.wait().map_err(|err| CommandError::Execute {
                 program: display_os(&spec.program),
                 message: err.to_string(),
-            })?
-        };
+            })?;
+            let stdout = join_stream(stdout_reader, &spec.program)?;
+            let stderr = join_stream(stderr_reader, &spec.program)?;
+            Ok::<_, CommandError>((status, stdout, stderr))
+        })?;
 
         let output = CommandOutput {
-            status: output.status.code().map_or(128, |code| code),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            status: status.code().map_or(128, |code| code),
+            stdout,
+            stderr,
         };
         append_audit_entry(AuditEntry::finished(
             spec,
             &output,
             started.elapsed().as_millis(),
         ));
+        self.emit(CommandEvent {
+            event: "finish",
+            command: display,
+            stream: None,
+            line: None,
+            status: Some(output.status),
+            elapsed_ms: Some(started.elapsed().as_millis()),
+        });
         Ok(output)
     }
+}
+
+fn read_stream<R: Read>(
+    reader: R,
+    stream: &'static str,
+    command: &str,
+    observer: Option<Arc<dyn CommandObserver>>,
+) -> std::io::Result<String> {
+    let mut reader = BufReader::new(reader);
+    let mut output = Vec::new();
+    let mut buffer = Vec::new();
+    loop {
+        buffer.clear();
+        let read = reader.read_until(b'\n', &mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        output.extend_from_slice(&buffer);
+        if let Some(observer) = &observer {
+            let line = String::from_utf8_lossy(&buffer)
+                .trim_end_matches(['\r', '\n'])
+                .to_string();
+            if !line.is_empty() {
+                observer.on_event(CommandEvent {
+                    event: "line",
+                    command: command.to_string(),
+                    stream: Some(stream),
+                    line: Some(redacted_excerpt(&line)),
+                    status: None,
+                    elapsed_ms: None,
+                });
+            }
+        }
+    }
+    Ok(String::from_utf8_lossy(&output).into_owned())
+}
+
+fn join_stream(
+    handle: std::thread::ScopedJoinHandle<'_, std::io::Result<String>>,
+    program: &OsString,
+) -> Result<String, CommandError> {
+    handle
+        .join()
+        .map_err(|_| CommandError::Execute {
+            program: display_os(program),
+            message: "command output reader panicked".to_string(),
+        })?
+        .map_err(|err| CommandError::Execute {
+            program: display_os(program),
+            message: err.to_string(),
+        })
 }
 
 #[derive(Debug, Serialize)]
@@ -246,6 +375,12 @@ fn redacted_args(args: &[OsString]) -> Vec<String> {
         .collect()
 }
 
+fn redacted_command(spec: &CommandSpec) -> String {
+    let mut parts = vec![display_os(&spec.program)];
+    parts.extend(redacted_args(&spec.args));
+    parts.join(" ")
+}
+
 fn redacted_excerpt(value: &str) -> String {
     let mut output = String::new();
     for line in value.lines() {
@@ -345,10 +480,20 @@ fn display_os(value: &OsString) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        CommandOutput, CommandRunner, CommandSpec, FakeCommandRunner, redacted_args,
-        redacted_excerpt,
+        CommandEvent, CommandObserver, CommandOutput, CommandRunner, CommandSpec,
+        FakeCommandRunner, RealCommandRunner, redacted_args, redacted_excerpt,
     };
     use std::ffi::OsString;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Default)]
+    struct RecordingObserver(Mutex<Vec<CommandEvent>>);
+
+    impl CommandObserver for RecordingObserver {
+        fn on_event(&self, event: CommandEvent) {
+            self.0.lock().expect("observer lock").push(event);
+        }
+    }
 
     #[test]
     fn command_spec_collects_argv_without_shell() {
@@ -411,5 +556,30 @@ mod tests {
             redacted_excerpt("ok\npassword=hunter2\nnext"),
             "ok\npassword=******\nnext"
         );
+    }
+
+    #[test]
+    fn real_runner_streams_start_lines_and_finish() {
+        let observer = Arc::new(RecordingObserver::default());
+        let runner = RealCommandRunner::with_observer(observer.clone());
+
+        let output = runner
+            .run(&CommandSpec::new("sh").args(["-c", "printf 'first\\n'; printf 'second\\n' >&2"]))
+            .expect("command succeeds");
+
+        assert_eq!(output.status, 0);
+        let events = observer.0.lock().expect("observer lock");
+        assert_eq!(events.first().map(|event| event.event), Some("start"));
+        assert!(
+            events
+                .iter()
+                .any(|event| event.line.as_deref() == Some("first"))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| event.line.as_deref() == Some("second"))
+        );
+        assert_eq!(events.last().map(|event| event.event), Some("finish"));
     }
 }

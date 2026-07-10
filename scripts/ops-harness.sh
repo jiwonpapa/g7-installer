@@ -447,7 +447,7 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
     print(json.load(handle).get("site_user") or "")
 PY
 )"
-    certificate_present="$(sudo_capture "${cycle}-certificate-before-reset" "if test -d $(quote "/etc/letsencrypt/live/${DOMAIN}"); then echo yes; else echo no; fi")"
+    certificate_present="$(sudo_sh_capture "${cycle}-certificate-before-reset" "if test -d $(quote "/etc/letsencrypt/live/${DOMAIN}"); then echo yes; else echo no; fi")"
   fi
 
   if step_enabled report-contract; then

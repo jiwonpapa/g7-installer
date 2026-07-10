@@ -14,6 +14,8 @@ pub async fn run(config: WebSetupConfig) -> Result<()> {
         domain: config.domain,
         local_test: config.local_test,
         events: broadcast::channel(128).0,
+        event_history: Arc::new(Mutex::new(VecDeque::with_capacity(512))),
+        event_sequence: Arc::new(AtomicU64::new(0)),
         install_running: Arc::new(AtomicBool::new(false)),
         sessions: Arc::new(Mutex::new(HashMap::new())),
         allowed_client_ip: Arc::new(Mutex::new(None)),
@@ -35,6 +37,7 @@ pub async fn run(config: WebSetupConfig) -> Result<()> {
         .route("/setup/result", get(index))
         .route("/setup/provision", get(index))
         .route("/app.js", get(app_js))
+        .route("/modules/event-stream.js", get(event_stream_js))
         .route("/app.css", get(app_css))
         .route("/promo.json", get(promo_json))
         .route("/api/bootstrap", get(bootstrap))
@@ -43,6 +46,7 @@ pub async fn run(config: WebSetupConfig) -> Result<()> {
         .route("/api/doctor", get(api_doctor))
         .route("/api/plan", post(api_plan))
         .route("/api/install/prepare", post(api_install_prepare))
+        .route("/api/install/resume", post(api_resume))
         .route("/api/provision/action", post(api_provision_action))
         .route("/api/reset", post(api_reset))
         .route("/api/rollback", post(api_rollback))
@@ -284,6 +288,24 @@ pub(super) async fn app_js(
     ))
 }
 
+pub(super) async fn event_stream_js(
+    axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+) -> std::result::Result<impl IntoResponse, ApiError> {
+    require_allowed_client_ip(&state, peer.ip())?;
+
+    Ok((
+        [
+            (
+                header::CONTENT_TYPE,
+                "application/javascript; charset=utf-8",
+            ),
+            (header::CACHE_CONTROL, "no-store, no-cache, max-age=0"),
+        ],
+        EVENT_STREAM_JS,
+    ))
+}
+
 pub(super) async fn app_css(
     axum::extract::State(state): axum::extract::State<WebState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -363,27 +385,45 @@ pub(super) async fn api_events(
         return error.into_response();
     }
 
-    ws.on_upgrade(move |socket| event_socket(socket, state.events.subscribe()))
+    ws.on_upgrade(move |socket| event_socket(socket, state))
         .into_response()
 }
 
-pub(super) async fn event_socket(mut socket: WebSocket, mut events: broadcast::Receiver<WebEvent>) {
-    let connected = WebEvent {
-        event_type: "log",
-        message: "실시간 로그 연결됨".to_string(),
-        stage: None,
-        status: None,
-        operation: None,
-        percent: None,
-    };
+pub(super) async fn event_socket(mut socket: WebSocket, state: WebState) {
+    let mut events = state.events.subscribe();
+    let history = event_history_snapshot(&state, 0);
+    let mut last_seq = 0;
+    for event in history {
+        last_seq = last_seq.max(event.seq);
+        if send_event(&mut socket, &event).await.is_err() {
+            return;
+        }
+    }
 
+    let connected = emit_log(&state, "실시간 로그 연결됨");
+    last_seq = last_seq.max(connected.seq);
     if send_event(&mut socket, &connected).await.is_err() {
         return;
     }
 
-    while let Ok(event) = events.recv().await {
-        if send_event(&mut socket, &event).await.is_err() {
-            break;
+    loop {
+        match events.recv().await {
+            Ok(event) if event.seq > last_seq => {
+                last_seq = event.seq;
+                if send_event(&mut socket, &event).await.is_err() {
+                    break;
+                }
+            }
+            Ok(_) => {}
+            Err(broadcast::error::RecvError::Lagged(_)) => {
+                for event in event_history_snapshot(&state, last_seq) {
+                    last_seq = event.seq;
+                    if send_event(&mut socket, &event).await.is_err() {
+                        return;
+                    }
+                }
+            }
+            Err(broadcast::error::RecvError::Closed) => break,
         }
     }
 }

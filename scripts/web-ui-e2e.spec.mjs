@@ -62,7 +62,7 @@ function mockReport() {
     network_checks: [],
     runtime_checks: [{ name: "php-runtime-limits", status: "pass", message: "PHP 한도 설정 확인" }],
     database_checks: [{ name: "database-user", status: "pass", message: "DB 계정 확인" }],
-    firewall_checks: [{ name: "ufw-policy", status: "manual", message: "보안 카드에서 확인하세요." }],
+    firewall_checks: [{ name: "network-boundary", status: "manual", message: "VPS 제공자 방화벽 또는 별도 유지보수 앱에서 관리하세요." }],
     mail_checks: [{ name: "postfix", status: "pass", message: "Postfix 발송 확인" }],
     certbot_checks: [{ name: "tls-certificate", status: "pass", message: "인증서 확인" }],
     vhost_checks: [{ name: "nginx-configtest", status: "pass", message: "nginx -t 통과" }],
@@ -115,6 +115,9 @@ async function asset(pathname) {
   if (pathname === "/app.js") {
     return readFile(path.join(root, "web/app.js"));
   }
+  if (pathname === "/modules/event-stream.js") {
+    return readFile(path.join(root, "web/modules/event-stream.js"));
+  }
   if (pathname === "/app.css") {
     return readFile(path.join(root, "web/dist/app.css"));
   }
@@ -146,12 +149,14 @@ async function startServer() {
     }
     if (pathname === "/api/recovery") {
       json(response, {
+        can_resume: false,
         can_reset: true,
         can_rollback: false,
         recommended_action: "reset",
         message: "설치기 소유 기록이 있어 재설치 초기화가 가능합니다.",
         metadata_paths: ["/var/lib/g7-installer/state.json"],
         rollback_reason: "앱/DB/인증서 단계 이후에는 reset을 사용합니다.",
+        resume_reason: "현재 단계에서는 이어서 진행할 수 없습니다.",
       });
       return;
     }
@@ -174,6 +179,13 @@ async function startServer() {
     if (pathname === "/api/doctor") {
       json(response, {
         install_allowed: true,
+        resources: {
+          total_memory_mib: 2048,
+          available_memory_mib: 1536,
+          swap_total_mib: 2048,
+          root_available_mib: 40000,
+          root_inode_free_percent: 95,
+        },
         checks: [
           { name: "ubuntu-version", status: "pass", message: "Ubuntu 24.04 확인" },
           { name: "privilege", status: "pass", message: "root 권한 확인" },
@@ -189,8 +201,8 @@ async function startServer() {
       json(response, {
         action: "security",
         status: "manual",
-        message: "보안 설정은 현재 점검 모드입니다.",
-        checks: [{ name: "security-policy", status: "manual", message: "UFW/SSH 정책을 확인하세요." }],
+        message: "보안 경계는 현재 안내 모드입니다.",
+        checks: [{ name: "security-policy", status: "manual", message: "SSH와 VPS 제공자 포트 정책을 확인하세요." }],
       });
       return;
     }
@@ -231,7 +243,7 @@ test("wizard routes render report, downloads, and provision cards", async ({ pag
     await page.getByRole("button", { name: "세부 설정으로 이동" }).click();
     await expect(page).toHaveURL(/\/setup\/provision/);
     await expect(page.getByRole("heading", { name: "세부 설정 적용/점검" })).toBeVisible();
-    await expect(page.getByText("보안/방화벽")).toBeVisible();
+    await expect(page.getByText("보안 경계 안내")).toBeVisible();
     await page.getByRole("button", { name: "설정 파일/값 확인" }).first().click();
     await expect(page.getByRole("heading", { name: "웹서버/vhost" })).toBeVisible();
   } finally {
@@ -263,7 +275,36 @@ test("plan route auto-generates a review after doctor pass", async ({ page }) =>
 
     await expect(page).toHaveURL(/\/setup\/plan/);
     await expect(page.getByText("선택한 설치 사양")).toBeVisible();
+    await expect(page.locator("details.plan-details[open]")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "이 사양으로 진행" })).toBeEnabled();
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("mobile plan keeps one-column flow without horizontal overflow", async ({ page }) => {
+  const { server, baseUrl } = await startServer();
+  try {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${baseUrl}/setup/doctor?token=e2e`);
+    await page.getByRole("button", { name: "점검 실행" }).click();
+    await page.getByRole("button", { name: "다음: 설치 방식" }).click();
+    for (const [selector, value] of [
+      ["#site-password", "Test-only_9x!"],
+      ["#site-password-confirm", "Test-only_9x!"],
+      ["#database-name-input", "g7devops"],
+      ["#database-user-input", "g7devops"],
+      ["#database-password", "Test-only_9x!"],
+      ["#database-password-confirm", "Test-only_9x!"],
+    ]) {
+      await page.fill(selector, value);
+    }
+    await page.getByRole("button", { name: "다음: 사양 확정" }).last().click();
+    await expect(page.getByText("선택한 설치 사양")).toBeVisible();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow).toBeLessThanOrEqual(1);
+    const columns = await page.locator(".plan-detail-grid").evaluate((element) => getComputedStyle(element).gridTemplateColumns);
+    expect(columns.trim().split(/\s+/)).toHaveLength(1);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

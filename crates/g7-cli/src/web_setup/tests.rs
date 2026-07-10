@@ -2,11 +2,11 @@ use super::{
     CSRF_HEADER, DoctorCheckStatus, REPORT_PATH, SESSION_COOKIE, SESSION_TTL, Session,
     SetupRequest, WebState, api_install_prepare, api_plan, api_recovery, api_report, api_reset,
     api_rollback, api_status, app_css, app_js, bootstrap, browser_addr_for, create_session,
-    doctor_status_label, doctor_to_api, ensure_remote_binding_is_explicit, failed_doctor_details,
-    index, install_checks_to_api, install_to_api, lock_client_ip, options_from_request, parse_bind,
-    promo_json, remove_session, require_allowed_client_ip, require_authenticated_session,
-    require_csrf, require_session, require_session_id, rollback_to_api, secure_eq, secure_token,
-    session_cookie,
+    doctor_status_label, doctor_to_api, emit_log, ensure_remote_binding_is_explicit,
+    event_history_snapshot, failed_doctor_details, index, install_checks_to_api, install_to_api,
+    lock_client_ip, options_from_request, parse_bind, promo_json, remove_session,
+    require_allowed_client_ip, require_authenticated_session, require_csrf, require_session,
+    require_session_id, rollback_to_api, secure_eq, secure_token, session_cookie,
 };
 use axum::Json;
 use axum::body::to_bytes;
@@ -15,11 +15,11 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::IntoResponse;
 use g7_core::commands::doctor::{DoctorCheck, DoctorReport};
 use g7_core::commands::{install, plan, reset, rollback};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::broadcast;
@@ -30,6 +30,8 @@ fn test_state() -> WebState {
         domain: None,
         local_test: true,
         events: broadcast::channel(16).0,
+        event_history: Arc::new(Mutex::new(VecDeque::new())),
+        event_sequence: Arc::new(AtomicU64::new(0)),
         install_running: Arc::new(AtomicBool::new(false)),
         sessions: Arc::new(Mutex::new(HashMap::new())),
         allowed_client_ip: Arc::new(Mutex::new(None)),
@@ -38,6 +40,22 @@ fn test_state() -> WebState {
 
 fn peer() -> ConnectInfo<SocketAddr> {
     ConnectInfo(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 49152))
+}
+
+#[test]
+fn web_events_keep_ordered_reconnect_history() {
+    let state = test_state();
+    let first = emit_log(&state, "first");
+    let second = emit_log(&state, "second");
+
+    assert!(second.seq > first.seq);
+    assert_eq!(
+        event_history_snapshot(&state, first.seq)
+            .into_iter()
+            .map(|event| event.message)
+            .collect::<Vec<_>>(),
+        vec!["second"]
+    );
 }
 
 fn setup_request(domain: &str) -> SetupRequest {
@@ -149,6 +167,7 @@ fn browser_url_uses_loopback_for_unspecified_bind() {
 fn failed_doctor_details_lists_blocking_checks_only() {
     let report = DoctorReport {
         install_allowed: false,
+        resources: Default::default(),
         checks: vec![
             DoctorCheck {
                 name: "ok",
@@ -346,6 +365,7 @@ fn public_wizard_rejects_unsupported_runtime_and_apps() {
 fn doctor_conversion_preserves_status_labels() {
     let report = doctor_to_api(DoctorReport {
         install_allowed: false,
+        resources: Default::default(),
         checks: vec![
             DoctorCheck {
                 name: "pass",

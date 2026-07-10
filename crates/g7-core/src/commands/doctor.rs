@@ -19,6 +19,18 @@ use g7_system::{SystemProbe, SystemProbeError};
 pub struct DoctorReport {
     pub install_allowed: bool,
     pub checks: Vec<DoctorCheck>,
+    pub resources: ResourceSnapshot,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ResourceSnapshot {
+    pub total_memory_kib: Option<u64>,
+    pub available_memory_kib: Option<u64>,
+    pub swap_total_kib: Option<u64>,
+    pub root_total_kib: Option<u64>,
+    pub root_available_kib: Option<u64>,
+    pub root_total_inodes: Option<u64>,
+    pub root_available_inodes: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,9 +53,43 @@ pub fn run() -> DoctorReport {
 }
 
 pub fn run_with_probe<R: CommandRunner>(probe: &SystemProbe<R>) -> DoctorReport {
-    let checks = vec![
+    let memory = probe.memory_info();
+    let filesystem = probe.root_filesystem_info();
+    let resources = ResourceSnapshot {
+        total_memory_kib: memory
+            .as_ref()
+            .ok()
+            .and_then(|value| value.map(|info| info.total_kib)),
+        available_memory_kib: memory
+            .as_ref()
+            .ok()
+            .and_then(|value| value.map(|info| info.available_kib)),
+        swap_total_kib: memory
+            .as_ref()
+            .ok()
+            .and_then(|value| value.map(|info| info.swap_total_kib)),
+        root_total_kib: filesystem
+            .as_ref()
+            .ok()
+            .and_then(|value| value.map(|info| info.total_kib)),
+        root_available_kib: filesystem
+            .as_ref()
+            .ok()
+            .and_then(|value| value.map(|info| info.available_kib)),
+        root_total_inodes: filesystem
+            .as_ref()
+            .ok()
+            .and_then(|value| value.map(|info| info.total_inodes)),
+        root_available_inodes: filesystem
+            .as_ref()
+            .ok()
+            .and_then(|value| value.map(|info| info.available_inodes)),
+    };
+    let mut checks = vec![
         ubuntu_check(probe.os_release()),
         privilege_check(probe.current_privilege()),
+        memory_capacity_check(&memory),
+        memory_headroom_check(&memory),
         nginx_check(probe.service_activity("nginx")),
         apache_check(probe.service_activity("apache2")),
         port_check(80, probe.tcp_port_status(80)),
@@ -55,6 +101,7 @@ pub fn run_with_probe<R: CommandRunner>(probe: &SystemProbe<R>) -> DoctorReport 
         g7_owned_files_check(probe),
         certbot_check(probe),
     ];
+    checks.extend(filesystem_capacity_checks(&filesystem));
 
     let install_allowed = checks.iter().all(|check| {
         !matches!(
@@ -66,7 +113,122 @@ pub fn run_with_probe<R: CommandRunner>(probe: &SystemProbe<R>) -> DoctorReport 
     DoctorReport {
         install_allowed,
         checks,
+        resources,
     }
+}
+
+fn memory_capacity_check(
+    result: &Result<Option<g7_system::MemoryInfo>, SystemProbeError>,
+) -> DoctorCheck {
+    match result {
+        Ok(Some(info)) if info.total_kib < 900 * 1024 => DoctorCheck {
+            name: "memory-capacity",
+            status: DoctorCheckStatus::Fail,
+            message: format!(
+                "메모리가 {} MiB입니다. 최소 900 MiB가 필요합니다.",
+                info.total_kib / 1024
+            ),
+        },
+        Ok(Some(info)) => DoctorCheck {
+            name: "memory-capacity",
+            status: DoctorCheckStatus::Pass,
+            message: format!("메모리 {} MiB를 감지했습니다.", info.total_kib / 1024),
+        },
+        Ok(None) => DoctorCheck {
+            name: "memory-capacity",
+            status: DoctorCheckStatus::Warn,
+            message: "메모리 용량을 확인하지 못했습니다.".to_string(),
+        },
+        Err(error) => DoctorCheck {
+            name: "memory-capacity",
+            status: DoctorCheckStatus::Warn,
+            message: format!("메모리 용량 확인 실패: {error}"),
+        },
+    }
+}
+
+fn memory_headroom_check(
+    result: &Result<Option<g7_system::MemoryInfo>, SystemProbeError>,
+) -> DoctorCheck {
+    match result {
+        Ok(Some(info)) if info.available_kib < 128 * 1024 && info.swap_total_kib == 0 => {
+            DoctorCheck {
+                name: "memory-headroom",
+                status: DoctorCheckStatus::Fail,
+                message: format!(
+                    "가용 메모리가 {} MiB이고 swap이 없습니다. 설치 전에 메모리를 확보해야 합니다.",
+                    info.available_kib / 1024
+                ),
+            }
+        }
+        Ok(Some(info)) if info.available_kib < 256 * 1024 => DoctorCheck {
+            name: "memory-headroom",
+            status: DoctorCheckStatus::Warn,
+            message: format!(
+                "가용 메모리가 {} MiB입니다. 설치 중 swap을 먼저 구성합니다.",
+                info.available_kib / 1024
+            ),
+        },
+        Ok(Some(info)) => DoctorCheck {
+            name: "memory-headroom",
+            status: DoctorCheckStatus::Pass,
+            message: format!(
+                "가용 메모리 {} MiB, swap {} MiB입니다.",
+                info.available_kib / 1024,
+                info.swap_total_kib / 1024
+            ),
+        },
+        _ => DoctorCheck {
+            name: "memory-headroom",
+            status: DoctorCheckStatus::Warn,
+            message: "가용 메모리와 swap 상태를 확인하지 못했습니다.".to_string(),
+        },
+    }
+}
+
+fn filesystem_capacity_checks(
+    result: &Result<Option<g7_system::FilesystemInfo>, SystemProbeError>,
+) -> Vec<DoctorCheck> {
+    let Some(info) = result.as_ref().ok().and_then(|value| *value) else {
+        return vec![
+            DoctorCheck {
+                name: "disk-capacity",
+                status: DoctorCheckStatus::Warn,
+                message: "루트 디스크 여유 공간을 확인하지 못했습니다.".to_string(),
+            },
+            DoctorCheck {
+                name: "inode-capacity",
+                status: DoctorCheckStatus::Warn,
+                message: "루트 디스크 inode 여유를 확인하지 못했습니다.".to_string(),
+            },
+        ];
+    };
+    let free_percent = info.available_inodes.saturating_mul(100) / info.total_inodes.max(1);
+    vec![
+        DoctorCheck {
+            name: "disk-capacity",
+            status: if info.available_kib < 6 * 1024 * 1024 {
+                DoctorCheckStatus::Fail
+            } else {
+                DoctorCheckStatus::Pass
+            },
+            message: format!(
+                "루트 디스크 여유 공간은 {} MiB입니다. 최소 6144 MiB가 필요합니다.",
+                info.available_kib / 1024
+            ),
+        },
+        DoctorCheck {
+            name: "inode-capacity",
+            status: if free_percent < 5 {
+                DoctorCheckStatus::Fail
+            } else {
+                DoctorCheckStatus::Pass
+            },
+            message: format!(
+                "루트 디스크 inode 여유는 {free_percent}%입니다. 최소 5%가 필요합니다."
+            ),
+        },
+    ]
 }
 
 fn nginx_check(result: Result<ServiceActivity, SystemProbeError>) -> DoctorCheck {
@@ -368,20 +530,25 @@ fn g7_owned_files_check<R: CommandRunner>(probe: &SystemProbe<R>) -> DoctorCheck
 
 fn certbot_check<R: CommandRunner>(probe: &SystemProbe<R>) -> DoctorCheck {
     match probe.directory_entries(Path::new("/etc/letsencrypt/live")) {
-        Ok(entries) if entries.is_empty() => DoctorCheck {
-            name: "certbot-live",
-            status: DoctorCheckStatus::Pass,
-            message: "No existing Let's Encrypt live certificates found.".to_string(),
-        },
-        Ok(entries) => DoctorCheck {
-            name: "certbot-live",
-            status: DoctorCheckStatus::Warn,
-            message: format!(
-                "Found {} existing Let's Encrypt live entr{}. Domain-specific ownership check will run during install.",
-                entries.len(),
-                plural_y(entries.len())
-            ),
-        },
+        Ok(entries) => {
+            let count = entries.into_iter().filter(|path| path.is_dir()).count();
+            if count == 0 {
+                DoctorCheck {
+                    name: "certbot-live",
+                    status: DoctorCheckStatus::Pass,
+                    message: "No existing Let's Encrypt live certificates found.".to_string(),
+                }
+            } else {
+                DoctorCheck {
+                    name: "certbot-live",
+                    status: DoctorCheckStatus::Warn,
+                    message: format!(
+                        "Found {count} existing Let's Encrypt live entr{}. Domain-specific ownership check will run during install.",
+                        plural_y(count)
+                    ),
+                }
+            }
+        }
         Err(err) => DoctorCheck {
             name: "certbot-live",
             status: DoctorCheckStatus::Warn,
@@ -400,7 +567,7 @@ fn plural_y(count: usize) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{DoctorCheckStatus, port_check, run_with_probe};
+    use super::{DoctorCheckStatus, certbot_check, port_check, run_with_probe};
     use g7_system::SystemProbe;
     use g7_system::command::{CommandOutput, FakeCommandRunner};
     use g7_system::port::PortStatus;
@@ -409,6 +576,22 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn certbot_readme_is_not_counted_as_a_certificate()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let fs_root = create_temp_fs_root()?;
+        let live = fs_root.join("etc/letsencrypt/live");
+        fs::create_dir_all(&live)?;
+        fs::write(live.join("README"), "Certbot managed directory\n")?;
+        let probe = SystemProbe::new(FakeCommandRunner::default()).with_fs_root(&fs_root);
+
+        let check = certbot_check(&probe);
+
+        fs::remove_dir_all(fs_root)?;
+        assert_eq!(check.status, DoctorCheckStatus::Pass);
+        Ok(())
+    }
 
     #[test]
     fn doctor_allows_clean_fresh_server_with_non_root_warning()

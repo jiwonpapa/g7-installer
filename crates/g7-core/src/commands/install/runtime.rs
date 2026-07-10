@@ -10,8 +10,6 @@ pub(super) fn apply_runtime_phase<R: CommandRunner>(
     let sizing = detected_memory_sizing(probe);
     let ini_path = php_ini_override_path(plan);
 
-    checks.extend(apply_swap_configuration(probe, paths, &sizing, owned)?);
-
     checks.push(InstallCheck::pass(
         "server-sizing",
         format!(

@@ -22,6 +22,5 @@ pub mod privilege;
 pub mod probe;
 pub mod service;
 pub mod systemd;
-pub mod ufw;
 
-pub use probe::{SystemProbe, SystemProbeError};
+pub use probe::{FilesystemInfo, MemoryInfo, SystemProbe, SystemProbeError};

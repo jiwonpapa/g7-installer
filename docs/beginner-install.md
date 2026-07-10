@@ -78,6 +78,8 @@ bash "$tmp"
 
 ## 3. 방화벽 열기
 
+이 단계는 Lightsail 등 VPS 제공자 콘솔에서 직접 합니다. G7 Installer는 UFW·fail2ban을 설치하거나 방화벽 규칙을 변경하지 않습니다.
+
 메뉴:
 
 ```text

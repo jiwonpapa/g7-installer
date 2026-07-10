@@ -509,20 +509,20 @@ pub(super) fn provisioning_sections(input: ProvisioningInput<'_>) -> Vec<Provisi
         },
         ProvisioningSection {
             name: "firewall",
-            title: "방화벽 및 포트 정책",
+            title: "외부 포트 운영 경계",
             summary:
-                "SSH, HTTP, HTTPS만 외부 공개하고 DB/Redis/설치 UI 포트는 외부 공개를 차단합니다."
+                "설치기는 필요한 포트만 안내합니다. 방화벽 설치·변경은 별도 유지보수 도구의 책임입니다."
                     .to_string(),
             settings: vec![
                 ProvisioningSetting::new("allow", "active SSH port, 80/tcp, 443/tcp"),
                 ProvisioningSetting::new("deny", "7717/tcp, 3306/tcp, 6379/tcp inbound"),
                 ProvisioningSetting::new(
                     "owner",
-                    "Lightsail 방화벽을 1차 기준으로 보고 UFW는 서버 내부 보조 정책으로 적용",
+                    "Lightsail 등 VPS 제공자 방화벽 또는 별도 유지보수 앱에서 관리",
                 ),
                 ProvisioningSetting::new(
                     "verify",
-                    "적용 후 ss/ufw/외부 포트 검사 결과를 리포트에 기록",
+                    "설치기는 서비스의 로컬 리슨 상태만 점검하고 방화벽 규칙은 변경하지 않음",
                 ),
             ],
         },
@@ -607,8 +607,8 @@ pub(super) fn provisioning_sections(input: ProvisioningInput<'_>) -> Vec<Provisi
                 "웹파일은 사이트 계정 소유, 쓰기 디렉터리만 제한적으로 허용",
             ),
             ProvisioningSetting::new(
-                "fail2ban",
-                "SSH jail 상태 점검 후 standard/hardened 정책에서 적용 후보",
+                "operations_scope",
+                "UFW/fail2ban은 별도 유지보수 앱에서 관리",
             ),
             ProvisioningSetting::new(
                 "ssh",

@@ -6,13 +6,13 @@
 //! The controller must not expose arbitrary shell execution or invent install
 //! defaults that do not exist in `plan.rs`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, Query};
@@ -23,7 +23,9 @@ use axum::{Json, Router};
 use g7_core::commands::{DoctorCheckStatus, doctor, install, plan, reset, rollback, status};
 use g7_core::installer_paths::{CONFIG_PATH, LOCAL_HOSTS_PATH, REPORT_PATH, ROLLBACK_PATH};
 use g7_state::owned_files::OWNED_FILES_PATH;
-use g7_state::state::STATE_PATH;
+use g7_state::state::{STATE_PATH, read_state_file};
+use g7_system::SystemProbe;
+use g7_system::command::{CommandEvent, CommandObserver, RealCommandRunner};
 use getrandom::fill as fill_random;
 use miette::{IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};

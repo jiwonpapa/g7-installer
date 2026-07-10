@@ -337,12 +337,13 @@ dependencies = [
 
 [[package]]
 name = "g7-cli"
-version = "0.2.30"
+version = "0.2.31"
 dependencies = [
  "axum",
  "clap",
  "g7-core",
  "g7-state",
+ "g7-system",
  "getrandom",
  "miette",
  "serde",
@@ -353,7 +354,7 @@ dependencies = [
 
 [[package]]
 name = "g7-core"
-version = "0.2.30"
+version = "0.2.31"
 dependencies = [
  "base64",
  "g7-state",
@@ -366,15 +367,15 @@ dependencies = [
 
 [[package]]
 name = "g7-release"
-version = "0.2.30"
+version = "0.2.31"
 
 [[package]]
 name = "g7-render"
-version = "0.2.30"
+version = "0.2.31"
 
 [[package]]
 name = "g7-state"
-version = "0.2.30"
+version = "0.2.31"
 dependencies = [
  "fs2",
  "serde",
@@ -383,7 +384,7 @@ dependencies = [
 
 [[package]]
 name = "g7-system"
-version = "0.2.30"
+version = "0.2.31"
 dependencies = [
  "serde",
  "serde_json",

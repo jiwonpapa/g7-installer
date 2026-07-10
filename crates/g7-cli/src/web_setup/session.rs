@@ -244,15 +244,26 @@ impl IntoResponse for ApiError {
     }
 }
 
-pub(super) fn emit_log(state: &WebState, message: impl Into<String>) {
-    let _ = state.events.send(WebEvent {
-        event_type: "log",
-        message: message.into(),
-        stage: None,
-        status: None,
-        operation: None,
-        percent: None,
-    });
+const EVENT_HISTORY_LIMIT: usize = 2_000;
+
+pub(super) fn emit_log(state: &WebState, message: impl Into<String>) -> WebEvent {
+    publish_event(
+        state,
+        WebEvent {
+            seq: 0,
+            timestamp_unix_ms: 0,
+            event_type: "log",
+            message: message.into(),
+            stage: None,
+            status: None,
+            operation: None,
+            percent: None,
+            operation_id: None,
+            stream: None,
+            command: None,
+            elapsed_ms: None,
+        },
+    )
 }
 
 pub(super) fn emit_stage(
@@ -260,15 +271,24 @@ pub(super) fn emit_stage(
     stage: &'static str,
     status: &'static str,
     message: impl Into<String>,
-) {
-    let _ = state.events.send(WebEvent {
-        event_type: "stage",
-        message: message.into(),
-        stage: Some(stage),
-        status: Some(status),
-        operation: None,
-        percent: None,
-    });
+) -> WebEvent {
+    publish_event(
+        state,
+        WebEvent {
+            seq: 0,
+            timestamp_unix_ms: 0,
+            event_type: "stage",
+            message: message.into(),
+            stage: Some(stage),
+            status: Some(status),
+            operation: None,
+            percent: None,
+            operation_id: None,
+            stream: None,
+            command: None,
+            elapsed_ms: None,
+        },
+    )
 }
 
 pub(super) fn emit_progress(
@@ -276,13 +296,104 @@ pub(super) fn emit_progress(
     operation: &'static str,
     percent: u8,
     message: impl Into<String>,
-) {
-    let _ = state.events.send(WebEvent {
-        event_type: "progress",
-        message: message.into(),
-        stage: None,
-        status: None,
-        operation: Some(operation),
-        percent: Some(percent.min(100)),
-    });
+) -> WebEvent {
+    publish_event(
+        state,
+        WebEvent {
+            seq: 0,
+            timestamp_unix_ms: 0,
+            event_type: "progress",
+            message: message.into(),
+            stage: None,
+            status: None,
+            operation: Some(operation),
+            percent: Some(percent.min(100)),
+            operation_id: None,
+            stream: None,
+            command: None,
+            elapsed_ms: None,
+        },
+    )
+}
+
+pub(super) fn event_history_snapshot(state: &WebState, after_seq: u64) -> Vec<WebEvent> {
+    state
+        .event_history
+        .lock()
+        .map(|history| {
+            history
+                .iter()
+                .filter(|event| event.seq > after_seq)
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn publish_event(state: &WebState, mut event: WebEvent) -> WebEvent {
+    event.seq = state.event_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+    event.timestamp_unix_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_millis());
+    if let Ok(mut history) = state.event_history.lock() {
+        history.push_back(event.clone());
+        while history.len() > EVENT_HISTORY_LIMIT {
+            history.pop_front();
+        }
+    }
+    let _ = state.events.send(event.clone());
+    event
+}
+
+#[derive(Clone)]
+pub(super) struct WebCommandObserver {
+    state: WebState,
+    operation: &'static str,
+    operation_id: String,
+}
+
+impl WebCommandObserver {
+    pub(super) fn new(state: WebState, operation: &'static str, operation_id: String) -> Self {
+        Self {
+            state,
+            operation,
+            operation_id,
+        }
+    }
+}
+
+impl CommandObserver for WebCommandObserver {
+    fn on_event(&self, command_event: CommandEvent) {
+        let message = match command_event.event {
+            "start" => format!("명령 시작: {}", command_event.command),
+            "finish" => format!(
+                "명령 완료: {} (종료 코드 {})",
+                command_event.command,
+                command_event.status.unwrap_or(128)
+            ),
+            _ => command_event.line.clone().unwrap_or_default(),
+        };
+        if message.is_empty() {
+            return;
+        }
+        publish_event(
+            &self.state,
+            WebEvent {
+                seq: 0,
+                timestamp_unix_ms: 0,
+                event_type: "command",
+                message,
+                stage: None,
+                status: command_event
+                    .status
+                    .map(|status| if status == 0 { "성공" } else { "실패" }),
+                operation: Some(self.operation),
+                percent: None,
+                operation_id: Some(self.operation_id.clone()),
+                stream: command_event.stream,
+                command: Some(command_event.command),
+                elapsed_ms: command_event.elapsed_ms,
+            },
+        );
+    }
 }

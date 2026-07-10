@@ -91,9 +91,9 @@ pub(super) fn apply_post_database_guidance(
     Vec<InstallCheck>,
 ) {
     let firewall_checks = vec![InstallCheck {
-        name: "ufw-policy".to_string(),
-        status: "deferred".to_string(),
-        message: "UFW apply is deferred until active SSH port detection is implemented; provider firewall should allow SSH, 80, and 443 only.".to_string(),
+        name: "network-boundary".to_string(),
+        status: "manual".to_string(),
+        message: "Firewall management is outside this installer. Allow the active SSH port plus 80/443 in the VPS provider or a separate maintenance app; do not expose 7717/3306/6379.".to_string(),
     }];
     let mail_checks = if plan.mail_mode == "none" {
         vec![InstallCheck {

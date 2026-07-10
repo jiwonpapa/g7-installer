@@ -1,8 +1,26 @@
 use super::*;
 
 pub(super) fn doctor_to_api(report: doctor::DoctorReport) -> DoctorApiReport {
+    let resources = DoctorApiResources {
+        total_memory_mib: report.resources.total_memory_kib.map(|value| value / 1024),
+        available_memory_mib: report
+            .resources
+            .available_memory_kib
+            .map(|value| value / 1024),
+        swap_total_mib: report.resources.swap_total_kib.map(|value| value / 1024),
+        root_available_mib: report
+            .resources
+            .root_available_kib
+            .map(|value| value / 1024),
+        root_inode_free_percent: report
+            .resources
+            .root_available_inodes
+            .zip(report.resources.root_total_inodes)
+            .map(|(available, total)| available.saturating_mul(100) / total.max(1)),
+    };
     DoctorApiReport {
         install_allowed: report.install_allowed,
+        resources,
         checks: report
             .checks
             .into_iter()

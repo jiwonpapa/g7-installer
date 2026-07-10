@@ -780,7 +780,7 @@ pub(super) fn setup_guide_content(
     content.push_str(&checks_markdown(&summary.runtime_checks));
     content.push_str("\n### DB\n\n");
     content.push_str(&checks_markdown(&summary.database_checks));
-    content.push_str("\n### 방화벽\n\n");
+    content.push_str("\n### 외부 포트 운영 경계 (수동 관리)\n\n");
     content.push_str(&checks_markdown(&summary.firewall_checks));
     content.push_str("\n### 메일\n\n");
     content.push_str(&checks_markdown(&summary.mail_checks));

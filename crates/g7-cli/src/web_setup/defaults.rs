@@ -4,6 +4,7 @@ pub const DEFAULT_BIND: &str = "127.0.0.1:7717";
 
 pub(super) const INDEX_HTML: &str = include_str!("../../../../web/index.html");
 pub(super) const APP_JS: &str = include_str!("../../../../web/app.js");
+pub(super) const EVENT_STREAM_JS: &str = include_str!("../../../../web/modules/event-stream.js");
 pub(super) const APP_CSS: &str = include_str!("../../../../web/dist/app.css");
 pub(super) const PROMO_JSON: &str = include_str!("../../../../web/promo.sample.json");
 pub(super) const DEFAULT_PROMO_MANIFEST_URL: &str = "/promo.json";
