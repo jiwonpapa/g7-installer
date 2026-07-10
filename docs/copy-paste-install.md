@@ -1,266 +1,150 @@
 # 따라하기식 설치 매뉴얼
 
-새 Ubuntu 24.04 VPS에 `g7inst`를 설치하고 웹 마법사를 여는 복붙용 절차입니다. Mac 터미널과 Windows PowerShell 둘 다 따라 할 수 있습니다.
+새 Ubuntu 24.04 VPS에 `g7inst`를 설치하고 웹 마법사를 여는 가장 짧은 절차입니다. 기존 운영 서버에는 실행하지 마세요.
 
-대상은 새 서버입니다. 기존 운영 서버에는 실행하지 마세요.
+## 1. 준비할 값
 
-실행 위치를 구분합니다.
-
-| 표시 | 의미 |
+| 값 | 예시 |
 | --- | --- |
-| Mac | 내 Mac 터미널에서 실행 |
-| Windows PowerShell | 내 Windows PowerShell에서 실행 |
-| 서버 안 | SSH 접속 후 Ubuntu 서버 터미널에서 실행. Mac/Windows 공통 |
+| 서버 공인 IP | `203.0.113.10` |
+| SSH 계정 | Ubuntu 이미지라면 보통 `ubuntu` |
+| SSH 개인키 | `YOUR_KEY.pem` |
+| 도메인 | 웹 마법사에서 입력 |
 
-## 0. 내 값 정하기
+VPS 제공자 방화벽은 `22`, `80`, `443`만 엽니다. `7717`, `3306`, `6379`는 열지 않습니다.
 
-Mac:
+## 2. 접속 방식 하나 선택
+
+아래 명령 한 줄이 다음 작업을 모두 처리합니다.
+
+1. VPS에 SSH 접속
+2. 설치 화면용 SSH 터널 생성
+3. 최신 `g7inst` 설치 또는 업데이트
+4. 웹 설치 마법사 실행
+
+### A. `.pem` 개인키로 접속
+
+Lightsail을 포함한 대부분의 클라우드 Ubuntu 이미지는 이 방식을 사용합니다.
+
+Mac 터미널:
 
 ```bash
-SERVER_IP="서버_공인_IP"
-DOMAIN="example.com"
-KEY="$HOME/.ssh/lightsail_g7inst.pem"
-```
-
-예:
-
-```bash
-SERVER_IP="52.79.62.209"
-DOMAIN="g7devops.com"
-KEY="$HOME/.ssh/lightsail_g7inst.pem"
+ssh -i "$HOME/.ssh/YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/latest/download/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 Windows PowerShell:
 
 ```powershell
-$SERVER_IP = "서버_공인_IP"
-$DOMAIN = "example.com"
-$KEY = "$env:USERPROFILE\.ssh\lightsail_g7inst.pem"
+ssh -i "$env:USERPROFILE\.ssh\YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/latest/download/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
-## 1. DNS 설정
+바꿀 값:
 
-Cloudflare를 쓰면 프록시는 끄고 `DNS only`로 둡니다.
+- `YOUR_KEY.pem`: 내려받은 개인키 파일명
+- `SERVER_IP`: VPS 공인 IP
+- `ubuntu`: VPS 제공자가 안내한 SSH 계정이 다를 때만 변경
 
-| 타입 | 이름 | 값 |
-| --- | --- | --- |
-| A | `@` | `SERVER_IP` |
-| CNAME | `www` | `DOMAIN` |
+개인키 파일을 아직 옮기지 않았다면 먼저 처리합니다.
 
-DNS 확인입니다. Mac:
+Mac 터미널:
 
 ```bash
-dig +short "$DOMAIN" A
-dig +short "www.$DOMAIN" A
-```
-
-Windows PowerShell:
-
-```powershell
-nslookup $DOMAIN
-nslookup "www.$DOMAIN"
-```
-
-## 2. SSH 키 준비
-
-Mac:
-
-```bash
-mkdir -p ~/.ssh
-mv ~/Downloads/YOUR_LIGHTSAIL_KEY.pem "$KEY"
-chmod 600 "$KEY"
+mkdir -p "$HOME/.ssh"
+mv "$HOME/Downloads/YOUR_KEY.pem" "$HOME/.ssh/YOUR_KEY.pem"
+chmod 600 "$HOME/.ssh/YOUR_KEY.pem"
 ```
 
 Windows PowerShell:
 
 ```powershell
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.ssh" | Out-Null
-Move-Item "$env:USERPROFILE\Downloads\YOUR_LIGHTSAIL_KEY.pem" "$KEY"
-icacls "$KEY" /inheritance:r /grant:r "$($env:USERNAME):(R)"
+Move-Item "$env:USERPROFILE\Downloads\YOUR_KEY.pem" "$env:USERPROFILE\.ssh\YOUR_KEY.pem"
+icacls "$env:USERPROFILE\.ssh\YOUR_KEY.pem" /inheritance:r /grant:r "$($env:USERNAME):(R)"
 ```
 
-## 3. 서버 접속
+### B. SSH 비밀번호로 접속
 
-Mac:
+VPS 업체가 SSH 계정과 비밀번호를 제공한 경우에만 사용합니다. Mac 터미널과 Windows PowerShell에서 같은 명령을 실행합니다.
 
 ```bash
-ssh -i "$KEY" ubuntu@"$SERVER_IP"
+ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/latest/download/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
-Windows PowerShell:
+바꿀 값:
 
-```powershell
-ssh -i $KEY ubuntu@$SERVER_IP
-```
+- `SSH_USER`: VPS 접속 계정
+- `SERVER_IP`: VPS 공인 IP
 
-접속되면 서버 안에서 확인합니다. 아래 명령은 Mac/Windows 공통입니다.
+SSH 비밀번호와 sudo 비밀번호를 물으면 터미널에 입력합니다. 비밀번호를 명령어에 넣거나 웹 설치 화면에 입력하지 않습니다.
 
-```bash
-sudo -n true && echo "sudo OK"
-```
+## 3. 브라우저 열기
 
-`sudo OK`가 나오지 않아도 sudo 비밀번호를 아는 계정이면 계속 진행할 수 있습니다.
-
-## 4. g7inst 설치
-
-서버 안에서 실행합니다. 아래 명령은 Mac/Windows 공통입니다.
-
-```bash
-sudo apt-get update
-sudo apt-get install -y ca-certificates curl
-tmp="$(mktemp)"
-curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/latest/download/bootstrap.sh -o "$tmp"
-sudo bash "$tmp"
-rm -f "$tmp"
-g7inst --version
-sudo g7inst doctor
-```
-
-sudo 비밀번호를 물어보면 SSH 터미널에 입력합니다.
-
-## 5. 선택: g7inst만 비밀번호 없이 sudo 허용
-
-매번 sudo 비밀번호를 묻는 서버라면 `g7inst` 명령만 비밀번호 없이 실행되도록 제한할 수 있습니다.
-
-```bash
-sudo visudo -f /etc/sudoers.d/g7inst
-```
-
-파일에 아래 줄을 넣습니다. 접속 계정이 `ubuntu`가 아니면 `ubuntu`를 실제 계정명으로 바꿉니다.
-
-```text
-ubuntu ALL=(root) NOPASSWD: SETENV: /usr/local/bin/g7inst
-```
-
-편집기가 `nano`로 열렸다면 `Ctrl+O`, `Enter`, `Ctrl+X` 순서로 저장하고 나옵니다.
-
-저장 후 확인합니다.
-
-```bash
-sudo chmod 0440 /etc/sudoers.d/g7inst
-sudo visudo -cf /etc/sudoers.d/g7inst
-sudo -n /usr/local/bin/g7inst --version
-```
-
-모든 명령을 비밀번호 없이 여는 `ALL=(ALL) NOPASSWD: ALL` 설정은 권장하지 않습니다.
-
-## 6. SSH 터널 열기
-
-서버에서 나갑니다. 아래 명령은 Mac/Windows 공통입니다.
-
-```bash
-exit
-```
-
-내 PC에서 터널을 열며 다시 접속합니다.
-
-Mac:
-
-```bash
-ssh -i "$KEY" -L 7717:127.0.0.1:7717 ubuntu@"$SERVER_IP"
-```
-
-Windows PowerShell:
-
-```powershell
-ssh -i $KEY -L 7717:127.0.0.1:7717 ubuntu@$SERVER_IP
-```
-
-## 7. 설치 마법사 시작
-
-터널로 접속된 서버 안에서 실행합니다. 아래 명령은 Mac/Windows 공통입니다.
-
-```bash
-DOMAIN="example.com"
-g7inst setup --domain "$DOMAIN"
-```
-
-`example.com`은 실제 도메인으로 바꿉니다. root가 아니면 설치기가 자동으로 `sudo` 재실행을 시도합니다. sudo 비밀번호가 필요하면 SSH 터미널에 입력합니다.
-
-성공하면 터미널에 이런 주소가 나옵니다.
+설치가 시작되면 터미널에 아래 형태의 주소가 나옵니다.
 
 ```text
 http://127.0.0.1:7717/?token=...
 ```
 
-## 8. 브라우저에서 열기
+주소 전체를 복사해 같은 PC의 브라우저에서 엽니다.
 
-내 PC 브라우저에서 터미널에 나온 `http://127.0.0.1:7717/?token=...` 주소를 엽니다. Mac/Windows 모두 같은 주소를 엽니다.
+- 도메인은 웹 마법사에서 한 번만 입력합니다.
+- 설치 중에는 터미널 창을 닫지 않습니다.
+- `7717/tcp`는 외부 방화벽에 열지 않습니다.
+- 설치를 마치면 터미널에서 `Ctrl+C`로 종료합니다.
 
-웹 UI에는 root/ubuntu 서버 비밀번호를 입력하지 않습니다.
+## 4. 마법사 진행
 
-## 9. 웹 화면에서 입력할 값
+웹 화면에서 다음 순서로 진행합니다.
 
-기본값은 아래 기준입니다.
+1. 서버 상태 점검
+2. 도메인과 사이트 계정 입력
+3. 설치 옵션 확인
+4. 설치 계획 확인
+5. 패키지와 서버 설정 설치
+6. 결과 리포트 확인
+7. 결과의 앱 링크에서 CMS 설치 마무리
 
-| 항목 | 값 |
-| --- | --- |
-| 도메인 | 실제 도메인 |
-| 웹서버 | Nginx |
-| PHP | 8.5 |
-| DB | MySQL |
-| Redis | 사용 |
-| 메일 | 서버 Postfix 발송 |
-| 앱 | 그누보드7 |
-| 사이트 계정 | 예: `g7` |
-| 사이트 계정 비밀번호 | 새로 정한 SFTP/파일관리 비밀번호 |
+`사이트 계정 비밀번호`는 서버 SSH 비밀번호가 아닙니다. 설치기가 만들 SFTP/파일관리 계정의 새 비밀번호입니다.
 
-진행 순서:
+## 5. 완료 기준
 
-1. 접속 확인
-2. 서버 점검
-3. 설치 방식
-4. 사양 확정
-5. 기본 구성
-6. 결과
-7. 세부 설정
+- 리포트 단계가 `completed`입니다.
+- 웹서버, PHP, DB, SSL 검증 결과가 표시됩니다.
+- `/var/log/g7-installer/setup-guide.md`가 생성됩니다.
+- 결과 리포트의 앱 링크가 열립니다.
 
-## 10. 설치 후 확인
+`completed`는 서버 프로비저닝 완료를 뜻합니다. 그누보드7과 WordPress의 관리자 계정과 CMS 내부 설정은 결과의 공식 설치 화면에서 마칩니다.
 
-서버 터미널입니다. 아래 명령은 Mac/Windows 공통입니다.
+## 6. 다시 설치할 때
 
-```bash
-sudo cat /var/log/g7-installer/report.json
-sudo less /var/log/g7-installer/setup-guide.md
-```
-
-브라우저:
-
-```text
-http://example.com
-https://example.com
-```
-
-`example.com`은 실제 도메인으로 바꿉니다.
-
-SSL은 DNS/IP가 맞고 Let's Encrypt 발급 조건이 통과해야 적용됩니다.
-
-`completed`는 서버 프로비저닝 완료입니다. CMS 관리자 설치까지 끝난 상태는 아닙니다. 결과 리포트의 `앱 링크`를 열어 다음을 진행합니다.
-
-- 그누보드7: 공식 `/install` 화면에서 Composer/Vendor, 관리자 계정, 확장, 마이그레이션을 완료합니다. 설치기는 그 전에 최신 안정 Release, 필수 빌드 파일, `.env.example` 기반 `.env`와 사이트 계정 전용 `0600` 권한까지 준비합니다.
-- WordPress: 공식 `/wp-admin/install.php` 화면에서 사이트 제목과 관리자 계정을 만듭니다.
-
-`www` 사용 여부와 HTTPS 적용 결과에 따라 주소가 달라질 수 있으므로 URL을 직접 조합하지 말고 결과 리포트의 링크를 사용합니다.
-
-## 11. 다시 설치해야 할 때
-
-신규 VPS 테스트에서 설치기가 만든 항목을 지우고 다시 시도하려면:
+운영 데이터가 생기기 전의 신규 VPS에서만 사용합니다.
 
 ```bash
 sudo g7inst reset --yes
 ```
 
-기존 Let's Encrypt 인증서는 중복 발급 제한을 피하기 위해 보존 우선입니다.
+설치기가 만든 파일, 계정, DB, 패키지와 메타데이터만 제거합니다. 운영 중인 사이트의 백업 복구 기능은 아닙니다.
 
-이 명령은 신규 VPS 재설치용입니다. 공식 CMS 설치를 마쳤거나 운영 데이터가 생겼다면 먼저 VPS 스냅샷이나 별도 백업을 만드세요.
+## 7. 막히면 확인
 
-## 막히면
-
-| 증상 | 처리 |
+| 증상 | 확인할 것 |
 | --- | --- |
-| SSH 접속 실패 | IP, 키 파일 경로, 키 권한 확인 |
-| `g7inst: command not found` | 4번 bootstrap 다시 실행 |
-| sudo 비밀번호를 모름 | root SSH, `su -`, VPS 콘솔에서 관리자 권한 확보 |
-| 브라우저 접속 안 됨 | SSH 터널 창이 열려 있는지 확인 |
-| 세션 쿠키 없음 | 터미널에 나온 token URL을 다시 열기 |
-| SSL 실패 | DNS A/CNAME, Cloudflare DNS only, 80/443 방화벽 확인 |
+| `Permission denied (publickey)` | 개인키 경로, 파일 권한, SSH 계정명 |
+| 비밀번호 로그인이 안 됨 | VPS 업체가 SSH 비밀번호 로그인을 허용했는지 확인 |
+| sudo 실패 | sudo 가능한 계정인지 확인하거나 VPS 콘솔에서 root 권한 확보 |
+| 브라우저 접속 실패 | 명령을 실행한 터미널이 열려 있는지 확인 |
+| `7717` 연결 거부 | 서버의 `g7inst setup`이 종료됐는지 확인하고 한 줄 명령 재실행 |
+| 설치 세션 없음 | 터미널에 새로 출력된 token 주소 전체를 다시 열기 |
+
+## 용어 설명
+
+| 용어 | 뜻 |
+| --- | --- |
+| SSH 개인키 | 비밀번호 대신 서버 접속을 증명하는 파일 |
+| SSH 비밀번호 | VPS 업체가 허용한 경우 터미널에서 입력하는 서버 접속 비밀번호 |
+| SSH 터널 | `7717`을 인터넷에 공개하지 않고 내 PC 브라우저로 연결하는 통로 |
+| sudo | 일반 계정에서 관리자 권한 명령을 실행하는 기능 |
+| bootstrap | 최신 `g7inst` 바이너리를 설치하거나 업데이트하는 과정 |
+| 접속 확인 주소 | 터미널에 출력되는 `http://127.0.0.1:7717/?token=...` 주소 |
+
+서버 생성, DNS, SSH 키 저장을 자세히 보려면 [Lightsail 상세 안내](lightsail-ubuntu24-setup-guide.md)를 확인합니다.

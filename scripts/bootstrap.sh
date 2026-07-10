@@ -95,5 +95,5 @@ echo "Installed ${BIN_NAME} to ${INSTALL_DIR}/${BIN_NAME}"
 "${INSTALL_DIR}/${BIN_NAME}" --version
 echo
 echo "Next:"
-echo "  sudo ${BIN_NAME} setup --domain example.com"
+echo "  sudo ${BIN_NAME} setup"
 echo "  ${BIN_NAME} doctor"

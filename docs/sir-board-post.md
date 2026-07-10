@@ -45,32 +45,25 @@ GitHub: https://github.com/jiwonpapa/g7-installer
 
 ### 설치 순서
 
-서버 SSH 접속 후 아래를 실행합니다.
+`.pem` 개인키를 사용하는 Mac은 아래 한 줄을 실행합니다.
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y ca-certificates curl
-tmp="$(mktemp)"
-curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/latest/download/bootstrap.sh -o "$tmp"
-sudo bash "$tmp"
-rm -f "$tmp"
-g7inst --version
-sudo g7inst doctor
+ssh -i "$HOME/.ssh/YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/latest/download/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
-내 PC의 새 터미널에서 SSH 터널을 열고 서버에 접속합니다.
+Windows PowerShell:
+
+```powershell
+ssh -i "$env:USERPROFILE\.ssh\YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/latest/download/bootstrap.sh | sudo bash && sudo g7inst setup'
+```
+
+SSH 비밀번호 로그인을 허용하는 VPS는 Mac과 Windows에서 아래 명령을 사용합니다.
 
 ```bash
-ssh -i ~/.ssh/YOUR_KEY.pem -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP
+ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/latest/download/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
-터널로 접속된 서버에서 설치 마법사를 시작합니다.
-
-```bash
-sudo g7inst setup --domain example.com
-```
-
-터미널에 출력된 아래 형태의 정확한 주소를 같은 PC 브라우저에서 엽니다. SSH 터널과 `setup` 터미널은 설치가 끝날 때까지 닫지 않습니다.
+SSH 비밀번호와 sudo 비밀번호는 터미널에만 입력합니다. 터미널에 출력된 아래 형태의 정확한 주소를 같은 PC 브라우저에서 엽니다. 설치가 끝날 때까지 터미널을 닫지 않습니다.
 
 ```text
 http://127.0.0.1:7717/?token=...

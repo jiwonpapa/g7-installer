@@ -115,7 +115,7 @@ pub(super) fn current_user_is_root() -> Result<bool> {
 
 pub(super) fn setup_requires_root_error() -> miette::Report {
     miette!(
-        "g7inst setup must be started with sudo/root.\nPreferred: sudo -v && sudo g7inst setup --domain example.com\nIf sudo asks for a password, type it in the SSH terminal before the web UI opens.\nIf sudo is not available, log in as root or run su - from the provider console, then run g7inst setup.\nServer account password input is not used in the web UI."
+        "g7inst setup must be started with sudo/root.\nPreferred: sudo -v && sudo g7inst setup\nEnter the domain once in the web wizard.\nIf sudo asks for a password, type it in the SSH terminal before the web UI opens.\nIf sudo is not available, log in as root or run su - from the provider console, then run g7inst setup.\nServer account password input is not used in the web UI."
     )
 }
 

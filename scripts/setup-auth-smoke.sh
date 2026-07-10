@@ -63,7 +63,7 @@ if [[ "$(id -u)" == "0" ]]; then
 fi
 
 set +e
-output="$(G7INST_DISABLE_SUDO_REEXEC=1 cargo run -q -p g7-cli -- setup --domain example.com 2>&1)"
+output="$(G7INST_DISABLE_SUDO_REEXEC=1 cargo run -q -p g7-cli -- setup 2>&1)"
 status=$?
 set -e
 

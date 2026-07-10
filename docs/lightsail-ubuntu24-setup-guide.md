@@ -10,68 +10,25 @@
 
 이미 서버, 고정 IP, 도메인 A 레코드가 준비됐으면 바로 진행합니다.
 
-Lightsail 기본 Ubuntu는 보통 서버 비밀번호가 필요 없습니다. `ubuntu` 계정으로 SSH 키 접속하고, 비밀번호 없는 `sudo`로 설치 컨트롤러를 실행합니다. 다른 VPS에서 `sudo` 비밀번호를 요구하면 일반 계정에서 `g7inst setup --domain ...`을 실행해도 설치기가 SSH 터미널에서 `sudo` 재실행을 시도합니다. 웹 UI에는 서버 비밀번호를 입력하지 않습니다.
-
-1. SSH와 sudo 상태를 확인합니다.
+Lightsail 기본 Ubuntu는 `.pem` 개인키와 `ubuntu` 계정을 사용합니다. Mac 터미널에서는 아래 한 줄을 실행합니다.
 
 ```bash
-ssh g7installer
-sudo -n true && echo "sudo OK"
-g7inst --version
-exit
+ssh -i "$HOME/.ssh/lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/latest/download/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
-`sudo OK`가 나오면 비밀번호 없이 설치 준비가 된 상태입니다. 실패하더라도 `sudo` 권한이 있는 서버라면 아래처럼 일반 계정에서 setup을 실행할 수 있습니다.
+Windows PowerShell:
+
+```powershell
+ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/latest/download/bootstrap.sh | sudo bash && sudo g7inst setup'
+```
+
+다른 VPS에서 SSH 비밀번호 로그인을 허용하면 Mac과 Windows에서 아래 명령을 사용합니다.
 
 ```bash
-g7inst setup --domain g7devops.com
+ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/latest/download/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
-설치기가 sudo로 재실행되며, sudo 비밀번호를 물어보면 SSH 터미널에 입력합니다. sudo 자체가 실패하면 root SSH, `su -`, 또는 VPS 콘솔에서 관리자 권한을 먼저 확보해야 합니다.
-
-필요하면 `g7inst` 명령만 비밀번호 없이 sudo 실행되도록 제한할 수 있습니다. root 또는 sudo 가능한 계정으로 한 번 접속한 뒤 아래처럼 설정합니다.
-
-```bash
-sudo visudo -f /etc/sudoers.d/g7inst
-```
-
-열린 파일에 서버 접속 계정을 넣습니다. Lightsail 기본 계정이면 보통 `ubuntu`입니다.
-
-```text
-ubuntu ALL=(root) NOPASSWD: SETENV: /usr/local/bin/g7inst
-```
-
-저장 후 확인합니다.
-
-```bash
-sudo chmod 0440 /etc/sudoers.d/g7inst
-sudo visudo -cf /etc/sudoers.d/g7inst
-sudo -n /usr/local/bin/g7inst --version
-```
-
-`ALL=(ALL) NOPASSWD: ALL`처럼 모든 명령을 비밀번호 없이 여는 설정은 권장하지 않습니다. 설치가 끝난 뒤 이 예외가 필요 없으면 `sudo rm /etc/sudoers.d/g7inst`로 제거합니다.
-
-2. 필요하면 VPS 백업/스냅샷을 확인합니다.
-
-```text
-스냅샷/백업은 비용과 시간이 들 수 있습니다.
-신규 테스트 서버라면 필수 단계가 아닙니다.
-운영 데이터가 있으면 먼저 백업 정책을 확인하세요.
-```
-
-3. SSH 터널을 열고 서버에 접속합니다.
-
-```bash
-ssh -L 7717:127.0.0.1:7717 g7installer
-```
-
-4. 같은 터미널 창에서 설치 UI를 시작합니다.
-
-```bash
-sudo g7inst setup --domain g7devops.com
-```
-
-5. 브라우저에서 접속 확인 주소를 엽니다.
+SSH 비밀번호와 sudo 비밀번호는 요청될 때 터미널에만 입력합니다. 도메인은 웹 마법사에서 한 번만 입력합니다. 브라우저에서는 터미널에 출력된 접속 확인 주소를 엽니다.
 
 ```text
 http://127.0.0.1:7717/?token=...
@@ -225,10 +182,10 @@ dig +short www.example.com A
 
 ## 8. g7inst 확인
 
-서버에 접속합니다.
+서버에 접속합니다. SSH alias가 없어도 됩니다.
 
 ```bash
-ssh g7installer
+ssh -i "$HOME/.ssh/lightsail_g7inst.pem" ubuntu@SERVER_IP
 ```
 
 설치 여부를 확인합니다.
@@ -240,9 +197,31 @@ g7inst doctor
 sudo tail -120 /var/log/g7-lightsail-bootstrap.log
 ```
 
-`sudo OK`가 나오지 않으면 일반 계정에서 `g7inst setup --domain example.com`을 실행해 sudo 재실행을 시도합니다. 그래도 실패하면 설치 UI를 진행하지 말고 root SSH, `su -`, 또는 VPS 콘솔에서 관리자 권한을 확보합니다. 기본 Lightsail Ubuntu 이미지는 보통 비밀번호 없이 sudo가 됩니다.
+`sudo OK`가 나오지 않으면 일반 계정에서 `g7inst setup`을 실행해 sudo 재실행을 시도합니다. 그래도 실패하면 설치 UI를 진행하지 말고 root SSH, `su -`, 또는 VPS 콘솔에서 관리자 권한을 확보합니다. 기본 Lightsail Ubuntu 이미지는 보통 비밀번호 없이 sudo가 됩니다.
 
-매번 sudo 비밀번호를 묻는 서버는 위의 `g7inst` 전용 sudoers 설정을 적용하면 이후 `g7inst setup` 재실행이 비밀번호 없이 진행됩니다.
+매번 sudo 비밀번호를 묻는 서버는 아래 선택 설정을 적용하면 이후 `g7inst setup` 재실행이 비밀번호 없이 진행됩니다.
+
+### 선택: `g7inst`만 비밀번호 없이 sudo 허용
+
+```bash
+sudo visudo -f /etc/sudoers.d/g7inst
+```
+
+접속 계정이 `ubuntu`가 아니면 실제 계정명으로 바꿉니다.
+
+```text
+ubuntu ALL=(root) NOPASSWD: SETENV: /usr/local/bin/g7inst
+```
+
+저장 후 검사합니다.
+
+```bash
+sudo chmod 0440 /etc/sudoers.d/g7inst
+sudo visudo -cf /etc/sudoers.d/g7inst
+sudo -n /usr/local/bin/g7inst --version
+```
+
+모든 명령을 허용하는 `ALL=(ALL) NOPASSWD: ALL`은 사용하지 않습니다. 설치 후 예외가 필요 없으면 `sudo rm /etc/sudoers.d/g7inst`로 제거합니다.
 
 `g7inst: command not found`가 나오면 먼저 `sudo tail -120 /var/log/g7-lightsail-bootstrap.log`로 시작 스크립트가 끝났는지 확인합니다. 로그가 끝났는데도 없으면 아래를 서버 안에서 한 번 실행합니다.
 
@@ -270,28 +249,24 @@ g7inst --version
 
 ## 10. 설치 웹 UI 열기
 
-Mac:
+`.pem` 개인키 방식은 SSH 터널과 설치기 설치·실행을 한 줄로 처리합니다.
+
+Mac 터미널:
 
 ```bash
-ssh -i ~/.ssh/lightsail_g7inst.pem -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP
+ssh -i "$HOME/.ssh/lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/latest/download/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 Windows PowerShell:
 
 ```powershell
-ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP
+ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/latest/download/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
-SSH alias가 있으면:
+SSH 비밀번호 방식은 Mac과 Windows에서 같은 명령을 사용합니다.
 
 ```bash
-ssh -L 7717:127.0.0.1:7717 g7installer
-```
-
-서버 안에서 실행합니다.
-
-```bash
-sudo g7inst setup --domain example.com
+ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/latest/download/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 브라우저에서 접속 확인 주소를 엽니다.
@@ -300,7 +275,7 @@ sudo g7inst setup --domain example.com
 http://127.0.0.1:7717/?token=...
 ```
 
-웹 화면에서는 root/ubuntu 서버 비밀번호를 입력하지 않습니다. 접속 확인 주소로 접속하면 바로 서버 점검 단계로 진행합니다. 설치 중에는 이 SSH 터널 창을 닫지 않습니다.
+비밀번호는 요청될 때 터미널에만 입력합니다. 웹 화면에서는 서버 비밀번호를 입력하지 않고 도메인을 한 번 입력합니다. 설치 중에는 이 SSH 터널 창을 닫지 않습니다.
 
 `사이트 계정 비밀번호`는 새로 정합니다. 설치기가 만들 `g7` 같은 사이트 계정의 SFTP/파일관리 비밀번호이며, sudo 권한은 주지 않습니다. 기본 웹루트는 `/home/계정/public_html`이고 소유권은 `계정:www-data`로 맞춥니다.
 
