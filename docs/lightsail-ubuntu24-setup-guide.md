@@ -301,7 +301,7 @@ sudo cat /var/log/g7-installer/report.json
 sudo less /var/log/g7-installer/setup-guide.md
 ```
 
-리포트 단계가 `completed`이면 패키지, Nginx/Apache vhost, PHP/DB 튜닝, DB 계정, 앱 파일 배치, 설정 안내서 저장까지 끝난 상태입니다. SSL은 DNS/IP 검증과 인증서 발급 조건이 맞을 때 적용되며, 보류나 실패가 있으면 리포트에 표시됩니다. 그누보드7은 GitHub 공식 최신 안정 Release와 필수 빌드 파일을 검증한 뒤 브라우저 `/install`로 인계합니다. Composer/Vendor, `.env`, 관리자 계정, 확장과 마이그레이션은 G7 공식 설치 화면에서 진행합니다. WordPress는 공식 최신 설치 화면으로 이어집니다.
+리포트 단계가 `completed`이면 패키지, Nginx/Apache vhost, PHP/DB 튜닝, DB 계정, 앱 파일 배치, 설정 안내서 저장까지 끝난 상태입니다. SSL은 DNS/IP 검증과 인증서 발급 조건이 맞을 때 적용되며, 보류나 실패가 있으면 리포트에 표시됩니다. 그누보드7은 GitHub 공식 최신 안정 Release와 필수 빌드 파일을 검증하고 `.env.example`에서 사이트 계정 전용 `0600` 권한의 `.env`를 준비한 뒤 브라우저 `/install`로 인계합니다. Composer/Vendor, 관리자 계정, 확장과 마이그레이션은 G7 공식 설치 화면에서 진행합니다. WordPress는 공식 최신 설치 화면으로 이어집니다.
 
 ## 11. 다른 Ubuntu VPS에서 쓰기
 

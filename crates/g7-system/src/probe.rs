@@ -10,7 +10,7 @@ use crate::apache::{config_test as apache_config_test, enable_module as apache_e
 use crate::app::{artisan, composer_install, composer_require, npm_install, npm_run_build};
 use crate::apt::{apt_add_repository, apt_candidate_available, apt_install, apt_purge, apt_update};
 use crate::archive::{
-    copy_dir_contents, download_file, fetch_text, git_clone, git_fsck_full,
+    copy_dir_contents, copy_file, download_file, fetch_text, git_clone, git_fsck_full,
     git_ls_files_error_unmatch, git_rev_parse_head, git_tracked_files_status, test_dir, test_file,
     unzip_archive, unzip_test,
 };
@@ -293,6 +293,14 @@ impl<R: CommandRunner> SystemProbe<R> {
     ) -> Result<CommandOutput, SystemProbeError> {
         copy_dir_contents(&self.runner, source_dir, destination_dir)
             .map_err(SystemProbeError::Command)
+    }
+
+    pub fn copy_file(
+        &self,
+        source_path: &str,
+        destination_path: &str,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        copy_file(&self.runner, source_path, destination_path).map_err(SystemProbeError::Command)
     }
 
     pub fn test_file(&self, path: &str) -> Result<CommandOutput, SystemProbeError> {

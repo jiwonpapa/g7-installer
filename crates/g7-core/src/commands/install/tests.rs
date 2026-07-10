@@ -117,7 +117,12 @@ fn install_writes_prepared_state_and_owned_files()
     assert!(database_runtime.contains("long_query_time = 0.5"));
     assert!(fs_root.join("etc/g7-installer/secrets.toml").exists());
     assert!(fs_root.join("var/log/g7-installer/setup-guide.md").exists());
-    assert!(!fs_root.join("home/g7/public_html/.env").exists());
+    assert!(
+        report
+            .app_checks
+            .iter()
+            .any(|check| check.name == "app-env-created" && check.status == "pass")
+    );
     assert!(
         !fs_root
             .join("home/g7/public_html/storage/app/settings/drivers.json")
@@ -166,6 +171,22 @@ fn install_writes_prepared_state_and_owned_files()
         .find(|(_, spec)| spec.display() == "chown -R g7:www-data /home/g7/public_html")
         .map(|(index, _)| index)
         .ok_or_else(|| std::io::Error::other("missing app chown command after copy"))?;
+    let env_copy_index = recorded
+        .iter()
+        .enumerate()
+        .skip(app_copy_index + 1)
+        .find(|(_, spec)| {
+            spec.display() == "cp -- /home/g7/public_html/.env.example /home/g7/public_html/.env"
+        })
+        .map(|(index, _)| index)
+        .ok_or_else(|| std::io::Error::other("missing G7 .env copy command"))?;
+    let env_chmod_index = recorded
+        .iter()
+        .enumerate()
+        .skip(env_copy_index + 1)
+        .find(|(_, spec)| spec.display() == "chmod 0600 /home/g7/public_html/.env")
+        .map(|(index, _)| index)
+        .ok_or_else(|| std::io::Error::other("missing G7 .env permission command"))?;
     let storage_chmod_index = recorded
         .iter()
         .enumerate()
@@ -184,8 +205,10 @@ fn install_writes_prepared_state_and_owned_files()
         .map(|(index, _)| index)
         .ok_or_else(|| std::io::Error::other("missing final deployed Git check"))?;
     assert!(app_copy_index < final_git_check_index);
-    assert!(final_git_check_index < app_chown_index);
+    assert!(final_git_check_index < env_copy_index);
+    assert!(env_copy_index < app_chown_index);
     assert!(app_chown_index < storage_chmod_index);
+    assert!(storage_chmod_index < env_chmod_index);
     assert!(recorded.iter().any(|spec| {
         spec.display()
             .contains("api.github.com/repos/gnuboard/g7/releases/latest")
@@ -586,7 +609,12 @@ fn install_configures_frankenphp_edge_runtime()
     let vhost = fs::read_to_string(fs_root.join("etc/nginx/sites-available/g7.conf"))?;
     assert!(vhost.contains("proxy_pass http://127.0.0.1:7080;"));
     assert!(!vhost.contains("fastcgi_pass"));
-    assert!(!fs_root.join("home/g7/public_html/.env").exists());
+    assert!(
+        report
+            .app_checks
+            .iter()
+            .any(|check| check.name == "app-env-created" && check.status == "pass")
+    );
     let setup_guide = fs::read_to_string(fs_root.join("var/log/g7-installer/setup-guide.md"))?;
     assert!(setup_guide.contains("FrankenPHP service"));
     assert!(setup_guide.contains("sudo systemctl restart g7-frankenphp"));
@@ -897,7 +925,12 @@ fn install_configures_gnuboard7_octane_on_frankenphp()
     assert!(unit.contains("Description=G7 FrankenPHP app server"));
     assert!(unit.contains("php-server --listen 127.0.0.1:7080"));
     assert!(!unit.contains("artisan octane:frankenphp"));
-    assert!(!fs_root.join("home/g7/public_html/.env").exists());
+    assert!(
+        report
+            .app_checks
+            .iter()
+            .any(|check| check.name == "app-env-created" && check.status == "pass")
+    );
 
     let recorded = probe.runner().recorded();
     assert!(!recorded.iter().any(|spec| {
@@ -1475,7 +1508,9 @@ fn push_successful_app_outputs(
             runner.push_output(CommandOutput::success(""));
             push_successful_required_path_outputs(runner, super::GNUBOARD7_REQUIRED_FILES, &[]);
             push_successful_git_validation_outputs(runner, super::GNUBOARD7_REQUIRED_FILES);
+            runner.push_output(CommandOutput::success(""));
             push_successful_app_permission_outputs(runner, install_plan);
+            runner.push_output(CommandOutput::success(""));
         }
         "wordpress" => {
             runner.push_output(CommandOutput::success(""));
@@ -1500,6 +1535,7 @@ fn push_successful_app_outputs(
             runner.push_output(CommandOutput::success(""));
             push_successful_required_path_outputs(runner, super::LARAVEL_REQUIRED_FILES, &[]);
             push_successful_app_permission_outputs(runner, install_plan);
+            runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success("composer ok\n"));
             if install_plan.app_profile == "laravel-octane" {
                 runner.push_output(CommandOutput::success("octane composer ok\n"));
@@ -1553,12 +1589,6 @@ fn push_successful_app_permission_outputs(
 ) {
     runner.push_output(CommandOutput::success(""));
     for _writable_path in super::app_writable_paths(install_plan) {
-        runner.push_output(CommandOutput::success(""));
-    }
-    if matches!(
-        install_plan.app_profile.as_str(),
-        "laravel" | "laravel-octane"
-    ) {
         runner.push_output(CommandOutput::success(""));
     }
 }

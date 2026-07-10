@@ -148,32 +148,25 @@ pub(super) fn apply_app_permissions<R: CommandRunner>(
             format!("Set runtime directory `{target}` to owner-writable mode 0755."),
         ));
     }
-    if let Some(check) = apply_app_env_permissions(probe, paths, plan)? {
-        checks.push(check);
-    }
-
     Ok(checks)
 }
 
 pub(super) fn apply_app_env_permissions<R: CommandRunner>(
     probe: &SystemProbe<R>,
-    paths: &InstallPaths,
     plan: &plan::InstallPlan,
-) -> Result<Option<InstallCheck>> {
+) -> Result<InstallCheck> {
     let env_path = format!("{}/.env", plan.web_root);
-    if !paths.resolve(&env_path).exists() {
-        return Ok(None);
-    }
-
-    let command = format!("chmod 0640 {env_path}");
+    let command = format!("chmod 0600 {env_path}");
     let output = probe
-        .chmod_path("0640", &env_path)
+        .chmod_path("0600", &env_path)
         .map_err(|err| command_error("app-env-permissions", &command, err))?;
     require_success("app-env-permissions", command, output)?;
-    Ok(Some(InstallCheck::pass(
+    Ok(InstallCheck::pass(
         "app-env-permissions",
-        format!("Set `{env_path}` to mode 0640 after web-root permission normalization."),
-    )))
+        format!(
+            "Set `{env_path}` to owner-only mode 0600 after web-root permission normalization."
+        ),
+    ))
 }
 
 pub(super) fn verify_git_checkout<R: CommandRunner>(

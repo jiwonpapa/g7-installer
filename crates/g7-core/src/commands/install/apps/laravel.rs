@@ -80,6 +80,7 @@ pub(super) fn install_laravel_app<R: CommandRunner>(
     checks.extend(source_checks);
     checks.extend(deployed_checks);
     checks.extend(apply_app_permissions(probe, paths, plan, owned)?);
+    checks.push(apply_app_env_permissions(probe, plan)?);
     checks.extend(configure_laravel_runtime(
         probe,
         paths,

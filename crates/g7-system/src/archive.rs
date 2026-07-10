@@ -143,6 +143,19 @@ pub fn copy_dir_contents<R: CommandRunner>(
     )
 }
 
+pub fn copy_file<R: CommandRunner>(
+    runner: &R,
+    source_path: &str,
+    destination_path: &str,
+) -> Result<CommandOutput, CommandError> {
+    runner.run(
+        &CommandSpec::new("cp")
+            .arg("--")
+            .arg(source_path)
+            .arg(destination_path),
+    )
+}
+
 pub fn test_file<R: CommandRunner>(runner: &R, path: &str) -> Result<CommandOutput, CommandError> {
     runner.run(&CommandSpec::new("test").arg("-f").arg(path))
 }
@@ -154,7 +167,7 @@ pub fn test_dir<R: CommandRunner>(runner: &R, path: &str) -> Result<CommandOutpu
 #[cfg(test)]
 mod tests {
     use super::{
-        copy_dir_contents, download_file, fetch_text, git_clone, git_fsck_full,
+        copy_dir_contents, copy_file, download_file, fetch_text, git_clone, git_fsck_full,
         git_ls_files_error_unmatch, git_rev_parse_head, git_tracked_files_status, test_dir,
         test_file, unzip_archive, unzip_test,
     };
@@ -359,6 +372,26 @@ mod tests {
                 OsString::from("-a"),
                 OsString::from("/tmp/app/."),
                 OsString::from("/home/g7/public_html"),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn copy_file_is_shell_free() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success(""));
+
+        copy_file(&runner, "/tmp/source/.env.example", "/srv/app/.env")?;
+        let recorded = runner.recorded();
+
+        assert_eq!(recorded[0].program, OsString::from("cp"));
+        assert_eq!(
+            recorded[0].args,
+            vec![
+                OsString::from("--"),
+                OsString::from("/tmp/source/.env.example"),
+                OsString::from("/srv/app/.env"),
             ]
         );
         Ok(())

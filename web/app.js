@@ -3081,7 +3081,7 @@ function provisioningActions(report = {}) {
         ["G7 core 빌드", `${appRoot}/public/build/core/template-engine.min.js`],
         ["설치 잠금", `${appRoot}/storage/app/g7_installed`],
         ["CKEditor 업로드 제한", `${appRoot}/storage/app/plugins/sirsoft-ckeditor5/settings/setting.json`],
-        [".env 권한", "0640"],
+        [".env 권한", "0600 (사이트 계정만 읽기/쓰기)"],
         ["접속 링크", appUrl],
         ["안내서", report.setup_guide_path || "-"],
       ],

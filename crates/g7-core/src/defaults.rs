@@ -31,6 +31,7 @@ pub(crate) const FRANKENPHP_HOST: &str = "127.0.0.1";
 pub(crate) const FRANKENPHP_PORT: &str = "7080";
 pub(crate) const FRANKENPHP_LISTEN: &str = "127.0.0.1:7080";
 pub(crate) const GNUBOARD7_REQUIRED_FILES: &[&str] = &[
+    ".env.example",
     "artisan",
     "composer.json",
     "public/index.php",

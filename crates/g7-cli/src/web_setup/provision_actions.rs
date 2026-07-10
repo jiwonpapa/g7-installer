@@ -357,7 +357,7 @@ pub(super) fn app_permission_checks(
     checks.push(run_command_check(
         "app-web-root-mode",
         "chmod",
-        &["-R", "0755", web_root],
+        &["0755", web_root],
         None,
     ));
 
@@ -388,7 +388,7 @@ pub(super) fn app_permission_checks(
         checks.push(run_command_check(
             "app-env-mode",
             "chmod",
-            &["0640", &env_path],
+            &["0600", &env_path],
             None,
         ));
     }

@@ -31,7 +31,7 @@ jiwonpapa/g7-installer
 
 G7 본체와의 관계:
 
-- 그누보드7은 GitHub 공식 최신 안정 Release를 조회·clone하고 배포 후 Git 필수 파일을 재검증한 뒤 공식 브라우저 `/install`로 인계합니다. Composer/Vendor, `.env`, 관리자 계정, 확장과 마이그레이션은 G7 공식 설치기가 담당합니다.
+- 그누보드7은 GitHub 공식 최신 안정 Release를 조회·clone하고 배포 후 Git 필수 파일을 재검증한 뒤 `.env.example`에서 소유자 전용 `0600` 권한의 `.env`를 준비하고 공식 브라우저 `/install`로 인계합니다. Composer/Vendor, 관리자 계정, 확장과 마이그레이션은 G7 공식 설치기가 담당합니다.
 - WordPress는 최신 배포 zip을 받아 설치 화면으로 연결합니다.
 - 각 앱 본체 레포를 직접 수정하지 않습니다.
 

@@ -174,7 +174,7 @@ http://127.0.0.1:7717/?token=...
 
 웹 UI는 `패키지 설치/검증 -> 사이트 계정/웹루트 -> 웹서버 vhost/HTTP 검증 -> PHP/런타임 튜닝 -> DB 튜닝/계정 생성 -> SSL 인증서/HTTPS 검증 -> 웹앱 파일 배치 -> 리포트 생성 -> 세부 설정 액션 패널` 순서로 진행합니다. 한 단계라도 실패하면 다음 단계로 넘어가지 않고 중단 리포트를 보여줍니다.
 
-그누보드7은 GitHub 공식 최신 안정 Release를 매번 새로 조회·clone하고 Git 무결성과 필수 빌드 파일을 검증한 뒤 공식 브라우저 `/install`로 인계합니다. Composer/Vendor, `.env`, 관리자 계정, 확장과 마이그레이션은 G7 공식 설치기가 처리하며 `g7inst`는 사전 NPM 빌드나 Artisan 설치 명령을 실행하지 않습니다. WordPress는 공식 `latest.zip`을 매번 내려받아 설치 화면으로 이어집니다.
+그누보드7은 GitHub 공식 최신 안정 Release를 매번 새로 조회·clone하고 Git 무결성과 필수 빌드 파일을 검증합니다. 이어서 `.env.example`을 `.env`로 복사하고 사이트 계정 전용 `0600` 권한을 적용한 뒤 공식 브라우저 `/install`로 인계합니다. Composer/Vendor, 관리자 계정, 확장과 마이그레이션은 G7 공식 설치기가 처리하며 `g7inst`는 사전 NPM 빌드나 Artisan 설치 명령을 실행하지 않습니다. WordPress는 공식 `latest.zip`을 매번 내려받아 설치 화면으로 이어집니다.
 
 재설치 초기화는 installer가 만든 사이트 계정의 서비스, 프로세스와 SSH/SFTP 세션을 종료한 뒤 계정을 삭제합니다. Ubuntu 기본 SSH 계정, root로 실행 중인 웹 컨트롤러, Mac의 SSH 터널과 보존 대상 Let's Encrypt 인증서는 종료하거나 삭제하지 않습니다.
 
