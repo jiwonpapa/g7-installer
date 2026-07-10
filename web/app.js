@@ -21,6 +21,7 @@ const state = {
   operationLocked: false,
   provisionActionResults: {},
   planPackages: [],
+  packageGroups: [],
   packageTicker: null,
   resourceDefaultsApplied: false,
   theme: localStorage.getItem("g7inst-theme") || "light",
@@ -77,6 +78,14 @@ const nodes = {
   installConfirmDialog: document.querySelector("#install-confirm-dialog"),
   installConfirmSummary: document.querySelector("#install-confirm-summary"),
   installConfirmStart: document.querySelector("#install-confirm-start"),
+  installProgressDialog: document.querySelector("#install-progress-dialog"),
+  installProgressClose: document.querySelector("#install-progress-close"),
+  installAppSummary: document.querySelector("#install-app-summary"),
+  installAppTitle: document.querySelector("#install-app-title"),
+  installAppState: document.querySelector("#install-app-state"),
+  installLogSlot: document.querySelector("#install-log-slot"),
+  logDock: document.querySelector("#log-dock"),
+  logDockHome: document.querySelector("#log-dock-home"),
   recoveryConfirmDialog: document.querySelector("#recovery-confirm-dialog"),
   recoveryConfirmTitle: document.querySelector("#recovery-confirm-title"),
   recoveryConfirmMessage: document.querySelector("#recovery-confirm-message"),
@@ -373,12 +382,67 @@ function setInstallRunning(running) {
   if (running) {
     state.currentOperation = "install";
     setOperationLocked(true);
+    setInstallSummaryStatus("running", "진행 중");
+    openInstallProgressDialog();
   } else if (state.currentOperation === "install") {
     state.currentOperation = null;
     setOperationLocked(false);
   }
 
   saveWizardState();
+}
+
+function setInstallSummaryStatus(status, label) {
+  if (nodes.installAppSummary) {
+    nodes.installAppSummary.dataset.status = status;
+  }
+  if (nodes.installAppState) {
+    nodes.installAppState.textContent = label;
+  }
+}
+
+function moveLogDock(target) {
+  if (!nodes.logDock || !target || nodes.logDock.parentElement === target) {
+    return;
+  }
+  target.append(nodes.logDock);
+}
+
+function openInstallProgressDialog() {
+  if (!nodes.installProgressDialog?.showModal) {
+    return;
+  }
+  nodes.installProgressDialog.dataset.outcome = "running";
+  nodes.installProgressClose.disabled = true;
+  setButtonLabel(nodes.installProgressClose, "설치 진행 중");
+  moveLogDock(nodes.installLogSlot);
+  if (!nodes.installProgressDialog.open) {
+    nodes.installProgressDialog.showModal();
+  }
+}
+
+function closeInstallProgressDialog() {
+  if (nodes.installProgressDialog?.open) {
+    nodes.installProgressDialog.close();
+  }
+  moveLogDock(nodes.logDockHome);
+}
+
+async function finishInstallProgressDialog(success) {
+  if (!nodes.installProgressDialog) {
+    return;
+  }
+
+  nodes.installProgressDialog.dataset.outcome = success ? "complete" : "failed";
+  setInstallSummaryStatus(success ? "complete" : "failed", success ? "완료" : "실패");
+  if (!success) {
+    nodes.installProgressClose.disabled = false;
+    setButtonLabel(nodes.installProgressClose, "닫고 문제 해결");
+    return;
+  }
+
+  await new Promise((resolve) => window.setTimeout(resolve, 560));
+  closeInstallProgressDialog();
 }
 
 function showOperationOverlay(title, message, options = {}) {
@@ -1376,6 +1440,9 @@ function refreshSummary() {
   nodes.summaryRuntime.textContent = `${runtimeLabel(payload.web_server)} / ${phpRuntimeLabel(payload.php_version, payload.php_source)}`;
   nodes.summaryData.textContent = `${databaseLabel(payload.database)} / Redis ${payload.redis === "enable" ? "사용" : "미사용"}`;
   nodes.summaryApp.textContent = appPackageLabel(payload.app_package);
+  if (nodes.installAppTitle) {
+    nodes.installAppTitle.textContent = appPackageLabel(payload.app_package);
+  }
 }
 
 function planRequestSignature(payload = optionPayload()) {
@@ -1709,6 +1776,9 @@ function markStage(stage, status) {
 
   row.dataset.status = status;
   row.querySelector("strong").textContent = status;
+  if (stage === "packages") {
+    setPackageGroupsForStage(status);
+  }
   const stageLabel = installStageLabels[stage] || row.querySelector("span")?.textContent || stage;
   if (status === "진행") {
     setActivityStatus(stageLabel, `${stageLabel} 진행 중입니다.`);
@@ -1718,6 +1788,30 @@ function markStage(stage, status) {
     setActivityStatus(stageLabel, `${stageLabel} 완료`);
   }
   updateInstallProgress();
+}
+
+function setPackageGroupsForStage(status) {
+  if (status === "성공") {
+    completePendingPackageProgress();
+    return;
+  }
+
+  document.querySelectorAll("[data-package-group]").forEach((group) => {
+    if (group.dataset.status === "complete" || group.dataset.status === "failed") {
+      return;
+    }
+    const label = group.querySelector("[data-package-group-status]");
+    if (status === "진행") {
+      group.dataset.status = "running";
+      label.textContent = "설치 중";
+    } else if (status === "실패") {
+      group.dataset.status = "failed";
+      label.textContent = "확인 필요";
+    } else {
+      group.dataset.status = "pending";
+      label.textContent = "대기";
+    }
+  });
 }
 
 function flattenPlanPackages(packages) {
@@ -1863,8 +1957,48 @@ function packageStatusMessage(check) {
   return purpose;
 }
 
+function packageGroupDefinition(name) {
+  const packageName = String(name || "");
+  const phpMatch = packageName.match(/^php(\d+\.\d+)(?:-|$)/);
+  if (phpMatch) {
+    return { key: "php", title: `PHP ${phpMatch[1]} 런타임` };
+  }
+  if (/^(nginx|apache2|frankenphp)/.test(packageName)) {
+    return { key: "web", title: "웹서버" };
+  }
+  if (/^(mysql|mariadb)/.test(packageName)) {
+    return { key: "database", title: "데이터베이스" };
+  }
+  if (/^redis/.test(packageName)) {
+    return { key: "redis", title: "Redis 캐시" };
+  }
+  if (/^(postfix|mailutils)/.test(packageName)) {
+    return { key: "mail", title: "메일 발송" };
+  }
+  if (/^(certbot|python3-certbot|letsencrypt)/.test(packageName)) {
+    return { key: "ssl", title: "SSL 인증서 도구" };
+  }
+  if (/^(git|composer|curl|unzip|nodejs|npm|ca-certificates|software-properties-common|lsb-release)/.test(packageName)) {
+    return { key: "tools", title: "앱 설치 도구" };
+  }
+  return { key: "system", title: "시스템 지원 패키지" };
+}
+
+function groupPackages(packages) {
+  const groups = new Map();
+  packages.forEach((packageItem) => {
+    const definition = packageGroupDefinition(packageItem.name);
+    if (!groups.has(definition.key)) {
+      groups.set(definition.key, { ...definition, packages: [] });
+    }
+    groups.get(definition.key).packages.push(packageItem);
+  });
+  return Array.from(groups.values());
+}
+
 function renderPackageProgress(packages) {
   state.planPackages = packages;
+  state.packageGroups = groupPackages(packages);
   stopPackageTicker();
 
   if (!nodes.packageProgressList) {
@@ -1873,44 +2007,71 @@ function renderPackageProgress(packages) {
 
   if (!packages.length) {
     if (nodes.packageProgressHelp) {
-      nodes.packageProgressHelp.textContent = "설치 사양 확정 후 apt 패키지별 진행 상태를 표시합니다.";
+      nodes.packageProgressHelp.textContent = "설치 사양 확정 후 apt 패키지를 역할별로 묶어 표시합니다.";
     }
-    nodes.packageProgressList.innerHTML = `<div class="empty-state">설치 사양 확정 후 패키지 목록이 표시됩니다.</div>`;
+    nodes.packageProgressList.innerHTML = `<div class="empty-state">설치 사양 확정 후 패키지 그룹이 표시됩니다.</div>`;
     return;
   }
 
   if (nodes.packageProgressHelp) {
-    nodes.packageProgressHelp.textContent = `총 ${packages.length}개 apt 패키지를 설치 또는 검증합니다. 각 패키지의 진행률과 결과를 따로 표시합니다.`;
+    nodes.packageProgressHelp.textContent = `${packages.length}개 apt 패키지를 ${state.packageGroups.length}개 역할로 묶었습니다. 실패한 그룹만 자동으로 펼쳐집니다.`;
   }
 
-  nodes.packageProgressList.innerHTML = packages.map((packageItem) => `
-    <div class="package-progress-row" data-package="${escapeHtml(packageItem.name)}">
-      <div>
-        <span>${escapeHtml(packageItem.name)}</span>
-        <p>${escapeHtml(packageItem.description)}</p>
+  nodes.packageProgressList.innerHTML = state.packageGroups.map((group) => `
+    <details class="package-progress-group" data-package-group="${escapeHtml(group.key)}" data-status="pending">
+      <summary>
+        <span>${escapeHtml(group.title)} · ${group.packages.length}개</span>
+        <strong data-package-group-status>대기</strong>
+      </summary>
+      <div class="package-progress-items">
+        ${group.packages.map((packageItem) => `
+          <div class="package-progress-item" data-package="${escapeHtml(packageItem.name)}" data-status="pending" title="${escapeHtml(packageItem.description)}">
+            <span>${escapeHtml(packageItem.name)}</span>
+            <span>대기</span>
+          </div>
+        `).join("")}
       </div>
-      <div class="package-progress-meter">
-        <progress class="progress progress-primary w-full" value="0" max="100"></progress>
-        <strong>대기 0%</strong>
-      </div>
-    </div>
+    </details>
   `).join("");
 }
 
 function updatePackageProgress(name, status, percent, message = null) {
-  const row = document.querySelector(`[data-package="${CSS.escape(name)}"]`);
-  if (!row) {
+  const item = document.querySelector(`[data-package="${CSS.escape(name)}"]`);
+  if (!item) {
     return;
   }
 
-  const progress = row.querySelector("progress");
-  const label = row.querySelector("strong");
-  const description = row.querySelector("p");
-  const value = Math.max(0, Math.min(100, Number(percent) || 0));
-  progress.value = value;
-  label.textContent = `${status} ${value}%`;
+  const normalizedStatus = status.includes("실패")
+    ? "fail"
+    : (status.includes("완료") ? "pass" : (status.includes("설치") || status.includes("진행") ? "running" : "pending"));
+  item.dataset.status = normalizedStatus;
+  item.querySelector("span:last-child").textContent = status;
   if (message) {
-    description.textContent = message;
+    item.title = message;
+  }
+  refreshPackageGroupStatus(item.closest("[data-package-group]"));
+}
+
+function refreshPackageGroupStatus(group) {
+  if (!group) {
+    return;
+  }
+  const statuses = Array.from(group.querySelectorAll("[data-package]")).map((item) => item.dataset.status);
+  const label = group.querySelector("[data-package-group-status]");
+  if (statuses.includes("fail")) {
+    group.dataset.status = "failed";
+    label.textContent = "실패";
+    group.open = true;
+  } else if (statuses.length && statuses.every((status) => status === "pass")) {
+    group.dataset.status = "complete";
+    label.textContent = "완료";
+    group.open = false;
+  } else if (statuses.includes("running")) {
+    group.dataset.status = "running";
+    label.textContent = "설치 중";
+  } else {
+    group.dataset.status = "pending";
+    label.textContent = "대기";
   }
 }
 
@@ -1922,46 +2083,6 @@ function resetPackageProgressRows() {
 
 function startPackageTicker() {
   stopPackageTicker();
-  if (!state.planPackages.length) {
-    return;
-  }
-
-  let index = 0;
-  let percent = 0;
-  updatePackageProgress(
-    state.planPackages[index].name,
-    "설치 중",
-    5,
-    `${packageDescription(state.planPackages[index].name)} 설치를 준비하고 있습니다.`,
-  );
-
-  state.packageTicker = window.setInterval(() => {
-    if (!state.installRunning) {
-      stopPackageTicker();
-      return;
-    }
-
-    const packageItem = state.planPackages[index];
-    percent = Math.min(95, percent + 10);
-    updatePackageProgress(packageItem.name, "설치 중", percent, `${packageDescription(packageItem.name)} 설치 또는 검증을 진행 중입니다.`);
-
-    if (percent >= 95 && index < state.planPackages.length - 1) {
-      updatePackageProgress(
-        packageItem.name,
-        "검증 대기",
-        100,
-        `${packageDescription(packageItem.name)} 최종 검증 결과를 기다리고 있습니다.`,
-      );
-      index += 1;
-      percent = 5;
-      updatePackageProgress(
-        state.planPackages[index].name,
-        "설치 중",
-        percent,
-        `${packageDescription(state.planPackages[index].name)} 설치를 준비하고 있습니다.`,
-      );
-    }
-  }, 700);
 }
 
 function stopPackageTicker() {
@@ -1978,9 +2099,10 @@ function applyPackageChecks(checks) {
   }
 
   checks.forEach((check) => {
+    const successful = ["pass", "installed", "skipped"].includes(check.status);
     updatePackageProgress(
       check.name,
-      check.status === "pass" ? "설치 완료" : "실패",
+      successful ? "설치 완료" : "실패",
       100,
       packageStatusMessage(check),
     );
@@ -1989,12 +2111,11 @@ function applyPackageChecks(checks) {
 
 function completePendingPackageProgress() {
   stopPackageTicker();
-  document.querySelectorAll("[data-package]").forEach((row) => {
-    const progress = row.querySelector("progress");
-    if (!progress || Number(progress.value) >= 100) {
+  document.querySelectorAll("[data-package]").forEach((item) => {
+    if (["pass", "fail"].includes(item.dataset.status)) {
       return;
     }
-    const packageName = row.dataset.package || "";
+    const packageName = item.dataset.package || "";
     updatePackageProgress(
       packageName,
       "검증 완료",
@@ -2103,11 +2224,13 @@ async function runResumeAction(button, statusNode) {
     renderInstallReport(report);
     await refreshRecoveryStatus();
     setAlert(nodes.reportStatus, "success", "설치 이어서 진행 완료", "중단 지점 이후 설정과 검증을 완료했습니다.");
+    await finishInstallProgressDialog(true);
     showStep("report", { force: true });
   } catch (error) {
     setAlert(statusNode, "error", "설치 이어서 진행 실패", formatError(error));
     log(formatError(error));
     await refreshRecoveryStatus();
+    await finishInstallProgressDialog(false);
   } finally {
     state.currentOperation = null;
     setOperationLocked(false);
@@ -2284,6 +2407,10 @@ function restoreInstallStateFromReport(report) {
 
   applyInstallStagesFromReport(report);
   state.installCompleted = isInstallCompleted(report);
+  setInstallSummaryStatus(
+    state.installCompleted ? "complete" : (failedStageFromReport(report) ? "failed" : "running"),
+    state.installCompleted ? "완료" : (failedStageFromReport(report) ? "실패" : "진행 중"),
+  );
   setReportReady(true);
   refreshInstallButtonState(state.installCompleted ? null : "복구 후 다시 시도");
 }
@@ -3350,20 +3477,37 @@ function compactListCard(title, rows, emptyText = "없음") {
   `;
 }
 
+function planAccordionSummary(title, meta) {
+  return `
+    <summary>
+      <span class="plan-summary-title">${iconMarkup("chevron-right")}<strong>${escapeHtml(title)}</strong></span>
+      <span>${escapeHtml(meta)}</span>
+    </summary>
+  `;
+}
+
 function packagePlanCard(packages) {
   const rows = flattenPlanPackages(packages);
+  const groups = groupPackages(rows);
   return `
     <details class="report-card plan-details">
-      <summary><strong>설치할 패키지</strong><span>${rows.length}개</span></summary>
+      ${planAccordionSummary("설치할 패키지", `${rows.length}개 · ${groups.length}개 역할`)}
       <div class="package-plan-list plan-details-body">
-        ${rows.length ? rows.map((item) => `
-          <div class="package-plan-item">
-            <div>
-              <span>${escapeHtml(item.name)}</span>
-              <p>${escapeHtml(item.description)}</p>
+        ${groups.length ? groups.map((group) => `
+          <details class="package-plan-group">
+            <summary>
+              <span>${iconMarkup("chevron-right")}${escapeHtml(group.title)}</span>
+              <span>${group.packages.length}개</span>
+            </summary>
+            <div class="package-plan-items">
+              ${group.packages.map((item) => `
+                <div class="package-plan-item">
+                  <span>${escapeHtml(item.name)}</span>
+                  <p>${escapeHtml(item.description)}</p>
+                </div>
+              `).join("")}
             </div>
-            <strong>패키지</strong>
-          </div>
+          </details>
         `).join("") : `
           <div class="empty-state">설치할 패키지가 없습니다.</div>
         `}
@@ -3376,7 +3520,7 @@ function provisioningPlanCard(provisioning) {
   const sections = Array.isArray(provisioning) ? provisioning : [];
   return `
     <details class="report-card plan-details">
-      <summary><strong>서버 설정 계획</strong><span>${sections.length}개 영역</span></summary>
+      ${planAccordionSummary("서버 설정 계획", `${sections.length}개 영역`)}
       <div class="result-list mt-3 plan-details-body">
         ${sections.length ? sections.map((section) => {
           const settings = Array.isArray(section.settings) && section.settings.length
@@ -3403,7 +3547,7 @@ function compactPlanDetails(title, rows, emptyText = "없음") {
   const items = Array.isArray(rows) && rows.length ? rows : [emptyText];
   return `
     <details class="report-card plan-details">
-      <summary><strong>${escapeHtml(title)}</strong><span>${items.length}개</span></summary>
+      ${planAccordionSummary(title, `${items.length}개`)}
       <ul class="report-list plan-details-body">
         ${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
       </ul>
@@ -3470,6 +3614,7 @@ function resetInstallStages() {
   });
   setProgress(nodes.installProgress, 0);
   resetPackageProgressRows();
+  setInstallSummaryStatus("pending", "대기");
 }
 
 function installConfirmSummaryHtml(payload) {
@@ -3567,6 +3712,7 @@ function confirmRecoveryAction(action) {
 
 function resetWizardForRetry(options = {}) {
   const targetStep = options.targetStep || "check";
+  closeInstallProgressDialog();
   clearWizardState();
   state.doctorReport = null;
   state.planReport = null;
@@ -3926,6 +4072,24 @@ function bindEvents() {
     }
   });
 
+  nodes.installProgressClose?.addEventListener("click", () => {
+    if (!state.installRunning) {
+      closeInstallProgressDialog();
+    }
+  });
+
+  nodes.installProgressDialog?.addEventListener("cancel", (event) => {
+    if (state.installRunning) {
+      event.preventDefault();
+      return;
+    }
+    moveLogDock(nodes.logDockHome);
+  });
+
+  nodes.installProgressDialog?.addEventListener("close", () => {
+    moveLogDock(nodes.logDockHome);
+  });
+
   document.querySelectorAll("[data-step]").forEach((button) => {
     button.addEventListener("click", () => showStep(button.dataset.step));
   });
@@ -4022,11 +4186,11 @@ function bindEvents() {
       return;
     }
 
-    setInstallRunning(true);
     state.installCompleted = false;
     setReportReady(false);
-    refreshInstallButtonState();
     resetInstallStages();
+    setInstallRunning(true);
+    refreshInstallButtonState();
     hideAlert(nodes.installStatus);
     hideReportProgress();
     startPackageTicker();
@@ -4043,8 +4207,9 @@ function bindEvents() {
       renderInstallReport(report);
       await refreshRecoveryStatus();
       setAlert(nodes.installStatus, "success", "서버 세팅 완료", "결과 리포트에서 웹서버, PHP, DB, SSL, 앱 경로와 재시작 명령을 확인하세요.");
-      showStep("report", { force: true });
       log(`서버 세팅 완료: ${report.phase}`);
+      await finishInstallProgressDialog(true);
+      showStep("report", { force: true });
     } catch (error) {
       stopPackageTicker();
       const reportPayload = await apiFetch("/api/report").catch(() => null);
@@ -4060,6 +4225,7 @@ function bindEvents() {
       await refreshRecoveryStatus();
       showStep("report", { force: true });
       log(formatError(error));
+      await finishInstallProgressDialog(false);
     } finally {
       setInstallRunning(false);
       refreshInstallButtonState(state.installCompleted ? null : "다시 시도");

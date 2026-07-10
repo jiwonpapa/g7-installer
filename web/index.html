@@ -517,36 +517,13 @@
               <button id="install-button" class="btn btn-primary icon-button" type="button" data-icon="package-plus">기본 구성 시작</button>
             </div>
             <div id="install-status" class="mt-5 hidden"></div>
-            <section class="execution-board mt-5">
-              <div class="execution-main">
-                <div>
-                  <span class="execution-kicker">실시간 실행</span>
-                  <h3 id="activity-current-stage">대기 중</h3>
-                  <p id="activity-current-message">기본 구성을 시작하면 서버 작업 로그와 단계별 결과가 이곳에 표시됩니다.</p>
-                </div>
-                <div class="execution-progress-row">
-                  <progress id="install-progress" class="progress progress-primary w-full" value="0" max="100"></progress>
-                  <strong id="activity-progress-label">0%</strong>
-                </div>
+            <section id="install-app-summary" class="install-app-summary mt-5" data-status="pending">
+              <div>
+                <span class="install-app-kicker">설치 대상</span>
+                <h3 id="install-app-title">그누보드7</h3>
+                <p>설치 중에는 작업 그래프가 별도 화면으로 열리고, 완료 후 결과 단계로 이동합니다.</p>
               </div>
-              <div class="execution-timeline" id="install-stages">
-                <div class="stage-row" data-stage="preflight"><span>서버 사전 점검</span><strong>대기</strong></div>
-                <div class="stage-row" data-stage="packages"><span>패키지 설치/검증</span><strong>대기</strong></div>
-                <div class="stage-row" data-stage="site"><span>사이트 계정/웹루트</span><strong>대기</strong></div>
-                <div class="stage-row" data-stage="vhost"><span>웹서버 vhost/HTTP 검증</span><strong>대기</strong></div>
-                <div class="stage-row" data-stage="runtime"><span>PHP/런타임 튜닝</span><strong>대기</strong></div>
-                <div class="stage-row" data-stage="database"><span>DB 튜닝/계정 생성</span><strong>대기</strong></div>
-                <div class="stage-row" data-stage="ssl"><span>SSL 인증서/HTTPS 검증</span><strong>대기</strong></div>
-                <div class="stage-row" data-stage="app"><span>웹앱 파일 배치</span><strong>대기</strong></div>
-                <div class="stage-row" data-stage="report"><span>리포트 생성</span><strong>대기</strong></div>
-              </div>
-            </section>
-            <section class="mt-5">
-              <h3 class="text-lg font-semibold">패키지 진행 상황</h3>
-              <p id="package-progress-help" class="mt-1 text-sm text-base-content/60">설치 사양 확정 후 apt 패키지별 진행 상태를 표시합니다.</p>
-              <div id="package-progress-list" class="package-progress-list mt-4">
-                <div class="empty-state">설치 사양 확정 후 패키지 목록이 표시됩니다.</div>
-              </div>
+              <strong id="install-app-state">대기</strong>
             </section>
             <section class="recovery-panel mt-5" data-recovery-panel hidden>
               <div>
@@ -645,12 +622,14 @@
             </dl>
           </section>
 
-          <details class="log-dock collapse collapse-arrow">
-            <summary class="collapse-title font-semibold">실시간 로그</summary>
-            <div class="collapse-content">
-              <pre id="live-log" class="code-box log-box">웹 컨트롤러를 불러오는 중...</pre>
-            </div>
-          </details>
+          <div id="log-dock-home">
+            <details id="log-dock" class="log-dock collapse collapse-arrow">
+              <summary class="collapse-title font-semibold">실시간 로그</summary>
+              <div class="collapse-content">
+                <pre id="live-log" class="code-box log-box">웹 컨트롤러를 불러오는 중...</pre>
+              </div>
+            </details>
+          </div>
         </aside>
       </section>
       </section>
@@ -670,6 +649,47 @@
       <form method="dialog" class="modal-backdrop">
         <button>close</button>
       </form>
+    </dialog>
+    <dialog id="install-progress-dialog" class="install-progress-dialog" aria-labelledby="activity-current-stage" aria-describedby="activity-current-message">
+      <section class="install-progress-shell">
+        <header class="install-progress-heading">
+          <div>
+            <span class="execution-kicker">기본 서버 구성</span>
+            <h2 id="activity-current-stage">대기 중</h2>
+            <p id="activity-current-message">기본 구성을 시작하면 현재 작업과 완료 순서가 표시됩니다.</p>
+          </div>
+          <div class="execution-progress-row">
+            <progress id="install-progress" class="progress progress-primary w-full" value="0" max="100"></progress>
+            <strong id="activity-progress-label">0%</strong>
+          </div>
+        </header>
+
+        <div class="install-graph" id="install-stages" aria-live="polite">
+          <section class="install-graph-node" data-stage="preflight"><div><span>서버 사전 점검</span><strong>대기</strong></div></section>
+          <section class="install-graph-node" data-stage="packages">
+            <div><span>패키지 설치/검증</span><strong>대기</strong></div>
+            <div class="install-graph-node-body">
+              <p id="package-progress-help">apt 패키지는 역할별로 묶어 표시합니다.</p>
+              <div id="package-progress-list" class="package-progress-list">
+                <div class="empty-state">설치 사양 확정 후 패키지 그룹이 표시됩니다.</div>
+              </div>
+            </div>
+          </section>
+          <section class="install-graph-node" data-stage="site"><div><span>사이트 계정/웹루트</span><strong>대기</strong></div></section>
+          <section class="install-graph-node" data-stage="vhost"><div><span>웹서버/HTTP 연결</span><strong>대기</strong></div></section>
+          <section class="install-graph-node" data-stage="runtime"><div><span>PHP 런타임 튜닝</span><strong>대기</strong></div></section>
+          <section class="install-graph-node" data-stage="database"><div><span>데이터베이스 구성</span><strong>대기</strong></div></section>
+          <section class="install-graph-node" data-stage="ssl"><div><span>SSL/HTTPS 검증</span><strong>대기</strong></div></section>
+          <section class="install-graph-node" data-stage="app"><div><span>웹앱 파일 배치</span><strong>대기</strong></div></section>
+          <section class="install-graph-node" data-stage="report"><div><span>설정 리포트 생성</span><strong>대기</strong></div></section>
+        </div>
+
+        <div id="install-log-slot" class="install-log-slot"></div>
+        <footer class="install-progress-footer">
+          <span>실패하면 해당 단계에서 멈추고 로그와 복구 방법을 표시합니다.</span>
+          <button id="install-progress-close" class="btn btn-outline icon-button" type="button" data-icon="x" disabled>닫기</button>
+        </footer>
+      </section>
     </dialog>
     <dialog id="recovery-confirm-dialog" class="modal">
       <div class="modal-box">

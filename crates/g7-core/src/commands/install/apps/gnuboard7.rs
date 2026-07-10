@@ -71,13 +71,13 @@ pub(super) fn install_gnuboard7_app<R: CommandRunner>(
     ];
     checks.extend(source_checks);
     checks.extend(deployed_checks);
-    checks.extend(apply_app_permissions(probe, paths, plan, owned)?);
     checks.extend(verify_git_checkout(
         probe,
         "gnuboard7-deployed",
         &plan.web_root,
         GNUBOARD7_REQUIRED_FILES,
     )?);
+    checks.extend(apply_app_permissions(probe, paths, plan, owned)?);
     checks.push(InstallCheck::pass(
         "app-install-screen",
         format!("그누보드7 브라우저 설치 화면을 {app_url} 에 준비했습니다."),

@@ -17,6 +17,21 @@
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .install-progress-shell,
+  .install-progress-dialog[data-outcome="complete"] .install-progress-shell,
+  .install-graph-node[data-status="진행"] {
+    animation: none !important;
+  }
+
+  .install-graph-node,
+  .install-graph-node-body,
+  .plan-summary-title .icon,
+  .package-plan-group > summary .icon {
+    transition: none !important;
+  }
+}
+
 @layer components {
   .app-shell {
     @apply mx-auto flex min-h-screen w-full max-w-7xl flex-col overflow-hidden border-base-300 bg-base-100 shadow-xl sm:my-4 sm:min-h-[calc(100vh-2rem)] sm:rounded-xl sm:border;
@@ -389,15 +404,32 @@
   }
 
   .plan-details summary {
-    @apply flex cursor-pointer list-none items-center justify-between gap-4;
+    @apply flex min-h-16 cursor-pointer list-none items-center justify-between gap-4 px-1;
   }
 
   .plan-details summary::-webkit-details-marker {
     display: none;
   }
 
-  .plan-details summary span {
+  .plan-details summary > span:last-child {
     @apply shrink-0 text-xs font-semibold text-base-content/50;
+  }
+
+  .plan-summary-title {
+    @apply flex min-w-0 items-center gap-3;
+  }
+
+  .plan-summary-title .icon {
+    @apply h-4 w-4 shrink-0 text-base-content/45 transition-transform duration-200;
+  }
+
+  .plan-details[open] .plan-summary-title .icon {
+    transform: rotate(90deg);
+  }
+
+  .plan-details summary:hover .plan-summary-title .icon,
+  .plan-details summary:focus-visible .plan-summary-title .icon {
+    @apply text-primary;
   }
 
   .plan-details-body {
@@ -596,11 +628,43 @@
   }
 
   .package-plan-list {
-    @apply mt-4 grid gap-x-6 md:grid-cols-2;
+    @apply mt-4 border-t border-base-300;
+  }
+
+  .package-plan-group {
+    @apply border-b border-base-300;
+  }
+
+  .package-plan-group > summary {
+    @apply flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 py-3 text-sm;
+  }
+
+  .package-plan-group > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .package-plan-group > summary > span:first-child {
+    @apply flex min-w-0 items-center gap-2 font-semibold;
+  }
+
+  .package-plan-group > summary .icon {
+    @apply h-4 w-4 shrink-0 text-base-content/40 transition-transform duration-200;
+  }
+
+  .package-plan-group[open] > summary .icon {
+    transform: rotate(90deg);
+  }
+
+  .package-plan-group > summary > span:last-child {
+    @apply shrink-0 text-xs font-semibold text-base-content/50;
+  }
+
+  .package-plan-items {
+    @apply grid gap-x-6 border-t border-base-300 pb-3 md:grid-cols-2;
   }
 
   .package-plan-item {
-    @apply flex min-w-0 items-start justify-between gap-4 border-t border-base-300 py-3 text-sm;
+    @apply min-w-0 border-b border-base-300/70 py-3 text-sm last:border-b-0;
   }
 
   .package-plan-item span {
@@ -611,31 +675,81 @@
     @apply mt-1 break-words text-xs leading-5 text-base-content/60;
   }
 
-  .package-plan-item strong {
-    @apply mt-0.5 shrink-0 rounded-full bg-info px-2 py-1 text-xs font-semibold text-info-content;
-  }
-
   .package-progress-list {
-    @apply grid gap-3 lg:grid-cols-2;
+    @apply mt-3 grid gap-2;
   }
 
-  .execution-board {
-    @apply grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem];
+  .install-app-summary {
+    @apply flex min-h-28 flex-col items-start justify-between gap-4 rounded-md border border-base-300 bg-base-100 p-5 shadow-sm sm:flex-row sm:items-center;
   }
 
-  .execution-main {
-    @apply grid min-w-0 gap-4 rounded-md border border-base-300 bg-base-100 p-4 shadow-sm;
+  .install-app-kicker {
+    @apply text-xs font-semibold text-primary;
+  }
+
+  .install-app-summary h3 {
+    @apply mt-1 text-xl font-semibold;
+  }
+
+  .install-app-summary p {
+    @apply mt-1 text-sm leading-6 text-base-content/60;
+  }
+
+  .install-app-summary > strong {
+    @apply inline-flex shrink-0 items-center rounded-full bg-base-200 px-3 py-1 text-xs font-semibold;
+  }
+
+  .install-app-summary[data-status="running"] > strong {
+    @apply bg-warning text-warning-content;
+  }
+
+  .install-app-summary[data-status="complete"] > strong {
+    @apply bg-success text-success-content;
+  }
+
+  .install-app-summary[data-status="failed"] > strong {
+    @apply bg-error text-error-content;
+  }
+
+  .install-progress-dialog {
+    width: min(62rem, calc(100vw - 2rem));
+    max-width: none;
+    max-height: calc(100dvh - 2rem);
+    margin: auto;
+    overflow: hidden;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: inherit;
+  }
+
+  .install-progress-dialog::backdrop {
+    background: rgb(17 24 39 / 0.62);
+    backdrop-filter: blur(8px);
+  }
+
+  .install-progress-shell {
+    @apply grid max-h-[calc(100dvh-2rem)] gap-5 overflow-y-auto rounded-md border border-base-300 bg-base-100 p-5 shadow-2xl md:p-6;
+    animation: g7inst-dialog-enter 180ms ease-out;
+  }
+
+  .install-progress-dialog[data-outcome="complete"] .install-progress-shell {
+    animation: g7inst-dialog-complete 520ms ease-in forwards;
+  }
+
+  .install-progress-heading {
+    @apply grid gap-4 border-b border-base-300 pb-5 md:grid-cols-[minmax(0,1fr)_15rem] md:items-end;
   }
 
   .execution-kicker {
     @apply text-xs font-semibold text-primary;
   }
 
-  .execution-main h3 {
-    @apply mt-1 text-xl font-semibold;
+  .install-progress-heading h2 {
+    @apply mt-1 text-2xl font-semibold;
   }
 
-  .execution-main p {
+  .install-progress-heading p {
     @apply mt-2 text-sm leading-6 text-base-content/60;
   }
 
@@ -647,28 +761,150 @@
     @apply text-sm font-semibold text-base-content/70 sm:text-right;
   }
 
-  .execution-timeline {
-    @apply grid gap-2;
+  .install-graph {
+    @apply grid gap-2 md:grid-cols-2;
   }
 
-  .package-progress-row {
-    @apply grid gap-3 rounded-md border border-base-300 bg-base-100 p-4 text-sm;
+  .install-graph-node {
+    @apply min-w-0 rounded-md border border-base-300 bg-base-100 px-4 transition-all duration-200;
   }
 
-  .package-progress-row span {
-    @apply block break-words font-semibold;
+  .install-graph-node > div:first-child {
+    @apply flex min-h-14 items-center justify-between gap-3;
   }
 
-  .package-progress-row p {
-    @apply mt-1 text-xs leading-5 text-base-content/60;
+  .install-graph-node > div:first-child span {
+    @apply min-w-0 break-words text-sm font-semibold;
   }
 
-  .package-progress-meter {
-    @apply grid content-center gap-2;
+  .install-graph-node > div:first-child strong {
+    @apply inline-flex min-w-14 shrink-0 items-center justify-center rounded-full bg-base-200 px-2 py-1 text-xs font-semibold;
   }
 
-  .package-progress-meter strong {
-    @apply text-xs font-semibold text-base-content/60;
+  .install-graph-node[data-status="진행"] {
+    @apply border-primary bg-primary/5 shadow-sm md:col-span-2;
+    animation: g7inst-stage-enter 180ms ease-out;
+  }
+
+  .install-graph-node[data-status="진행"] > div:first-child strong {
+    @apply bg-warning text-warning-content;
+  }
+
+  .install-graph-node[data-status="성공"] {
+    @apply border-success/40 bg-success/5;
+  }
+
+  .install-graph-node[data-status="성공"] > div:first-child strong {
+    @apply bg-success text-success-content;
+  }
+
+  .install-graph-node[data-status="실패"] {
+    @apply border-error bg-error/5 md:col-span-2;
+  }
+
+  .install-graph-node[data-status="실패"] > div:first-child strong {
+    @apply bg-error text-error-content;
+  }
+
+  .install-graph-node-body {
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-height 240ms ease, opacity 180ms ease, padding 180ms ease;
+  }
+
+  .install-graph-node[data-status="진행"] .install-graph-node-body,
+  .install-graph-node[data-status="실패"] .install-graph-node-body {
+    max-height: 34rem;
+    @apply border-t border-base-300 pb-4 pt-3 opacity-100;
+  }
+
+  .install-graph-node-body > p {
+    @apply text-xs leading-5 text-base-content/60;
+  }
+
+  .package-progress-group {
+    @apply rounded-md border border-base-300 bg-base-100;
+  }
+
+  .package-progress-group > summary {
+    @apply flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-3 text-sm;
+  }
+
+  .package-progress-group > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .package-progress-group > summary > span {
+    @apply min-w-0 break-words font-semibold;
+  }
+
+  .package-progress-group > summary > strong {
+    @apply inline-flex shrink-0 rounded-full bg-base-200 px-2 py-1 text-xs font-semibold;
+  }
+
+  .package-progress-group[data-status="running"] > summary > strong {
+    @apply bg-warning text-warning-content;
+  }
+
+  .package-progress-group[data-status="complete"] > summary > strong {
+    @apply bg-success text-success-content;
+  }
+
+  .package-progress-group[data-status="failed"] > summary > strong {
+    @apply bg-error text-error-content;
+  }
+
+  .package-progress-items {
+    @apply grid gap-1 border-t border-base-300 px-3 py-2;
+  }
+
+  .package-progress-item {
+    @apply flex min-w-0 items-center justify-between gap-3 py-1 text-xs text-base-content/60;
+  }
+
+  .package-progress-item > span:first-child {
+    @apply min-w-0 break-words font-mono;
+  }
+
+  .package-progress-item > span:last-child {
+    @apply shrink-0 font-semibold;
+  }
+
+  .package-progress-item[data-status="pass"] > span:last-child {
+    @apply text-success;
+  }
+
+  .package-progress-item[data-status="fail"] > span:last-child {
+    @apply text-error;
+  }
+
+  .install-log-slot .log-dock {
+    @apply rounded-md border border-base-300 bg-base-200/40;
+  }
+
+  .install-log-slot .log-box {
+    @apply max-h-48 min-h-32;
+  }
+
+  .install-progress-footer {
+    @apply flex flex-col gap-3 border-t border-base-300 pt-4 text-xs text-base-content/60 sm:flex-row sm:items-center sm:justify-between;
+  }
+
+  @keyframes g7inst-dialog-enter {
+    from { opacity: 0; transform: translateY(12px) scale(0.985); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  @keyframes g7inst-dialog-complete {
+    0% { opacity: 1; transform: scale(1); }
+    55% { opacity: 1; transform: scale(0.985); }
+    100% { opacity: 0; transform: translateY(16px) scale(0.96); }
+  }
+
+  @keyframes g7inst-stage-enter {
+    from { opacity: 0.65; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 
   .operation-overlay {

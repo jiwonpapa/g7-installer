@@ -183,9 +183,9 @@ fn install_writes_prepared_state_and_owned_files()
         })
         .map(|(index, _)| index)
         .ok_or_else(|| std::io::Error::other("missing final deployed Git check"))?;
-    assert!(app_copy_index < app_chown_index);
+    assert!(app_copy_index < final_git_check_index);
+    assert!(final_git_check_index < app_chown_index);
     assert!(app_chown_index < storage_chmod_index);
-    assert!(storage_chmod_index < final_git_check_index);
     assert!(recorded.iter().any(|spec| {
         spec.display()
             .contains("api.github.com/repos/gnuboard/g7/releases/latest")
@@ -1474,8 +1474,8 @@ fn push_successful_app_outputs(
             push_successful_git_validation_outputs(runner, super::GNUBOARD7_REQUIRED_FILES);
             runner.push_output(CommandOutput::success(""));
             push_successful_required_path_outputs(runner, super::GNUBOARD7_REQUIRED_FILES, &[]);
-            push_successful_app_permission_outputs(runner, install_plan);
             push_successful_git_validation_outputs(runner, super::GNUBOARD7_REQUIRED_FILES);
+            push_successful_app_permission_outputs(runner, install_plan);
         }
         "wordpress" => {
             runner.push_output(CommandOutput::success(""));

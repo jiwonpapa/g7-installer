@@ -127,7 +127,7 @@ async function asset(pathname) {
   return null;
 }
 
-async function startServer() {
+async function startServer(options = {}) {
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     const pathname = url.pathname;
@@ -169,6 +169,10 @@ async function startServer() {
       return;
     }
     if (pathname === "/api/report") {
+      if (options.reportExists === false) {
+        json(response, { exists: false, path: "/var/log/g7-installer/report.json", content: "" });
+        return;
+      }
       json(response, {
         exists: true,
         path: "/var/log/g7-installer/report.json",
@@ -195,6 +199,11 @@ async function startServer() {
     }
     if (pathname === "/api/plan") {
       json(response, mockPlan());
+      return;
+    }
+    if (pathname === "/api/install/prepare") {
+      await new Promise((resolve) => setTimeout(resolve, options.installDelayMs || 0));
+      json(response, mockReport());
       return;
     }
     if (pathname === "/api/provision/action") {
@@ -278,7 +287,46 @@ test("plan route auto-generates a review after doctor pass", async ({ page }) =>
     await expect(page).toHaveURL(/\/setup\/plan/);
     await expect(page.getByText("선택한 설치 사양")).toBeVisible();
     await expect(page.locator("details.plan-details[open]")).toHaveCount(0);
+    await expect(page.locator("details.plan-details .plan-summary-title .icon")).toHaveCount(5);
     await expect(page.getByRole("button", { name: "이 사양으로 진행" })).toBeEnabled();
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("install uses one modal graph and groups PHP packages", async ({ page }, testInfo) => {
+  const { server, baseUrl } = await startServer({ reportExists: false, installDelayMs: 900 });
+  try {
+    await page.goto(`${baseUrl}/setup/doctor?token=e2e`);
+    await page.getByRole("button", { name: "점검 실행" }).click();
+    await page.getByRole("button", { name: "다음: 설치 방식" }).click();
+    for (const [selector, value] of [
+      ["#site-password", "Test-only_9x!"],
+      ["#site-password-confirm", "Test-only_9x!"],
+      ["#database-name-input", "g7devops"],
+      ["#database-user-input", "g7devops"],
+      ["#database-password", "Test-only_9x!"],
+      ["#database-password-confirm", "Test-only_9x!"],
+    ]) {
+      await page.fill(selector, value);
+    }
+    await page.getByRole("button", { name: "다음: 사양 확정" }).last().click();
+    await page.getByRole("button", { name: "이 사양으로 진행" }).click();
+    await expect(page.getByRole("heading", { name: "그누보드7" })).toBeVisible();
+
+    await page.getByRole("button", { name: "기본 구성 시작" }).click();
+    await page.getByRole("button", { name: "시작", exact: true }).click();
+
+    await expect(page.locator("#install-progress-dialog[open]")).toBeVisible();
+    await expect(page.locator("#install-stages .install-graph-node")).toHaveCount(9);
+    await expect(page.locator('[data-package-group="php"]')).toContainText("PHP 8.5 런타임 · 2개");
+    await expect(page.locator("#install-log-slot #live-log")).toHaveCount(1);
+    await expect(page.locator("#live-log")).toHaveCount(1);
+    await page.screenshot({ path: testInfo.outputPath("install-progress-modal.png"), fullPage: false });
+
+    await expect(page).toHaveURL(/\/setup\/result/, { timeout: 5000 });
+    await expect(page.locator("#install-progress-dialog[open]")).toHaveCount(0);
+    await expect(page.locator("#log-dock-home #live-log")).toHaveCount(1);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
