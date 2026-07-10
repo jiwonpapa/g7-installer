@@ -17,3 +17,5 @@ pub const LOCAL_HOSTS_PATH: &str = "/etc/g7-installer/local-hosts.txt";
 pub const SECRETS_PATH: &str = "/etc/g7-installer/secrets.toml";
 pub const SETUP_GUIDE_PATH: &str = "/var/log/g7-installer/setup-guide.md";
 pub const LETSENCRYPT_LIVE_DIR: &str = "/etc/letsencrypt/live";
+pub const NGINX_MAIN_CONFIG_PATH: &str = "/etc/nginx/nginx.conf";
+pub const NGINX_MAIN_BACKUP_PATH: &str = "/var/backups/g7-installer/nginx.conf.before-g7";

@@ -9,7 +9,10 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::installer_paths::{BACKUP_DIR, CONFIG_PATH, LETSENCRYPT_LIVE_DIR, REPORT_PATH};
+use crate::installer_paths::{
+    BACKUP_DIR, CONFIG_PATH, LETSENCRYPT_LIVE_DIR, NGINX_MAIN_BACKUP_PATH, NGINX_MAIN_CONFIG_PATH,
+    REPORT_PATH,
+};
 use crate::resource_policy::{preserve_package_on_reset, preserve_service_on_reset};
 use crate::{Error, Result};
 use g7_state::owned_files::{OWNED_FILES_PATH, read_owned_files};
@@ -201,6 +204,10 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         }
     }
 
+    if let Some(action) = restore_nginx_main_config(paths, dry_run)? {
+        actions.push(action);
+    }
+
     let packages = metadata.packages_to_purge.clone();
     actions.extend(reset_packages(probe, &packages, dry_run)?);
 
@@ -308,14 +315,48 @@ pub fn run_metadata_only_with_probe_and_paths<R: CommandRunner>(
 
     require_root(probe)?;
     let metadata = reset_metadata(paths)?;
+    let mut actions = Vec::new();
+    if let Some(action) = restore_nginx_main_config(paths, dry_run)? {
+        actions.push(action);
+    }
     let (removed, missing) = remove_reset_files(paths, &metadata, dry_run)?;
 
     Ok(ResetReport {
         dry_run,
-        actions: Vec::new(),
+        actions,
         removed,
         missing,
     })
+}
+
+fn restore_nginx_main_config(paths: &ResetPaths, dry_run: bool) -> Result<Option<ResetAction>> {
+    let backup = paths.resolve(NGINX_MAIN_BACKUP_PATH);
+    if !backup.exists() {
+        return Ok(None);
+    }
+    if dry_run {
+        return Ok(Some(ResetAction::new(
+            "nginx-main-config",
+            "would-restore",
+            format!("would restore {NGINX_MAIN_CONFIG_PATH} from {NGINX_MAIN_BACKUP_PATH}"),
+        )));
+    }
+    let target = paths.resolve(NGINX_MAIN_CONFIG_PATH);
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|source| Error::FileWriteFailed {
+            path: parent.display().to_string(),
+            source,
+        })?;
+    }
+    fs::copy(&backup, &target).map_err(|source| Error::FileWriteFailed {
+        path: NGINX_MAIN_CONFIG_PATH.to_string(),
+        source,
+    })?;
+    Ok(Some(ResetAction::new(
+        "nginx-main-config",
+        "restored",
+        format!("restored {NGINX_MAIN_CONFIG_PATH} from installer backup"),
+    )))
 }
 
 fn remove_reset_files(
@@ -965,7 +1006,9 @@ fn is_safe_site_root(path: &str) -> bool {
 fn is_safe_runtime_config(path: &str) -> bool {
     if path == "/etc/nginx/conf.d/g7-runtime-tuning.conf"
         || path == "/etc/mysql/conf.d/g7-installer.cnf"
-        || path == "/etc/mysql/mariadb.conf.d/60-g7-installer.cnf"
+        || path == "/etc/mysql/mariadb.conf.d/z-g7-installer.cnf"
+        || path == "/etc/apache2/conf-available/g7-runtime.conf"
+        || path == "/etc/apache2/conf-enabled/g7-runtime.conf"
     {
         return true;
     }
@@ -974,6 +1017,17 @@ fn is_safe_runtime_config(path: &str) -> bool {
         .components()
         .map(|part| part.as_os_str().to_string_lossy().to_string())
         .collect::<Vec<_>>();
+
+    if parts.len() == 6
+        && parts[1] == "var"
+        && parts[2] == "lib"
+        && parts[3] == "php"
+        && parts[4] == "sessions"
+        && parts[5].starts_with("g7-")
+        && valid_path_segment(&parts[5])
+    {
+        return true;
+    }
 
     if parts.len() != 7 || parts[1] != "etc" || parts[2] != "php" || !valid_path_segment(&parts[3])
     {

@@ -50,7 +50,7 @@ fn install_writes_prepared_state_and_owned_files()
     assert!(config.contains("web_root = \"/home/g7/public_html\""));
     assert!(config.contains("www_mode = \"redirect-to-www\""));
     assert!(config.contains("redis = \"enable\""));
-    assert!(config.contains("mail_mode = \"local-postfix\""));
+    assert!(config.contains("mail_mode = \"none\""));
     assert!(config.contains("security_profile = \"standard\""));
     assert!(config.contains("ssh_policy = \"audit-only\""));
     assert!(fs_root.join("var/lib/g7-installer/rollback.json").exists());
@@ -115,7 +115,8 @@ fn install_writes_prepared_state_and_owned_files()
     assert!(fs_root.join("etc/mysql/conf.d/g7-installer.cnf").exists());
     let database_runtime = fs::read_to_string(fs_root.join("etc/mysql/conf.d/g7-installer.cnf"))?;
     assert!(database_runtime.contains("slow_query_log = ON"));
-    assert!(database_runtime.contains("long_query_time = 0.5"));
+    assert!(database_runtime.contains("long_query_time = 1"));
+    assert!(database_runtime.contains("min_examined_row_limit = 100"));
     assert!(fs_root.join("etc/g7-installer/secrets.toml").exists());
     assert!(fs_root.join("var/log/g7-installer/setup-guide.md").exists());
     assert!(
@@ -136,7 +137,7 @@ fn install_writes_prepared_state_and_owned_files()
             .exists()
     );
     let recorded = probe.runner().recorded();
-    assert!(recorded.iter().any(|spec| {
+    assert!(!recorded.iter().any(|spec| {
         spec.program == std::ffi::OsStr::new("debconf-set-selections")
             && spec.stdin.as_ref().is_some_and(|stdin| {
                 String::from_utf8_lossy(stdin)
@@ -144,17 +145,17 @@ fn install_writes_prepared_state_and_owned_files()
             })
     }));
     assert!(
-        recorded
+        !recorded
             .iter()
             .any(|spec| { spec.display() == "postconf -e inet_interfaces = loopback-only" })
     );
     assert!(
-        recorded
+        !recorded
             .iter()
             .any(|spec| spec.display() == "postconf -e inet_protocols = ipv4")
     );
     assert!(
-        recorded
+        !recorded
             .iter()
             .any(|spec| spec.display() == "systemctl restart postfix")
     );
@@ -270,7 +271,7 @@ fn install_writes_prepared_state_and_owned_files()
         report
             .mail_checks
             .iter()
-            .any(|check| { check.name == "local-postfix" && check.status == "pass" })
+            .any(|check| { check.name == "mail-delivery" && check.status == "skipped" })
     );
     assert!(
         report
@@ -461,6 +462,11 @@ fn tls_phase_reuses_existing_certificate_without_certonly()
         fs_root.join("etc/letsencrypt/live/example.com/privkey.pem"),
         "key",
     )?;
+    fs::create_dir_all(fs_root.join("etc/letsencrypt/renewal"))?;
+    fs::write(
+        fs_root.join("etc/letsencrypt/renewal/example.com.conf"),
+        "authenticator = webroot\nwebroot_path = /home/g7/public_html/public,\n",
+    )?;
     let plan = super::plan::build_with_options(
         "example.com".to_string(),
         super::plan::PlanOptions::default(),
@@ -472,6 +478,7 @@ fn tls_phase_reuses_existing_certificate_without_certonly()
     for _host in super::certificate_hosts(&plan) {
         runner.push_output(CommandOutput::success(""));
     }
+    push_successful_certificate_validation_outputs(&runner, &plan);
     runner.push_output(CommandOutput::success(""));
     runner.push_output(CommandOutput::success(""));
     runner.push_output(CommandOutput::success("renew ok\n"));
@@ -496,6 +503,51 @@ fn tls_phase_reuses_existing_certificate_without_certonly()
     }));
 
     fs::remove_dir_all(fs_root)?;
+    Ok(())
+}
+
+#[test]
+fn preserved_certificate_renewal_webroot_must_match_current_site()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let fs_root = create_temp_fs_root()?;
+    fs::create_dir_all(fs_root.join("etc/letsencrypt/renewal"))?;
+    fs::write(
+        fs_root.join("etc/letsencrypt/renewal/example.com.conf"),
+        "authenticator = webroot\nwebroot_path = /home/old/public_html/public,\n",
+    )?;
+    let paths = InstallPaths::with_root(&fs_root);
+    assert!(!super::renewal_webroot_matches(
+        &paths,
+        "example.com",
+        "/home/g7/public_html/public"
+    ));
+    fs::remove_dir_all(fs_root)?;
+    Ok(())
+}
+
+#[test]
+fn certificate_san_matching_does_not_accept_hostname_prefixes() {
+    let output = "X509v3 Subject Alternative Name:\n DNS:example.com.evil, DNS:www.example.com";
+    assert!(!super::certificate_san_contains(output, "example.com"));
+    assert!(super::certificate_san_contains(output, "www.example.com"));
+}
+
+#[test]
+fn apache_www_none_does_not_add_unrequested_alias()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let plan = super::plan::build_with_options(
+        "example.com".to_string(),
+        super::plan::PlanOptions {
+            web_server: "apache".to_string(),
+            www_mode: "none".to_string(),
+            ..super::plan::PlanOptions::default()
+        },
+    )?;
+    let vhost = super::apache_vhost_content_with_socket(&plan, "/run/php/g7.sock");
+    assert!(vhost.contains("ServerName example.com"));
+    assert!(!vhost.contains("ServerAlias www.example.com"));
+    assert!(!vhost.contains("ProxyPass /app"));
+    assert!(!vhost.contains("ProxyPass /apps"));
     Ok(())
 }
 
@@ -757,7 +809,8 @@ fn install_applies_apache_vhost_runtime_tls_and_app_link()
     assert!(fs_root.join("etc/apache2/sites-available/g7.conf").exists());
     assert!(fs_root.join("etc/apache2/sites-enabled/g7.conf").exists());
     let apache_vhost = fs::read_to_string(fs_root.join("etc/apache2/sites-available/g7.conf"))?;
-    assert!(apache_vhost.contains("ProxyPass /app ws://127.0.0.1:8080/app"));
+    assert!(!apache_vhost.contains("ProxyPass /app"));
+    assert!(!apache_vhost.contains("ProxyPass /apps"));
     assert!(
         report
             .service_checks
@@ -807,6 +860,43 @@ fn php_runtime_failures_block_app_phase() {
 }
 
 #[test]
+fn runtime_policy_keeps_upload_headroom_and_safe_opcache_refresh() {
+    let sizing = super::plan::resolve_memory_sizing(2 * 1024 * 1024, 2);
+    let ini = super::php_ini_override_content(&sizing);
+    assert!(ini.contains("upload_max_filesize = 64M"));
+    assert!(ini.contains("post_max_size = 80M"));
+    assert!(ini.contains("opcache.validate_timestamps = 1"));
+    assert!(ini.contains("opcache.enable_file_override = 0"));
+    assert!(!ini.contains("open_basedir"));
+}
+
+#[test]
+fn nginx_worker_tuning_updates_only_expected_main_directives()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let sizing = super::plan::resolve_memory_sizing(4 * 1024 * 1024, 2);
+    let source = "user www-data;\nworker_processes auto;\nevents {\n    worker_connections 768;\n}\nhttp {\n    include mime.types;\n}\n";
+    let tuned = super::nginx_main_runtime_content(source, &sizing)?;
+    assert!(tuned.contains("worker_processes 2;"));
+    assert!(tuned.contains("worker_rlimit_nofile 8192;"));
+    assert!(tuned.contains("worker_connections 2048;"));
+    assert!(tuned.contains("include mime.types;"));
+    Ok(())
+}
+
+#[test]
+fn redis_effective_output_parser_requires_exact_key_value_pairs() {
+    let output = "bind\n127.0.0.1\nprotected-mode\nyes\n";
+    assert_eq!(
+        super::redis_config_value(output, "bind").as_deref(),
+        Some("127.0.0.1")
+    );
+    assert_eq!(
+        super::redis_config_value(output, "protected-mode").as_deref(),
+        Some("yes")
+    );
+}
+
+#[test]
 fn install_reports_smtp_relay_reachability() -> std::result::Result<(), Box<dyn std::error::Error>>
 {
     let os_release_path = write_temp_os_release()?;
@@ -815,6 +905,8 @@ fn install_reports_smtp_relay_reachability() -> std::result::Result<(), Box<dyn 
         mail_mode: "smtp-relay".to_string(),
         smtp_host: Some("smtp.example.com".to_string()),
         smtp_from: Some("no-reply@example.com".to_string()),
+        smtp_username: Some("smtp-user".to_string()),
+        smtp_password: Some("smtp-secret-123".to_string()),
         ..super::plan::PlanOptions::default()
     };
     let probe = clean_root_probe_for_options(&os_release_path, &fs_root, "example.com", &options)?;
@@ -1121,6 +1213,12 @@ fn install_fails_before_install_when_package_candidate_is_missing()
     fs::create_dir_all(fs_root.join("etc/nginx/sites-enabled"))?;
     fs::create_dir_all(fs_root.join("etc/nginx/sites-available"))?;
     fs::create_dir_all(fs_root.join("etc/nginx/conf.d"))?;
+    fs::write(
+        fs_root.join("etc/nginx/nginx.conf"),
+        "user www-data;\nworker_processes auto;\npid /run/nginx.pid;\nevents {\n    worker_connections 768;\n}\nhttp {\n    include /etc/nginx/conf.d/*.conf;\n    include /etc/nginx/sites-enabled/*;\n}\n",
+    )?;
+    fs::create_dir_all(fs_root.join("etc/apache2/conf-available"))?;
+    fs::create_dir_all(fs_root.join("etc/apache2/conf-enabled"))?;
     let options = super::plan::PlanOptions {
         php_version: "8.5".to_string(),
         ..super::plan::PlanOptions::default()
@@ -1259,6 +1357,12 @@ fn clean_probe_with_uid_for_options_and_certbot(
     fs::create_dir_all(fs_root.join("etc/nginx/sites-enabled"))?;
     fs::create_dir_all(fs_root.join("etc/nginx/sites-available"))?;
     fs::create_dir_all(fs_root.join("etc/nginx/conf.d"))?;
+    fs::write(
+        fs_root.join("etc/nginx/nginx.conf"),
+        "user www-data;\nworker_processes auto;\npid /run/nginx.pid;\nevents {\n    worker_connections 768;\n}\nhttp {\n    include /etc/nginx/conf.d/*.conf;\n    include /etc/nginx/sites-enabled/*;\n}\n",
+    )?;
+    fs::create_dir_all(fs_root.join("etc/apache2/conf-available"))?;
+    fs::create_dir_all(fs_root.join("etc/apache2/conf-enabled"))?;
     let runner = FakeCommandRunner::default();
     runner.push_output(CommandOutput::success(uid));
     runner.push_output(CommandOutput::success("inactive\n"));
@@ -1409,18 +1513,42 @@ fn push_runtime_database_tls_outputs(
     install_plan: &super::plan::InstallPlan,
     certbot_output: CommandOutput,
 ) {
-    runner.push_output(CommandOutput::success(""));
-    if matches!(
-        install_plan.web_server.as_str(),
-        "nginx" | "apache" | "frankenphp"
-    ) {
+    if install_plan.web_server == "frankenphp" {
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
+    } else {
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(""));
+    }
+    if install_plan.redis_mode == "enable" {
+        for _ in 0..6 {
+            runner.push_output(CommandOutput::success("OK\n"));
+        }
+        let sizing = super::plan::resolve_memory_sizing(1024 * 1024, 1);
+        let redis_values = [
+            "bind\n127.0.0.1\n".to_string(),
+            "protected-mode\nyes\n".to_string(),
+            format!(
+                "maxmemory\n{}\n",
+                super::memory_value_bytes(&sizing.redis_maxmemory).unwrap()
+            ),
+            "maxmemory-policy\nvolatile-lru\n".to_string(),
+        ];
+        for value in redis_values {
+            runner.push_output(CommandOutput::success(value));
+        }
     }
     runner.push_output(CommandOutput::success(successful_php_runtime_probe_output(
         install_plan,
     )));
     runner.push_output(CommandOutput::success(""));
+    runner.push_output(CommandOutput::success(
+        successful_database_effective_output(),
+    ));
     runner.push_output(CommandOutput::success(""));
 
     if install_plan.deployment_mode == "public" && install_plan.web_server == "nginx" {
@@ -1432,6 +1560,7 @@ fn push_runtime_database_tls_outputs(
         let certbot_succeeded = certbot_output.status == 0;
         runner.push_output(certbot_output);
         if certbot_succeeded {
+            push_successful_certificate_validation_outputs(runner, install_plan);
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success("renew ok\n"));
@@ -1445,6 +1574,7 @@ fn push_runtime_database_tls_outputs(
         let certbot_succeeded = certbot_output.status == 0;
         runner.push_output(certbot_output);
         if certbot_succeeded {
+            push_successful_certificate_validation_outputs(runner, install_plan);
             for _module in super::apache_tls_modules() {
                 runner.push_output(CommandOutput::success(""));
             }
@@ -1461,12 +1591,41 @@ fn push_runtime_database_tls_outputs(
         let certbot_succeeded = certbot_output.status == 0;
         runner.push_output(certbot_output);
         if certbot_succeeded {
+            push_successful_certificate_validation_outputs(runner, install_plan);
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success("renew ok\n"));
         }
     }
     push_successful_app_outputs(runner, install_plan);
+}
+
+fn successful_database_effective_output() -> String {
+    let sizing = super::plan::resolve_memory_sizing(1024 * 1024, 1);
+    format!(
+        "g7_value\nversion=8.0.42\ng7_value\ninnodb_buffer_pool_size={}\ng7_value\nmax_connections={}\ng7_value\ntmp_table_size={}\ng7_value\nmax_heap_table_size={}\ng7_value\nbind_address=127.0.0.1\n",
+        super::memory_value_bytes(&sizing.db_buffer_pool).unwrap(),
+        sizing.db_max_connections,
+        super::memory_value_bytes(&sizing.db_tmp_table_size).unwrap(),
+        super::memory_value_bytes(&sizing.db_tmp_table_size).unwrap(),
+    )
+}
+
+fn push_successful_certificate_validation_outputs(
+    runner: &FakeCommandRunner,
+    install_plan: &super::plan::InstallPlan,
+) {
+    runner.push_output(CommandOutput::success("Certificate will not expire\n"));
+    let sans = super::certificate_hosts(install_plan)
+        .iter()
+        .map(|host| format!("DNS:{host}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    runner.push_output(CommandOutput::success(format!(
+        "X509v3 Subject Alternative Name:\n    {sans}\n"
+    )));
+    runner.push_output(CommandOutput::success("PUBLIC-KEY\n"));
+    runner.push_output(CommandOutput::success("PUBLIC-KEY\n"));
 }
 
 fn successful_php_runtime_probe_output(install_plan: &super::plan::InstallPlan) -> String {
@@ -1487,15 +1646,15 @@ fn successful_php_runtime_probe_output(install_plan: &super::plan::InstallPlan) 
              realpath_cache_ttl=600\n\
              opcache.enable=1\n\
              opcache.memory_consumption={}\n\
-             opcache.validate_timestamps=0\n\
-             opcache.enable_file_override=1\n\
+             opcache.validate_timestamps=1\n\
+             opcache.enable_file_override=0\n\
              extensions={}\n",
         install_plan.php_version,
         install_plan.php_version,
         install_plan.php_version,
         sizing.php_memory_limit,
         sizing.php_upload_limit,
-        sizing.php_upload_limit,
+        sizing.php_post_limit,
         sizing.opcache_memory.trim_end_matches('M'),
         extensions
     )

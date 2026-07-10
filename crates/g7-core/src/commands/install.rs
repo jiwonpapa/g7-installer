@@ -27,8 +27,8 @@ use crate::commands::plan;
 use crate::defaults::*;
 use crate::installer_paths::{
     BACKUP_DIR, BACKUP_MANIFEST_PATH, COMMAND_AUDIT_LOG_PATH, CONFIG_PATH, ETC_DIR, LIB_DIR,
-    LOCAL_HOSTS_PATH, LOG_DIR, LOG_PATH, REPORT_PATH, ROLLBACK_PATH, SECRETS_PATH,
-    SETUP_GUIDE_PATH,
+    LOCAL_HOSTS_PATH, LOG_DIR, LOG_PATH, NGINX_MAIN_BACKUP_PATH, NGINX_MAIN_CONFIG_PATH,
+    REPORT_PATH, ROLLBACK_PATH, SECRETS_PATH, SETUP_GUIDE_PATH,
 };
 use crate::{Error, Result};
 use g7_state::owned_files::{OWNED_FILES_PATH, OwnedFiles, read_owned_files, write_owned_files};

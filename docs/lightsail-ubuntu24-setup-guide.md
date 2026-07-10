@@ -306,7 +306,7 @@ http://127.0.0.1:7717/?token=...
 
 PHP 기본값은 8.5입니다. 설치기가 `ppa:ondrej/php` apt 소스를 자동 추가하고 다시 `apt update`를 실행한 뒤 `php8.5-fpm`을 설치합니다. PHP 8.3을 선택하면 Ubuntu 24.04 기본 apt 소스를 사용합니다.
 
-웹 UI 기본 조합은 `Nginx / PHP 8.5 / MySQL(apt mysql-server, UI 기준 8.4 LTS 계열) / www로 통일 / Redis 사용 / 서버 Postfix 발송 / 그누보드7`입니다. 실제 DB 패키지 버전은 Ubuntu apt 소스와 선택한 DB 패키지에 따릅니다.
+웹 UI 기본 조합은 `Nginx / PHP 8.5 / Ubuntu 24.04 apt의 MySQL / www로 통일 / Redis 사용 / 메일 발송 안 함 / 그누보드7`입니다. 외부 SMTP를 선택하면 계정과 비밀번호를 필수로 받고 비밀번호는 루트 전용 비밀 파일에만 저장합니다. 로컬 Postfix는 발신 IP 평판·PTR·25번 포트 정책을 직접 관리할 사용자만 선택합니다.
 
 기본 서버 구성 후 확인:
 

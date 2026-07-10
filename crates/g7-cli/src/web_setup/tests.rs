@@ -67,7 +67,7 @@ fn setup_request(domain: &str) -> SetupRequest {
         php_version: "8.5".to_string(),
         php_source: "auto".to_string(),
         database: "mysql".to_string(),
-        database_version: "mysql-8.4".to_string(),
+        database_version: "apt-default".to_string(),
         database_name: Some("g7_example_com".to_string()),
         database_user: Some("g7_app".to_string()),
         database_password: Some("Test-only_9x!".to_string()),
@@ -84,6 +84,9 @@ fn setup_request(domain: &str) -> SetupRequest {
         smtp_host: Some("  ".to_string()),
         smtp_port: 587,
         smtp_from: Some("  ".to_string()),
+        smtp_username: None,
+        smtp_password: None,
+        smtp_password_confirm: None,
         smtp_encryption: "starttls".to_string(),
         security_profile: "standard".to_string(),
         ssh_policy: "audit-only".to_string(),
@@ -428,6 +431,8 @@ fn install_and_rollback_reports_map_to_api_shapes() {
             smtp_host: None,
             smtp_port: None,
             smtp_from: None,
+            smtp_username: None,
+            smtp_password_policy: "not-used",
             smtp_encryption: None,
             dns_check: false,
             security_profile: "standard".to_string(),
@@ -642,7 +647,7 @@ async fn plan_api_requires_authentication_and_returns_plan()
     assert_eq!(payload["domain"], "g7-test.local");
     assert_eq!(payload["deployment_mode"], "local-test");
     assert_eq!(payload["web_server"], "nginx");
-    assert_eq!(payload["database_version"], "mysql-8.4");
+    assert_eq!(payload["database_version"], "apt-default");
     assert_eq!(payload["app_package"], "gnuboard7");
     assert!(payload["packages"].as_array().expect("packages").len() > 5);
     Ok(())
@@ -745,10 +750,10 @@ fn public_plan_api_mapping_exposes_user_visible_fields()
         "example.com".to_string(),
         options_from_request(setup_request("example.com")),
     )?;
-    let api = super::plan_to_api(install_plan, "mysql-8.4".to_string());
+    let api = super::plan_to_api(install_plan, "apt-default".to_string());
 
     assert_eq!(api.domain, "example.com");
-    assert_eq!(api.database_version, "mysql-8.4");
+    assert_eq!(api.database_version, "apt-default");
     assert_eq!(api.app_package, "gnuboard7");
     assert_eq!(api.app_document_root, "/home/g7/public_html/public");
     assert_eq!(api.web_root, "/home/g7/public_html");

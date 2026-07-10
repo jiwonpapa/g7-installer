@@ -93,6 +93,12 @@ enum Command {
         /// SMTP sender address. Required when --mail-mode smtp-relay.
         #[arg(long)]
         smtp_from: Option<String>,
+        /// SMTP account. Required when --mail-mode smtp-relay.
+        #[arg(long)]
+        smtp_username: Option<String>,
+        /// SMTP password. Prefer the SSH-tunneled web wizard to avoid shell history.
+        #[arg(long)]
+        smtp_password: Option<String>,
         /// SMTP encryption: none, starttls, tls.
         #[arg(long, default_value_t = plan::DEFAULT_SMTP_ENCRYPTION.to_string())]
         smtp_encryption: String,
@@ -162,6 +168,12 @@ enum Command {
         /// SMTP sender address. Required when --mail-mode smtp-relay.
         #[arg(long)]
         smtp_from: Option<String>,
+        /// SMTP account. Required when --mail-mode smtp-relay.
+        #[arg(long)]
+        smtp_username: Option<String>,
+        /// SMTP password. Prefer the SSH-tunneled web wizard to avoid shell history.
+        #[arg(long)]
+        smtp_password: Option<String>,
         /// SMTP encryption: none, starttls, tls.
         #[arg(long, default_value_t = plan::DEFAULT_SMTP_ENCRYPTION.to_string())]
         smtp_encryption: String,
@@ -248,6 +260,8 @@ async fn main() -> Result<()> {
             smtp_host,
             smtp_port,
             smtp_from,
+            smtp_username,
+            smtp_password,
             smtp_encryption,
             security_profile,
             ssh_policy,
@@ -277,6 +291,8 @@ async fn main() -> Result<()> {
                     smtp_host,
                     smtp_port,
                     smtp_from,
+                    smtp_username,
+                    smtp_password,
                     smtp_encryption,
                     security_profile,
                     ssh_policy,
@@ -304,6 +320,8 @@ async fn main() -> Result<()> {
             smtp_host,
             smtp_port,
             smtp_from,
+            smtp_username,
+            smtp_password,
             smtp_encryption,
             security_profile,
             ssh_policy,
@@ -334,6 +352,8 @@ async fn main() -> Result<()> {
                         smtp_host,
                         smtp_port,
                         smtp_from,
+                        smtp_username,
+                        smtp_password,
                         smtp_encryption,
                         security_profile,
                         ssh_policy,
@@ -388,6 +408,8 @@ pub(crate) fn plan_options(
     smtp_host: Option<String>,
     smtp_port: u16,
     smtp_from: Option<String>,
+    smtp_username: Option<String>,
+    smtp_password: Option<String>,
     smtp_encryption: String,
     security_profile: String,
     ssh_policy: String,
@@ -415,6 +437,8 @@ pub(crate) fn plan_options(
         smtp_host,
         smtp_port,
         smtp_from,
+        smtp_username,
+        smtp_password,
         smtp_encryption,
         security_profile,
         ssh_policy,
@@ -476,6 +500,13 @@ pub(crate) fn format_plan(plan: &plan::InstallPlan) -> String {
     }
     if let Some(from) = &plan.smtp_from {
         output.push_str(&format!("smtp_from: {from}\n"));
+    }
+    if let Some(username) = &plan.smtp_username {
+        output.push_str(&format!("smtp_username: {username}\n"));
+        output.push_str(&format!(
+            "smtp_password_policy: {}\n",
+            plan.smtp_password_policy
+        ));
     }
     if let Some(encryption) = &plan.smtp_encryption {
         output.push_str(&format!("smtp_encryption: {encryption}\n"));
@@ -603,6 +634,10 @@ fn print_install(report: install::InstallReport) {
     }
     if let Some(from) = &report.smtp_from {
         println!("smtp_from: {from}");
+    }
+    if let Some(username) = &report.smtp_username {
+        println!("smtp_username: {username}");
+        println!("smtp_password_policy: {}", report.smtp_password_policy);
     }
     if let Some(encryption) = &report.smtp_encryption {
         println!("smtp_encryption: {encryption}");

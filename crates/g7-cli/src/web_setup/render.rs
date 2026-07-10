@@ -248,6 +248,8 @@ pub(super) fn install_to_api(
         smtp_host: report.smtp_host,
         smtp_port: report.smtp_port,
         smtp_from: report.smtp_from,
+        smtp_username: report.smtp_username,
+        smtp_password_policy: report.smtp_password_policy,
         smtp_encryption: report.smtp_encryption,
         dns_check: report.dns_check,
         security_profile: report.security_profile,
@@ -277,10 +279,8 @@ pub(super) fn install_to_api(
 }
 
 pub(super) fn normalize_database_version(value: &str) -> String {
-    match value {
-        "mysql-8.0" | "mysql-8.4" => value.to_string(),
-        _ => "apt-default".to_string(),
-    }
+    let _ = value;
+    "apt-default".to_string()
 }
 
 pub(super) fn install_checks_to_api(checks: Vec<install::InstallCheck>) -> Vec<InstallApiCheck> {

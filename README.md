@@ -70,7 +70,7 @@ Lightsail 기본 Ubuntu는 보통 서버 비밀번호 없이 `ubuntu` 계정 SSH
 
 웹 UI의 `사이트 계정 비밀번호`는 별도입니다. 설치기가 만들 `g7` 같은 Linux 사이트 계정의 SFTP/파일관리 비밀번호이며, sudo 권한은 주지 않습니다.
 
-웹 UI 기본 조합은 `Nginx / PHP 8.5 / MySQL(apt mysql-server, UI 기준 8.4 LTS 계열) / www로 통일 / Redis 사용 / 서버 Postfix 발송 / 그누보드7`입니다. 실제 DB 패키지 버전은 Ubuntu apt 소스와 선택한 DB 패키지에 따릅니다.
+웹 UI 기본 조합은 `Nginx / PHP 8.5 / Ubuntu 24.04 apt의 MySQL / www로 통일 / Redis 사용 / 메일 발송 안 함 / 그누보드7`입니다. 외부 SMTP를 선택하면 계정과 비밀번호를 필수로 받고, 비밀번호는 루트 전용 비밀 파일에만 저장합니다. 로컬 Postfix는 발신 IP 평판·PTR·25번 포트 정책을 직접 관리할 사용자만 선택합니다.
 
 | 바꿔 넣을 값 | 의미 |
 | --- | --- |

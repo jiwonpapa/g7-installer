@@ -20,6 +20,7 @@ pub mod php;
 pub mod port;
 pub mod privilege;
 pub mod probe;
+pub mod redis;
 pub mod service;
 pub mod systemd;
 

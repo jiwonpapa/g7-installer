@@ -330,13 +330,11 @@
                       DB 버전
                       <span class="help-wrap">
                     <button class="help-circle" type="button" aria-label="DB 버전 도움말">?</button>
-                    <span class="help-text">기본 선택은 MySQL 8.4 LTS입니다. MariaDB를 선택하면 배포판 apt 기본값을 사용합니다.</span>
+                    <span class="help-text">선택한 DB 엔진의 Ubuntu 24.04 apt 실제 패키지를 설치합니다. 화면에 특정 버전을 고정해 표시하지 않습니다.</span>
                   </span>
                     </span>
                     <select name="database_version" id="database-version" class="select select-bordered w-full">
-                      <option value="apt-default">Ubuntu apt 기본값</option>
-                      <option value="mysql-8.0">MySQL 8.0 계열</option>
-                      <option value="mysql-8.4" selected>MySQL 8.4 LTS 계열</option>
+                      <option value="apt-default" selected>Ubuntu 24.04 apt 실제 설치 버전</option>
                     </select>
                   </label>
                   <label class="field">
@@ -397,13 +395,13 @@
                       메일 발송
                       <span class="help-wrap">
                     <button class="help-circle" type="button" aria-label="메일 발송 도움말">?</button>
-                    <span class="help-text">회원 인증/알림 메일 발송 전용 설정입니다. 기본은 서버 Postfix 발송이며, 수신 메일 서버는 설치하지 않습니다.</span>
+                    <span class="help-text">회원 인증/알림 메일 발송 전용 설정입니다. 기본은 비활성화이며, 외부 SMTP 사용을 권장합니다. 수신 메일 서버는 설치하지 않습니다.</span>
                   </span>
                     </span>
                     <select name="mail_mode" id="mail-mode" class="select select-bordered w-full">
-                      <option value="none">메일 발송 안 함</option>
+                      <option value="none" selected>메일 발송 안 함</option>
                       <option value="smtp-relay">외부 SMTP로 발송</option>
-                      <option value="local-postfix" selected>서버 Postfix로 발송</option>
+                      <option value="local-postfix">서버 Postfix로 발송</option>
                     </select>
                   </label>
                   <label class="field">
@@ -435,6 +433,18 @@
                   </span>
                     </span>
                     <input name="smtp_from" id="smtp-from" class="input input-bordered w-full" placeholder="no-reply@example.com" disabled />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">SMTP 계정</span>
+                    <input name="smtp_username" id="smtp-username" class="input input-bordered w-full" autocomplete="username" placeholder="smtp-user@example.com" disabled />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">SMTP 비밀번호</span>
+                    <input name="smtp_password" id="smtp-password" class="input input-bordered w-full" type="password" autocomplete="new-password" disabled />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">SMTP 비밀번호 확인</span>
+                    <input name="smtp_password_confirm" id="smtp-password-confirm" class="input input-bordered w-full" type="password" autocomplete="new-password" disabled />
                   </label>
                   <label class="field">
                     <span class="field-label">

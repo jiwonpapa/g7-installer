@@ -14,7 +14,7 @@ use crate::archive::{
     git_ls_files_error_unmatch, git_rev_parse_head, git_tracked_files_status, test_dir, test_file,
     unzip_archive, unzip_test,
 };
-use crate::certbot::{certonly_webroot, delete_cert, renew_dry_run};
+use crate::certbot::{certonly_webroot, delete_cert, reconfigure_webroot, renew_dry_run};
 use crate::command::CommandSpec;
 use crate::command::{CommandError, CommandOutput, CommandRunner, RealCommandRunner};
 use crate::database::{DatabaseEngine, apply_sql};
@@ -28,6 +28,10 @@ use crate::os::{OsRelease, OsReleaseError, read_os_release};
 use crate::package::{PackageStatus, package_status};
 use crate::port::{PortStatus, tcp_port_status};
 use crate::privilege::{Privilege, current_privilege};
+use crate::redis::{
+    config_get as redis_config_get, config_rewrite as redis_config_rewrite,
+    config_set as redis_config_set,
+};
 use crate::service::{ServiceActivity, disable_now, enable_now, is_active, reload, restart, start};
 use crate::systemd::daemon_reload;
 use std::net::IpAddr;
@@ -178,6 +182,14 @@ impl<R: CommandRunner> SystemProbe<R> {
             .map_err(SystemProbeError::Command)
     }
 
+    pub fn certbot_reconfigure_webroot(
+        &self,
+        webroot: &str,
+        cert_name: &str,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        reconfigure_webroot(&self.runner, webroot, cert_name).map_err(SystemProbeError::Command)
+    }
+
     pub fn certbot_delete_cert(&self, cert_name: &str) -> Result<CommandOutput, SystemProbeError> {
         delete_cert(&self.runner, cert_name).map_err(SystemProbeError::Command)
     }
@@ -188,6 +200,22 @@ impl<R: CommandRunner> SystemProbe<R> {
         sql: &str,
     ) -> Result<CommandOutput, SystemProbeError> {
         apply_sql(&self.runner, engine, sql).map_err(SystemProbeError::Command)
+    }
+
+    pub fn redis_config_set(
+        &self,
+        key: &str,
+        value: &str,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        redis_config_set(&self.runner, key, value).map_err(SystemProbeError::Command)
+    }
+
+    pub fn redis_config_rewrite(&self) -> Result<CommandOutput, SystemProbeError> {
+        redis_config_rewrite(&self.runner).map_err(SystemProbeError::Command)
+    }
+
+    pub fn redis_config_get(&self, pattern: &str) -> Result<CommandOutput, SystemProbeError> {
+        redis_config_get(&self.runner, pattern).map_err(SystemProbeError::Command)
     }
 
     pub fn current_privilege(&self) -> Result<Privilege, SystemProbeError> {

@@ -9,7 +9,8 @@ use gnuboard7::*;
 use laravel::*;
 use runtime::*;
 pub(super) use runtime::{
-    app_runtime_unit_names, app_writable_paths, read_database_password, systemd_unit_path,
+    app_runtime_unit_names, app_writable_paths, read_database_password, read_smtp_password,
+    systemd_unit_path,
 };
 use wordpress::*;
 

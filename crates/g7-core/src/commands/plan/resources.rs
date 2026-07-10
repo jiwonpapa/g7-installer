@@ -248,6 +248,26 @@ pub(super) fn files(
         web_server_enabled_file(web_server),
     ];
 
+    if matches!(web_server, "nginx" | "frankenphp") {
+        files.push(PlanFile::new(
+            "/var/backups/g7-installer/nginx.conf.before-g7",
+            "backup original nginx.conf before worker tuning",
+        ));
+        files.push(PlanFile::new(
+            "/etc/nginx/nginx.conf",
+            "update worker limits with reset restoration",
+        ));
+    } else if web_server == "apache" {
+        files.push(PlanFile::new(
+            "/etc/apache2/conf-available/g7-runtime.conf",
+            "create Apache event MPM tuning",
+        ));
+        files.push(PlanFile::new(
+            "/etc/apache2/conf-enabled/g7-runtime.conf",
+            "enable Apache event MPM tuning",
+        ));
+    }
+
     if web_server == "frankenphp" {
         files.push(PlanFile::new(
             "/opt/g7-frankenphp/frankenphp",
@@ -268,8 +288,8 @@ pub(super) fn files(
 
     if redis_mode == "enable" {
         files.push(PlanFile::new(
-            "/etc/g7-installer/redis.conf",
-            "create Redis hardening overlay",
+            "/etc/redis/redis.conf",
+            "persist local bind, protected mode, maxmemory, and eviction policy with Redis CONFIG REWRITE",
         ));
     }
 
@@ -280,12 +300,7 @@ pub(super) fn files(
         ));
     }
 
-    if mail_mode != "none" {
-        files.push(PlanFile::new(
-            "/etc/g7-installer/mail.toml",
-            "create SMTP delivery settings without secrets",
-        ));
-    }
+    let _ = mail_mode;
 
     files
 }

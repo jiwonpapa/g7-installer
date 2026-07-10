@@ -321,9 +321,8 @@ pub(super) fn deferred_vhost_checks(plan: &plan::InstallPlan) -> Vec<InstallChec
 
 pub(super) fn apache_http_modules() -> &'static [&'static str] {
     &[
+        "mpm_event",
         "proxy",
-        "proxy_http",
-        "proxy_wstunnel",
         "proxy_fcgi",
         "setenvif",
         "rewrite",
@@ -333,11 +332,10 @@ pub(super) fn apache_http_modules() -> &'static [&'static str] {
 
 pub(super) fn apache_tls_modules() -> &'static [&'static str] {
     &[
+        "mpm_event",
         "ssl",
         "http2",
         "proxy",
-        "proxy_http",
-        "proxy_wstunnel",
         "proxy_fcgi",
         "setenvif",
         "rewrite",
@@ -371,10 +369,8 @@ pub(super) fn apache_vhost_content_with_socket(
     let redirect_blocks = apache_http_redirect_blocks(plan);
     let (server_name, aliases) = apache_app_hosts(plan);
     let server_alias = apache_server_alias_line(&aliases);
-    let reverb_proxy = apache_reverb_proxy_block(plan);
-
     format!(
-        "{redirect_blocks}<VirtualHost *:80>\n    ServerName {server_name}\n{server_alias}    DocumentRoot {root}\n\n    ErrorLog ${{APACHE_LOG_DIR}}/g7-error.log\n    CustomLog ${{APACHE_LOG_DIR}}/g7-access.log combined\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n{reverb_proxy}\n    <FilesMatch \\.php$>\n        SetHandler \"proxy:unix:{php_socket}|fcgi://localhost/\"\n    </FilesMatch>\n\n    <DirectoryMatch \"^/.*/\\.git/\">\n        Require all denied\n    </DirectoryMatch>\n</VirtualHost>\n",
+        "{redirect_blocks}<VirtualHost *:80>\n    ServerName {server_name}\n{server_alias}    DocumentRoot {root}\n\n    ErrorLog ${{APACHE_LOG_DIR}}/g7-error.log\n    CustomLog ${{APACHE_LOG_DIR}}/g7-access.log combined\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n\n    <FilesMatch \\.php$>\n        SetHandler \"proxy:unix:{php_socket}|fcgi://localhost/\"\n    </FilesMatch>\n\n    <FilesMatch \"^\\.\">\n        Require all denied\n    </FilesMatch>\n</VirtualHost>\n",
         root = plan.app_document_root,
     )
 }
@@ -427,8 +423,8 @@ pub(super) fn nginx_server_runtime_directives(
     };
 
     format!(
-        "    client_max_body_size {upload_limit};\n    keepalive_timeout {keepalive};\n    fastcgi_buffers {fastcgi_buffers};\n    fastcgi_buffer_size 32k;\n\n",
-        upload_limit = sizing.php_upload_limit.to_ascii_lowercase(),
+        "    client_max_body_size {body_limit};\n    keepalive_timeout {keepalive};\n    fastcgi_buffers {fastcgi_buffers};\n    fastcgi_buffer_size 32k;\n\n",
+        body_limit = sizing.nginx_client_max_body_size.to_ascii_lowercase(),
         keepalive = sizing.nginx_keepalive_timeout,
         fastcgi_buffers = sizing.nginx_fastcgi_buffers,
     )
@@ -451,19 +447,23 @@ pub(super) fn nginx_app_hosts(plan: &plan::InstallPlan) -> String {
     }
 }
 
-pub(super) fn apache_reverb_proxy_block(plan: &plan::InstallPlan) -> &'static str {
-    if plan.app_profile != "gnuboard7" {
-        return "";
-    }
-
-    "\n    ProxyPreserveHost On\n    ProxyPass /app ws://127.0.0.1:8080/app\n    ProxyPassReverse /app ws://127.0.0.1:8080/app\n    ProxyPass /apps http://127.0.0.1:8080/apps\n    ProxyPassReverse /apps http://127.0.0.1:8080/apps\n"
-}
-
-pub(super) fn secrets_content(plan: &plan::InstallPlan, db_password: &str) -> String {
-    format!(
+pub(super) fn secrets_content(
+    plan: &plan::InstallPlan,
+    db_password: &str,
+    smtp_password: Option<&str>,
+) -> String {
+    let mut content = format!(
         "database_name = \"{}\"\ndatabase_user = \"{}\"\ndatabase_password = \"{}\"\n",
         plan.database_name, plan.database_user, db_password
-    )
+    );
+    if let (Some(username), Some(password)) = (&plan.smtp_username, smtp_password) {
+        content.push_str(&format!(
+            "smtp_username = \"{}\"\nsmtp_password = \"{}\"\n",
+            username.replace('"', "\\\""),
+            password.replace('"', "\\\"")
+        ));
+    }
+    content
 }
 
 pub(super) fn database_sql(plan: &plan::InstallPlan, db_password: &str) -> String {
@@ -567,10 +567,8 @@ pub(super) fn apache_tls_vhost_content(plan: &plan::InstallPlan, php_socket: &st
     let canonical_redirect = apache_https_canonical_redirect(plan);
     let (server_name, aliases) = apache_app_hosts(plan);
     let server_alias = apache_server_alias_line(&aliases);
-    let reverb_proxy = apache_reverb_proxy_block(plan);
-
     format!(
-        "<VirtualHost *:80>\n    ServerName {primary_host}\n    ServerAlias {http_hosts}\n    DocumentRoot {root}\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride None\n        Require all granted\n    </Directory>\n\n    RewriteEngine On\n    RewriteCond %{{REQUEST_URI}} !^/\\.well-known/acme-challenge/\n    RewriteRule ^ https://%{{HTTP_HOST}}%{{REQUEST_URI}} [R=301,L]\n</VirtualHost>\n\n{canonical_redirect}<VirtualHost *:443>\n    ServerName {server_name}\n{server_alias}    DocumentRoot {root}\n\n    ErrorLog ${{APACHE_LOG_DIR}}/g7-error.log\n    CustomLog ${{APACHE_LOG_DIR}}/g7-access.log combined\n\n    SSLEngine on\n    SSLCertificateFile /etc/letsencrypt/live/{cert_name}/fullchain.pem\n    SSLCertificateKeyFile /etc/letsencrypt/live/{cert_name}/privkey.pem\n    Protocols h2 http/1.1\n\n    Header always set X-Content-Type-Options \"nosniff\"\n    Header always set X-Frame-Options \"SAMEORIGIN\"\n    Header always set Referrer-Policy \"strict-origin-when-cross-origin\"\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n{reverb_proxy}\n    <FilesMatch \\.php$>\n        SetHandler \"proxy:unix:{php_socket}|fcgi://localhost/\"\n    </FilesMatch>\n\n    <DirectoryMatch \"^/.*/\\.git/\">\n        Require all denied\n    </DirectoryMatch>\n</VirtualHost>\n",
+        "<VirtualHost *:80>\n    ServerName {primary_host}\n    ServerAlias {http_hosts}\n    DocumentRoot {root}\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride None\n        Require all granted\n    </Directory>\n\n    RewriteEngine On\n    RewriteCond %{{REQUEST_URI}} !^/\\.well-known/acme-challenge/\n    RewriteRule ^ https://%{{HTTP_HOST}}%{{REQUEST_URI}} [R=301,L]\n</VirtualHost>\n\n{canonical_redirect}<VirtualHost *:443>\n    ServerName {server_name}\n{server_alias}    DocumentRoot {root}\n\n    ErrorLog ${{APACHE_LOG_DIR}}/g7-error.log\n    CustomLog ${{APACHE_LOG_DIR}}/g7-access.log combined\n\n    SSLEngine on\n    SSLCertificateFile /etc/letsencrypt/live/{cert_name}/fullchain.pem\n    SSLCertificateKeyFile /etc/letsencrypt/live/{cert_name}/privkey.pem\n    Protocols h2 http/1.1\n\n    Header always set X-Content-Type-Options \"nosniff\"\n    Header always set X-Frame-Options \"SAMEORIGIN\"\n    Header always set Referrer-Policy \"strict-origin-when-cross-origin\"\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n\n    <FilesMatch \\.php$>\n        SetHandler \"proxy:unix:{php_socket}|fcgi://localhost/\"\n    </FilesMatch>\n\n    <FilesMatch \"^\\.\">\n        Require all denied\n    </FilesMatch>\n</VirtualHost>\n",
         primary_host = primary_http_host(plan),
         root = plan.app_document_root,
     )
@@ -617,14 +615,7 @@ pub(super) fn apache_app_hosts(plan: &plan::InstallPlan) -> (String, Vec<String>
         "redirect-to-www" if !plan.domain.starts_with("www.") => {
             (format!("www.{}", plan.domain), Vec::new())
         }
-        "redirect-to-root" | "none" => {
-            let aliases = if plan.www_mode == "none" && !plan.domain.starts_with("www.") {
-                vec![format!("www.{}", plan.domain)]
-            } else {
-                Vec::new()
-            };
-            (plan.domain.clone(), aliases)
-        }
+        "redirect-to-root" | "none" => (plan.domain.clone(), Vec::new()),
         _ if !plan.domain.starts_with("www.") => {
             (plan.domain.clone(), vec![format!("www.{}", plan.domain)])
         }

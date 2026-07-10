@@ -21,6 +21,8 @@ pub struct PlanOptions {
     pub smtp_host: Option<String>,
     pub smtp_port: u16,
     pub smtp_from: Option<String>,
+    pub smtp_username: Option<String>,
+    pub smtp_password: Option<String>,
     pub smtp_encryption: String,
     pub security_profile: String,
     pub ssh_policy: String,
@@ -51,6 +53,8 @@ impl Default for PlanOptions {
             smtp_host: None,
             smtp_port: DEFAULT_SMTP_PORT,
             smtp_from: None,
+            smtp_username: None,
+            smtp_password: None,
             smtp_encryption: DEFAULT_SMTP_ENCRYPTION.to_string(),
             security_profile: DEFAULT_SECURITY_PROFILE.to_string(),
             ssh_policy: DEFAULT_SSH_POLICY.to_string(),
@@ -119,6 +123,8 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         &mail_mode,
         options.smtp_host.as_deref(),
         options.smtp_from.as_deref(),
+        options.smtp_username.as_deref(),
+        options.smtp_password.as_deref(),
     )?;
     let smtp_port = smtp_port_for_mode(&mail_mode, options.smtp_port);
     let database_name = match options.database_name {
@@ -238,6 +244,16 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         smtp_host: options.smtp_host,
         smtp_port: smtp_port_for_plan(&mail_mode, smtp_port),
         smtp_from: options.smtp_from,
+        smtp_username: if mail_mode == "smtp-relay" {
+            options.smtp_username
+        } else {
+            None
+        },
+        smtp_password_policy: if mail_mode == "smtp-relay" {
+            "user-provided-store-root-only"
+        } else {
+            "not-used"
+        },
         smtp_encryption: smtp_encryption_for_plan(&mail_mode, smtp_encryption),
         security_profile,
         ssh_policy,

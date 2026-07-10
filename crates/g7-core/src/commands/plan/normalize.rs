@@ -512,6 +512,8 @@ pub(super) fn validate_mail_options(
     mail_mode: &str,
     smtp_host: Option<&str>,
     smtp_from: Option<&str>,
+    smtp_username: Option<&str>,
+    smtp_password: Option<&str>,
 ) -> Result<()> {
     if mail_mode != "smtp-relay" {
         return Ok(());
@@ -525,12 +527,49 @@ pub(super) fn validate_mail_options(
         return Err(Error::MissingInput { field: "smtp-from" });
     }
 
+    if optional_trimmed_is_empty(smtp_username) {
+        return Err(Error::MissingInput {
+            field: "smtp-username",
+        });
+    }
+
+    if optional_trimmed_is_empty(smtp_password) {
+        return Err(Error::MissingInput {
+            field: "smtp-password",
+        });
+    }
+
     if let Some(host) = smtp_host {
         validate_config_safe_value("smtp-host", host)?;
     }
 
     if let Some(from) = smtp_from {
         validate_config_safe_value("smtp-from", from)?;
+    }
+
+    if let Some(username) = smtp_username {
+        validate_config_safe_value("smtp-username", username)?;
+        if username.contains('"') || username.contains('\\') {
+            return Err(Error::InvalidOption {
+                field: "smtp-username",
+                value: username.to_string(),
+                supported: "value without double quote, backslash, newline, or control characters"
+                    .to_string(),
+            });
+        }
+    }
+
+    if let Some(password) = smtp_password {
+        validate_config_safe_value("smtp-password", password)?;
+        if password.len() < 8 || password.contains('"') || password.contains('\\') {
+            return Err(Error::InvalidOption {
+                field: "smtp-password",
+                value: "redacted".to_string(),
+                supported:
+                    "8+ characters without double quote, backslash, newline, or control characters"
+                        .to_string(),
+            });
+        }
     }
 
     Ok(())

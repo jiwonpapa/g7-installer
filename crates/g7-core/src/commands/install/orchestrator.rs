@@ -111,6 +111,7 @@ pub fn resume_with_probe_and_paths<R: CommandRunner>(
     let report_value = read_report_value(paths)?;
     let mut options = plan_options_from_report(&report_value)?;
     options.database_password = read_database_password(paths)?;
+    options.smtp_password = read_smtp_password(paths)?;
     let install_plan = plan::build_with_options(state.domain.clone(), options)?;
     let mut apply_summary = apply_summary_from_report(&report_value);
     let mut owned_files =
@@ -304,6 +305,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     })?;
     let site_user_password = options.site_user_password.clone();
     let database_password = options.database_password.clone();
+    let smtp_password = options.smtp_password.clone();
     let install_plan = plan::build_with_options(domain, options)?;
     let doctor_report = doctor::run_with_probe(probe);
 
@@ -733,6 +735,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         &install_plan,
         &mut owned_file_list,
         database_password.as_deref(),
+        smtp_password.as_deref(),
     ) {
         Ok(database_checks) => {
             apply_summary.database_checks = database_checks;
@@ -983,6 +986,8 @@ fn build_install_report(
         smtp_host: install_plan.smtp_host,
         smtp_port: install_plan.smtp_port,
         smtp_from: install_plan.smtp_from,
+        smtp_username: install_plan.smtp_username,
+        smtp_password_policy: install_plan.smtp_password_policy,
         smtp_encryption: install_plan.smtp_encryption,
         dns_check: install_plan.dns_check_required,
         security_profile: install_plan.security_profile,
@@ -1050,6 +1055,7 @@ pub(super) fn plan_options_from_report(report: &serde_json::Value) -> Result<pla
     }
     options.smtp_host = optional_report_string(report, "smtp_host");
     options.smtp_from = optional_report_string(report, "smtp_from");
+    options.smtp_username = optional_report_string(report, "smtp_username");
     options.smtp_encryption = optional_report_string(report, "smtp_encryption")
         .unwrap_or_else(|| plan::DEFAULT_SMTP_ENCRYPTION.to_string());
     options.smtp_port = report

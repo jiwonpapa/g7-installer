@@ -447,6 +447,16 @@ pub(in crate::commands::install) fn app_writable_paths(
 pub(in crate::commands::install) fn read_database_password(
     paths: &InstallPaths,
 ) -> Result<Option<String>> {
+    read_secret_value(paths, "database_password")
+}
+
+pub(in crate::commands::install) fn read_smtp_password(
+    paths: &InstallPaths,
+) -> Result<Option<String>> {
+    read_secret_value(paths, "smtp_password")
+}
+
+pub(super) fn read_secret_value(paths: &InstallPaths, key: &str) -> Result<Option<String>> {
     let target = paths.resolve(SECRETS_PATH);
     let content = match fs::read_to_string(&target) {
         Ok(content) => content,
@@ -459,8 +469,9 @@ pub(in crate::commands::install) fn read_database_password(
         }
     };
 
+    let prefix = format!("{key} = ");
     Ok(content.lines().find_map(|line| {
-        line.strip_prefix("database_password = ")
+        line.strip_prefix(&prefix)
             .map(|value| value.trim().trim_matches('"').to_string())
     }))
 }
@@ -470,6 +481,7 @@ pub(super) fn laravel_env_content(
     db_password: &str,
     app_url: &str,
     kind: LaravelRuntimeKind,
+    smtp_password: Option<&str>,
 ) -> Result<String> {
     let app_key = random_laravel_app_key()?;
     let app_base_url = app_base_url_from_access_url(plan, app_url);
@@ -494,7 +506,7 @@ pub(super) fn laravel_env_content(
         if redis_enabled { "redis" } else { "file" },
         if redis_enabled { "redis" } else { "database" },
     );
-    env.push_str(&mail_env_content(plan));
+    env.push_str(&mail_env_content(plan, smtp_password));
     if is_octane_runtime(kind) {
         let octane_https = if app_url.starts_with("https://") {
             "true"
@@ -508,7 +520,7 @@ pub(super) fn laravel_env_content(
     Ok(env)
 }
 
-pub(super) fn mail_env_content(plan: &plan::InstallPlan) -> String {
+pub(super) fn mail_env_content(plan: &plan::InstallPlan, smtp_password: Option<&str>) -> String {
     match plan.mail_mode.as_str() {
         "local-postfix" => {
             let from = plan
@@ -531,8 +543,10 @@ pub(super) fn mail_env_content(plan: &plan::InstallPlan) -> String {
                 .smtp_from
                 .clone()
                 .unwrap_or_else(|| format!("noreply@{}", plan.domain));
+            let username = plan.smtp_username.clone().unwrap_or_default();
+            let password = smtp_password.unwrap_or_default().replace('"', "\\\"");
             format!(
-                "MAIL_MAILER=smtp\nMAIL_HOST={host}\nMAIL_PORT={port}\nMAIL_USERNAME=null\nMAIL_PASSWORD=null\nMAIL_ENCRYPTION={encryption}\nMAIL_FROM_ADDRESS=\"{from}\"\nMAIL_FROM_NAME=\"{}\"\n",
+                "MAIL_MAILER=smtp\nMAIL_HOST={host}\nMAIL_PORT={port}\nMAIL_USERNAME=\"{username}\"\nMAIL_PASSWORD=\"{password}\"\nMAIL_ENCRYPTION={encryption}\nMAIL_FROM_ADDRESS=\"{from}\"\nMAIL_FROM_NAME=\"{}\"\n",
                 plan.app_profile_label
             )
         }

@@ -62,7 +62,7 @@ mod tests {
         assert_eq!(plan.ssh_policy, "audit-only");
         assert_eq!(plan.www_mode, "redirect-to-www");
         assert_eq!(plan.redis_mode, "enable");
-        assert_eq!(plan.mail_mode, "local-postfix");
+        assert_eq!(plan.mail_mode, "none");
         assert_eq!(plan.mode, "dry-run");
         assert!(!plan.changes_made);
         Ok(())
@@ -551,6 +551,8 @@ mod tests {
             mail_mode: "smtp-relay".to_string(),
             smtp_host: Some("smtp.example.com".to_string()),
             smtp_from: Some("no-reply@example.com".to_string()),
+            smtp_username: Some("smtp-user".to_string()),
+            smtp_password: Some("smtp-secret-123".to_string()),
             ..PlanOptions::default()
         };
         let plan = build_with_options("example.com".to_string(), options)?;

@@ -34,7 +34,7 @@ function mockReport() {
     php_version: "8.5",
     php_source: "ondrej",
     database: "mysql",
-    database_version: "mysql-8.4",
+    database_version: "apt-default",
     database_name: "g7devops",
     database_user: "g7devops",
     database_password_policy: "user-provided-store-root-only",
@@ -42,7 +42,7 @@ function mockReport() {
     web_root: "/home/g7devops/public_html",
     www_mode: "redirect-to-www",
     redis: "enable",
-    mail_mode: "local-postfix",
+    mail_mode: "none",
     smtp_host: null,
     smtp_port: null,
     smtp_from: null,
@@ -89,7 +89,7 @@ function mockPlan() {
     php_version: "8.5",
     php_source: "ondrej",
     database: "mysql",
-    database_version: "mysql-8.4",
+    database_version: "apt-default",
     database_name: "g7devops",
     database_user: "g7devops",
     database_password_policy: "user-provided-store-root-only",
@@ -176,7 +176,7 @@ async function startServer(options = {}) {
       json(response, {
         exists: true,
         path: "/var/log/g7-installer/report.json",
-        content: JSON.stringify(mockReport()),
+        content: JSON.stringify(options.report || mockReport()),
       });
       return;
     }
@@ -257,6 +257,25 @@ test("wizard routes render report, downloads, and provision cards", async ({ pag
     await expect(page.getByText("보안 경계 안내")).toBeVisible();
     await page.getByRole("button", { name: "설정 파일/값 확인" }).first().click();
     await expect(page.getByRole("heading", { name: "웹서버/vhost" })).toBeVisible();
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("saved interrupted report exposes the exact failed check", async ({ page }) => {
+  const report = mockReport();
+  report.phase = "app-configured";
+  report.problem = null;
+  report.certbot_checks = [{
+    name: "tls-config",
+    status: "fail",
+    message: "TLS configuration failed: renewal webroot points to /home/old/public_html/public",
+  }];
+  const { server, baseUrl } = await startServer({ report });
+  try {
+    await page.goto(`${baseUrl}/setup/result?token=e2e`);
+    await expect(page.getByText("중단 원인")).toBeVisible();
+    await expect(page.getByText("TLS configuration failed: renewal webroot points to /home/old/public_html/public", { exact: true })).toBeVisible();
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

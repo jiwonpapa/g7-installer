@@ -105,6 +105,12 @@ pub(super) struct SetupRequest {
     pub(super) smtp_host: Option<String>,
     pub(super) smtp_port: u16,
     pub(super) smtp_from: Option<String>,
+    #[serde(default)]
+    pub(super) smtp_username: Option<String>,
+    #[serde(default)]
+    pub(super) smtp_password: Option<String>,
+    #[serde(default)]
+    pub(super) smtp_password_confirm: Option<String>,
     pub(super) smtp_encryption: String,
     pub(super) security_profile: String,
     pub(super) ssh_policy: String,
@@ -293,6 +299,8 @@ pub(super) struct InstallApiReport {
     pub(super) smtp_host: Option<String>,
     pub(super) smtp_port: Option<u16>,
     pub(super) smtp_from: Option<String>,
+    pub(super) smtp_username: Option<String>,
+    pub(super) smtp_password_policy: &'static str,
     pub(super) smtp_encryption: Option<String>,
     pub(super) dns_check: bool,
     pub(super) security_profile: String,
@@ -430,6 +438,7 @@ pub(super) async fn api_plan(
     validate_template_app_request(&request)?;
     validate_site_password_request(&request)?;
     validate_database_request(&request)?;
+    validate_mail_request(&request)?;
     emit_log(&state, "설치 계획 계산 중");
     let domain = request.domain.clone();
     let database_version = normalize_database_version(&request.database_version);
@@ -458,6 +467,7 @@ pub(super) async fn api_install_prepare(
     validate_template_app_request(&request)?;
     validate_site_password_request(&request)?;
     validate_database_request(&request)?;
+    validate_mail_request(&request)?;
 
     if state.install_running.swap(true, Ordering::SeqCst) {
         emit_log(&state, "설치 요청 거부: 이미 다른 설치 작업이 진행 중");
@@ -890,6 +900,12 @@ pub(super) fn options_from_request(request: SetupRequest) -> plan::PlanOptions {
         request.smtp_host.filter(|value| !value.trim().is_empty()),
         request.smtp_port,
         request.smtp_from.filter(|value| !value.trim().is_empty()),
+        request
+            .smtp_username
+            .filter(|value| !value.trim().is_empty()),
+        request
+            .smtp_password
+            .filter(|value| !value.trim().is_empty()),
         request.smtp_encryption,
         request.security_profile,
         request.ssh_policy,
@@ -1021,6 +1037,43 @@ pub(super) fn validate_database_request(
         );
     }
 
+    Ok(())
+}
+
+pub(super) fn validate_mail_request(request: &SetupRequest) -> std::result::Result<(), ApiError> {
+    if request.mail_mode != "smtp-relay" {
+        return Ok(());
+    }
+    let username = request.smtp_username.as_deref().unwrap_or("").trim();
+    let password = request.smtp_password.as_deref().unwrap_or("");
+    let confirm = request.smtp_password_confirm.as_deref().unwrap_or("");
+    if username.is_empty() {
+        return Err(ApiError::bad_request("SMTP 계정을 입력하세요."));
+    }
+    if password.is_empty() {
+        return Err(ApiError::bad_request("SMTP 비밀번호를 입력하세요."));
+    }
+    if password != confirm {
+        return Err(ApiError::bad_request(
+            "SMTP 비밀번호 확인이 일치하지 않습니다.",
+        ));
+    }
+    if password.len() < 8 {
+        return Err(ApiError::bad_request(
+            "SMTP 비밀번호는 8자 이상이어야 합니다.",
+        ));
+    }
+    if username
+        .chars()
+        .any(|ch| ch == '"' || ch == '\\' || ch == '\n' || ch == '\r' || ch.is_control())
+        || password
+            .chars()
+            .any(|ch| ch == '"' || ch == '\\' || ch == '\n' || ch == '\r' || ch.is_control())
+    {
+        return Err(ApiError::bad_request(
+            "SMTP 인증 정보에 큰따옴표, 백슬래시, 줄바꿈, 제어문자를 사용할 수 없습니다.",
+        ));
+    }
     Ok(())
 }
 

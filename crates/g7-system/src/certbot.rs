@@ -65,6 +65,23 @@ pub fn renew_dry_run<R: CommandRunner>(
     )
 }
 
+pub fn reconfigure_webroot<R: CommandRunner>(
+    runner: &R,
+    webroot: &str,
+    cert_name: &str,
+) -> Result<CommandOutput, CommandError> {
+    runner.run(
+        &CommandSpec::new(CERTBOT)
+            .arg("reconfigure")
+            .arg("--cert-name")
+            .arg(cert_name)
+            .arg("--webroot")
+            .arg("--webroot-path")
+            .arg(webroot)
+            .arg("--non-interactive"),
+    )
+}
+
 pub fn delete_cert<R: CommandRunner>(
     runner: &R,
     cert_name: &str,
@@ -87,7 +104,10 @@ fn certbot_staging_enabled() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{certonly_webroot, certonly_webroot_with_staging, delete_cert, renew_dry_run};
+    use super::{
+        certonly_webroot, certonly_webroot_with_staging, delete_cert, reconfigure_webroot,
+        renew_dry_run,
+    };
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
 
@@ -180,6 +200,25 @@ mod tests {
                 OsString::from("--cert-name"),
                 OsString::from("example.com"),
             ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn reconfigure_webroot_is_noninteractive_and_shell_free()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success(""));
+
+        reconfigure_webroot(&runner, "/home/g7/public_html/public", "example.com")?;
+        let recorded = runner.recorded();
+        assert_eq!(recorded[0].program, OsString::from("certbot"));
+        assert!(recorded[0].args.contains(&OsString::from("reconfigure")));
+        assert!(recorded[0].args.contains(&OsString::from("--webroot-path")));
+        assert!(
+            recorded[0]
+                .args
+                .contains(&OsString::from("--non-interactive"))
         );
         Ok(())
     }

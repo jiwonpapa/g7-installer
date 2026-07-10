@@ -1,5 +1,8 @@
 use super::*;
 
+const APACHE_RUNTIME_AVAILABLE: &str = "/etc/apache2/conf-available/g7-runtime.conf";
+const APACHE_RUNTIME_ENABLED: &str = "/etc/apache2/conf-enabled/g7-runtime.conf";
+
 pub(super) fn apply_runtime_phase<R: CommandRunner>(
     probe: &SystemProbe<R>,
     paths: &InstallPaths,
@@ -27,6 +30,40 @@ pub(super) fn apply_runtime_phase<R: CommandRunner>(
         format!("Created PHP runtime override at {ini_path}."),
     ));
 
+    if matches!(plan.web_server.as_str(), "nginx" | "frankenphp") {
+        checks.push(apply_nginx_worker_tuning(paths, &sizing, owned)?);
+    } else if plan.web_server == "apache" {
+        write_new_file(
+            paths,
+            APACHE_RUNTIME_AVAILABLE,
+            &apache_mpm_runtime_content(&sizing),
+            owned,
+        )?;
+        if paths.resolve(APACHE_RUNTIME_ENABLED).exists() {
+            if !owned.iter().any(|path| path == APACHE_RUNTIME_ENABLED) {
+                return Err(Error::InstallVerificationFailed {
+                    checks: format!(
+                        "{APACHE_RUNTIME_ENABLED} already exists and is not installer-owned"
+                    ),
+                });
+            }
+        } else {
+            create_owned_symlink(
+                paths,
+                APACHE_RUNTIME_AVAILABLE,
+                APACHE_RUNTIME_ENABLED,
+                owned,
+            )?;
+        }
+        checks.push(InstallCheck::pass(
+            "apache-mpm-event-runtime",
+            format!(
+                "Applied Apache event MPM tuning at {APACHE_RUNTIME_AVAILABLE}; MaxRequestWorkers={}, ThreadsPerChild={}.",
+                sizing.apache_max_request_workers, sizing.apache_threads_per_child
+            ),
+        ));
+    }
+
     if plan.web_server == "frankenphp" {
         write_existing_file(
             paths,
@@ -41,13 +78,29 @@ pub(super) fn apply_runtime_phase<R: CommandRunner>(
             ),
         ));
     } else {
+        let session_path = php_session_path(plan);
+        create_owned_dir_if_absent(paths, &session_path, owned)?;
+        let session_owner = format!("{}:www-data", plan.site_user);
+        let output = probe
+            .chown_recursive(&session_owner, &session_path)
+            .map_err(|err| command_error("php-session-owner", &session_path, err))?;
+        require_success("php-session-owner", &session_path, output)?;
+        let output = probe
+            .chmod_path("0700", &session_path)
+            .map_err(|err| command_error("php-session-permissions", &session_path, err))?;
+        require_success("php-session-permissions", &session_path, output)?;
+        checks.push(InstallCheck::pass(
+            "php-session-path",
+            format!("Created site-only PHP session directory at {session_path}."),
+        ));
+
         let pool_path = php_pool_path(plan);
         write_new_file(paths, &pool_path, &php_pool_content(plan, &sizing), owned)?;
         checks.push(InstallCheck::pass(
             "php-fpm-pool",
             format!(
-                "Created PHP-FPM pool config at {pool_path}; max_children={}, memory_limit={}.",
-                sizing.php_max_children, sizing.php_memory_limit
+                "Created PHP-FPM pool config at {pool_path}; pm={}, max_children={}, memory_limit={}.",
+                sizing.php_process_manager, sizing.php_max_children, sizing.php_memory_limit
             ),
         ));
     }
@@ -71,12 +124,13 @@ pub(super) fn apply_runtime_phase<R: CommandRunner>(
         ));
         checks.push(InstallCheck {
             name: "nginx-worker-mode".to_string(),
-            status: "info".to_string(),
+            status: "pass".to_string(),
             message: format!(
-                "Recommended nginx.conf values: worker_processes={}, worker_connections={}, rlimit_nofile={}. These are reported but not rewritten until nginx.conf backup ownership is implemented.",
+                "Applied nginx.conf values: worker_processes={}, worker_connections={}, rlimit_nofile={} with original backup at {}.",
                 sizing.nginx_worker_processes,
                 sizing.nginx_worker_connections,
-                sizing.nginx_worker_rlimit_nofile
+                sizing.nginx_worker_rlimit_nofile,
+                NGINX_MAIN_BACKUP_PATH
             ),
         });
     } else if plan.web_server == "apache" {
@@ -94,9 +148,9 @@ pub(super) fn apply_runtime_phase<R: CommandRunner>(
         ));
         checks.push(InstallCheck {
             name: "apache-worker-mode".to_string(),
-            status: "info".to_string(),
+            status: "pass".to_string(),
             message: format!(
-                "Apache mpm_event target: MaxRequestWorkers={} with PHP-FPM pool max_children={}. Keep MPM tuning in apache2.conf/mpm_event.conf after manual backup ownership is implemented.",
+                "Applied Apache mpm_event MaxRequestWorkers={} with PHP-FPM pool max_children={}.",
                 sizing.apache_max_request_workers, sizing.php_max_children
             ),
         });
@@ -177,6 +231,10 @@ pub(super) fn apply_runtime_phase<R: CommandRunner>(
         ));
     }
 
+    if plan.redis_mode == "enable" {
+        checks.extend(apply_redis_runtime(probe, &sizing)?);
+    }
+
     checks.extend(php_runtime_diagnostic_checks(probe, paths, plan, &sizing));
 
     Ok(checks)
@@ -233,13 +291,13 @@ pub(super) fn php_runtime_diagnostic_checks<R: CommandRunner>(
     let limits = [
         ("memory_limit", sizing.php_memory_limit.as_str()),
         ("upload_max_filesize", sizing.php_upload_limit.as_str()),
-        ("post_max_size", sizing.php_upload_limit.as_str()),
+        ("post_max_size", sizing.php_post_limit.as_str()),
         (
             "opcache.memory_consumption",
             sizing.opcache_memory.trim_end_matches('M'),
         ),
-        ("opcache.validate_timestamps", "0"),
-        ("opcache.enable_file_override", "1"),
+        ("opcache.validate_timestamps", "1"),
+        ("opcache.enable_file_override", "0"),
     ];
     let mismatches = limits
         .iter()
@@ -356,7 +414,7 @@ pub(super) fn php_fpm_pool_value_check(
     let expected = [
         ("user", plan.site_user.clone()),
         ("group", "www-data".to_string()),
-        ("pm", "dynamic".to_string()),
+        ("pm", sizing.php_process_manager.clone()),
         ("pm.max_children", sizing.php_max_children.to_string()),
         ("pm.max_requests", "500".to_string()),
     ];
@@ -376,8 +434,8 @@ pub(super) fn php_fpm_pool_value_check(
         InstallCheck::pass(
             "php-fpm-pool-values",
             format!(
-                "PHP-FPM pool 확인: user={}, group=www-data, pm=dynamic, max_children={}, max_requests=500.",
-                plan.site_user, sizing.php_max_children
+                "PHP-FPM pool 확인: user={}, group=www-data, pm={}, max_children={}, max_requests=500.",
+                plan.site_user, sizing.php_process_manager, sizing.php_max_children
             ),
         )
     } else {
@@ -467,6 +525,7 @@ pub(super) fn blocking_runtime_failure(checks: &[InstallCheck]) -> Option<String
                 && (check.name == "php-runtime-probe"
                     || check.name == "php-runtime-limits"
                     || check.name == "php-fpm-pool-values"
+                    || check.name == "redis-runtime-values"
                     || check.name.starts_with("php-extension:"))
         })
         .map(|check| format!("{} - {}", check.name, check.message))
@@ -482,6 +541,124 @@ pub(super) fn blocking_runtime_failure(checks: &[InstallCheck]) -> Option<String
     }
 }
 
+pub(super) fn apply_redis_runtime<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    sizing: &plan::ResolvedMemorySizing,
+) -> Result<Vec<InstallCheck>> {
+    let settings = [
+        ("bind", "127.0.0.1".to_string()),
+        ("protected-mode", "yes".to_string()),
+        (
+            "maxmemory",
+            sizing.redis_maxmemory.trim().to_ascii_lowercase(),
+        ),
+        ("maxmemory-policy", "volatile-lru".to_string()),
+    ];
+
+    for (key, value) in &settings {
+        let output = probe.redis_config_set(key, value).map_err(|error| {
+            command_error("redis-config-set", format!("CONFIG SET {key}"), error)
+        })?;
+        require_success("redis-config-set", format!("CONFIG SET {key}"), output)?;
+    }
+    let output = probe
+        .redis_config_rewrite()
+        .map_err(|error| command_error("redis-config-rewrite", "CONFIG REWRITE", error))?;
+    require_success("redis-config-rewrite", "CONFIG REWRITE", output)?;
+    let output = probe
+        .restart_service("redis-server")
+        .map_err(|error| command_error("redis-restart", "systemctl restart redis-server", error))?;
+    require_success("redis-restart", "systemctl restart redis-server", output)?;
+
+    let expected_maxmemory = memory_value_bytes(&sizing.redis_maxmemory).ok_or_else(|| {
+        Error::InstallVerificationFailed {
+            checks: format!(
+                "Redis maxmemory value `{}` could not be converted to bytes",
+                sizing.redis_maxmemory
+            ),
+        }
+    })?;
+    let expected = [
+        ("bind", "127.0.0.1".to_string()),
+        ("protected-mode", "yes".to_string()),
+        ("maxmemory", expected_maxmemory.to_string()),
+        ("maxmemory-policy", "volatile-lru".to_string()),
+    ];
+    let mut mismatches = Vec::new();
+    for (key, expected_value) in &expected {
+        let output = probe.redis_config_get(key).map_err(|error| {
+            command_error("redis-config-get", format!("CONFIG GET {key}"), error)
+        })?;
+        require_success(
+            "redis-config-get",
+            format!("CONFIG GET {key}"),
+            output.clone(),
+        )?;
+        let actual = redis_config_value(&output.stdout, key).unwrap_or_else(|| "-".to_string());
+        if actual != *expected_value {
+            mismatches.push(format!("{key}: expected {expected_value}, actual {actual}"));
+        }
+    }
+
+    if !mismatches.is_empty() {
+        return Ok(vec![InstallCheck::fail(
+            "redis-runtime-values",
+            format!(
+                "Redis effective settings differ from the install plan: {}.",
+                mismatches.join("; ")
+            ),
+        )]);
+    }
+
+    Ok(vec![
+        InstallCheck::pass(
+            "redis-runtime-config",
+            "Applied local-only Redis settings, persisted them with CONFIG REWRITE, and restarted Redis.",
+        ),
+        InstallCheck::pass(
+            "redis-runtime-values",
+            format!(
+                "Verified Redis effective settings: bind=127.0.0.1, protected-mode=yes, maxmemory={}, policy=volatile-lru.",
+                sizing.redis_maxmemory
+            ),
+        ),
+    ])
+}
+
+pub(super) fn redis_config_value(output: &str, key: &str) -> Option<String> {
+    let mut lines = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    while let Some(name) = lines.next() {
+        let value = lines.next()?;
+        if name == key {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
+pub(super) fn memory_value_bytes(value: &str) -> Option<u64> {
+    let normalized = value.trim().to_ascii_lowercase();
+    let digits = normalized
+        .chars()
+        .take_while(|character| character.is_ascii_digit())
+        .collect::<String>()
+        .parse::<u64>()
+        .ok()?;
+    let multiplier = if normalized.ends_with('g') || normalized.ends_with("gb") {
+        1024_u64.pow(3)
+    } else if normalized.ends_with('m') || normalized.ends_with("mb") {
+        1024_u64.pow(2)
+    } else if normalized.ends_with('k') || normalized.ends_with("kb") {
+        1024
+    } else {
+        1
+    };
+    digits.checked_mul(multiplier)
+}
+
 pub(super) fn detected_memory_sizing<R: CommandRunner>(
     probe: &SystemProbe<R>,
 ) -> plan::ResolvedMemorySizing {
@@ -492,6 +669,124 @@ pub(super) fn detected_memory_sizing<R: CommandRunner>(
         .unwrap_or(1024 * 1024);
     let vcpu_count = probe.vcpu_count().ok().flatten().unwrap_or(1);
     plan::resolve_memory_sizing(total_memory_kib, vcpu_count)
+}
+
+pub(super) fn apply_nginx_worker_tuning(
+    paths: &InstallPaths,
+    sizing: &plan::ResolvedMemorySizing,
+    owned: &mut Vec<String>,
+) -> Result<InstallCheck> {
+    let source = paths.resolve(NGINX_MAIN_CONFIG_PATH);
+    let content = fs::read_to_string(&source).map_err(|source| Error::FileReadFailed {
+        path: NGINX_MAIN_CONFIG_PATH.to_string(),
+        source,
+    })?;
+    let tuned = nginx_main_runtime_content(&content, sizing)?;
+    let backup = paths.resolve(NGINX_MAIN_BACKUP_PATH);
+    if !backup.exists() {
+        if let Some(parent) = backup.parent() {
+            fs::create_dir_all(parent).map_err(|source| Error::FileWriteFailed {
+                path: parent.display().to_string(),
+                source,
+            })?;
+        }
+        fs::copy(&source, &backup).map_err(|source| Error::FileWriteFailed {
+            path: NGINX_MAIN_BACKUP_PATH.to_string(),
+            source,
+        })?;
+        owned.push(NGINX_MAIN_BACKUP_PATH.to_string());
+    } else if !owned.iter().any(|path| path == NGINX_MAIN_BACKUP_PATH) {
+        return Err(Error::InstallVerificationFailed {
+            checks: format!("{NGINX_MAIN_BACKUP_PATH} exists without installer ownership metadata"),
+        });
+    }
+    write_existing_file(paths, NGINX_MAIN_CONFIG_PATH, &tuned)?;
+    Ok(InstallCheck::pass(
+        "nginx-main-runtime",
+        format!(
+            "Tuned {NGINX_MAIN_CONFIG_PATH} and preserved its original at {NGINX_MAIN_BACKUP_PATH}."
+        ),
+    ))
+}
+
+pub(super) fn nginx_main_runtime_content(
+    content: &str,
+    sizing: &plan::ResolvedMemorySizing,
+) -> Result<String> {
+    let has_rlimit = content
+        .lines()
+        .any(|line| line.trim_start().starts_with("worker_rlimit_nofile "));
+    let mut found_processes = false;
+    let mut found_connections = false;
+    let mut in_events = false;
+    let mut output = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("events") && trimmed.contains('{') {
+            in_events = true;
+        }
+        if trimmed.starts_with("worker_processes ") {
+            let indent = &line[..line.len() - line.trim_start().len()];
+            output.push(format!(
+                "{indent}worker_processes {};",
+                sizing.nginx_worker_processes
+            ));
+            if !has_rlimit {
+                output.push(format!(
+                    "{indent}worker_rlimit_nofile {};",
+                    sizing.nginx_worker_rlimit_nofile
+                ));
+            }
+            found_processes = true;
+            continue;
+        }
+        if trimmed.starts_with("worker_rlimit_nofile ") {
+            let indent = &line[..line.len() - line.trim_start().len()];
+            output.push(format!(
+                "{indent}worker_rlimit_nofile {};",
+                sizing.nginx_worker_rlimit_nofile
+            ));
+            continue;
+        }
+        if in_events && trimmed.starts_with("worker_connections ") {
+            let indent = &line[..line.len() - line.trim_start().len()];
+            output.push(format!(
+                "{indent}worker_connections {};",
+                sizing.nginx_worker_connections
+            ));
+            found_connections = true;
+            continue;
+        }
+        output.push(line.to_string());
+        if in_events && trimmed == "}" {
+            in_events = false;
+        }
+    }
+
+    if !found_processes || !found_connections {
+        return Err(Error::InstallVerificationFailed {
+            checks: format!(
+                "{NGINX_MAIN_CONFIG_PATH} does not contain expected worker_processes/events worker_connections directives"
+            ),
+        });
+    }
+    let mut content = output.join("\n");
+    content.push('\n');
+    Ok(content)
+}
+
+pub(super) fn apache_mpm_runtime_content(sizing: &plan::ResolvedMemorySizing) -> String {
+    format!(
+        "# Managed by g7inst.\n<IfModule mpm_event_module>\n    StartServers {}\n    ServerLimit {}\n    ThreadsPerChild {}\n    MaxRequestWorkers {}\n    MinSpareThreads {}\n    MaxSpareThreads {}\n    MaxConnectionsPerChild {}\n</IfModule>\n",
+        sizing.apache_start_servers,
+        sizing.apache_server_limit,
+        sizing.apache_threads_per_child,
+        sizing.apache_max_request_workers,
+        sizing.apache_min_spare_threads,
+        sizing.apache_max_spare_threads,
+        sizing.apache_max_connections_per_child,
+    )
 }
 
 pub(super) fn apply_swap_configuration<R: CommandRunner>(
@@ -630,7 +925,7 @@ WantedBy=swap.target
 }
 
 pub(super) fn swap_sysctl_content() -> &'static str {
-    "# Managed by g7inst.\nvm.swappiness = 10\nvm.vfs_cache_pressure = 50\n"
+    "# Managed by g7inst.\nvm.swappiness = 10\nvm.vfs_cache_pressure = 50\nvm.overcommit_memory = 1\n"
 }
 
 pub(super) fn php_fpm_site_socket(plan: &plan::InstallPlan) -> String {
@@ -645,6 +940,10 @@ pub(super) fn php_pool_path(plan: &plan::InstallPlan) -> String {
         "/etc/php/{}/fpm/pool.d/g7-{}.conf",
         plan.php_version, plan.site_user
     )
+}
+
+pub(super) fn php_session_path(plan: &plan::InstallPlan) -> String {
+    format!("/var/lib/php/sessions/g7-{}", plan.site_user)
 }
 
 pub(super) fn php_ini_override_path(plan: &plan::InstallPlan) -> String {
@@ -663,6 +962,20 @@ pub(super) fn php_pool_content(
     plan: &plan::InstallPlan,
     sizing: &plan::ResolvedMemorySizing,
 ) -> String {
+    let process_manager = if sizing.php_process_manager == "ondemand" {
+        format!(
+            "pm = ondemand\npm.max_children = {}\npm.process_idle_timeout = 10s\npm.max_requests = 500",
+            sizing.php_max_children
+        )
+    } else {
+        format!(
+            "pm = dynamic\npm.max_children = {}\npm.start_servers = {}\npm.min_spare_servers = {}\npm.max_spare_servers = {}\npm.max_requests = 500",
+            sizing.php_max_children,
+            sizing.php_start_servers,
+            sizing.php_min_spare_servers,
+            sizing.php_max_spare_servers
+        )
+    };
     format!(
         r#"[g7-{site_user}]
 user = {site_user}
@@ -672,27 +985,18 @@ listen.owner = www-data
 listen.group = www-data
 listen.mode = 0660
 
-pm = dynamic
-pm.max_children = {php_max_children}
-pm.start_servers = {php_start_servers}
-pm.min_spare_servers = {php_min_spare_servers}
-pm.max_spare_servers = {php_max_spare_servers}
-pm.max_requests = 500
+{process_manager}
 
-php_admin_value[open_basedir] = {web_root}:/tmp
-php_admin_value[session.save_path] = /tmp
+php_admin_value[session.save_path] = {session_path}
+request_terminate_timeout = 180s
 request_slowlog_timeout = 2s
 slowlog = /var/log/php{php_version}-fpm-{site_user}-slow.log
 catch_workers_output = yes
 "#,
         site_user = plan.site_user,
         socket = php_fpm_site_socket(plan),
-        web_root = plan.web_root,
+        session_path = php_session_path(plan),
         php_version = plan.php_version,
-        php_max_children = sizing.php_max_children,
-        php_start_servers = sizing.php_start_servers,
-        php_min_spare_servers = sizing.php_min_spare_servers,
-        php_max_spare_servers = sizing.php_max_spare_servers,
     )
 }
 
@@ -701,7 +1005,7 @@ pub(super) fn php_ini_override_content(sizing: &plan::ResolvedMemorySizing) -> S
         r#"; Managed by g7inst.
 memory_limit = {memory_limit}
 upload_max_filesize = {upload_limit}
-post_max_size = {upload_limit}
+post_max_size = {post_limit}
 max_execution_time = 120
 max_input_vars = 3000
 realpath_cache_size = 4096K
@@ -710,20 +1014,21 @@ opcache.enable = 1
 opcache.memory_consumption = {opcache_memory}
 opcache.interned_strings_buffer = 16
 opcache.max_accelerated_files = 20000
-opcache.validate_timestamps = 0
-opcache.revalidate_freq = 60
+opcache.validate_timestamps = 1
+opcache.revalidate_freq = 2
 opcache.save_comments = 1
-opcache.enable_file_override = 1
+opcache.enable_file_override = 0
 "#,
         memory_limit = sizing.php_memory_limit,
         upload_limit = sizing.php_upload_limit,
+        post_limit = sizing.php_post_limit,
         opcache_memory = sizing.opcache_memory.trim_end_matches('M'),
     )
 }
 
 pub(super) fn database_config_path(plan: &plan::InstallPlan) -> &'static str {
     if plan.database_engine == "mariadb" {
-        "/etc/mysql/mariadb.conf.d/60-g7-installer.cnf"
+        "/etc/mysql/mariadb.conf.d/z-g7-installer.cnf"
     } else {
         "/etc/mysql/conf.d/g7-installer.cnf"
     }
@@ -747,7 +1052,8 @@ max_connections = {max_connections}
 tmp_table_size = {tmp_table_size}
 max_heap_table_size = {tmp_table_size}
 slow_query_log = ON
-long_query_time = 0.5
+long_query_time = 1
+min_examined_row_limit = 100
 "#,
         buffer_pool = sizing.db_buffer_pool,
         max_connections = sizing.db_max_connections,

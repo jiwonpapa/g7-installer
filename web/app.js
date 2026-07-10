@@ -50,6 +50,9 @@ const nodes = {
   smtpHost: document.querySelector("#smtp-host"),
   smtpPort: document.querySelector("#smtp-port"),
   smtpFrom: document.querySelector("#smtp-from"),
+  smtpUsername: document.querySelector("#smtp-username"),
+  smtpPassword: document.querySelector("#smtp-password"),
+  smtpPasswordConfirm: document.querySelector("#smtp-password-confirm"),
   smtpEncryption: document.querySelector("#smtp-encryption"),
   securityGuidance: document.querySelector("#security-guidance"),
   optionsForm: document.querySelector("#options-form"),
@@ -229,9 +232,9 @@ const templates = {
     web_server: "nginx",
     php_version: "8.5",
     database: "mysql",
-    database_version: "mysql-8.4",
+    database_version: "apt-default",
     redis: "enable",
-    mail_mode: "local-postfix",
+    mail_mode: "none",
     app_package: "gnuboard7",
     web_root_mode: "public-html",
     www_mode: "redirect-to-www",
@@ -244,9 +247,9 @@ const templates = {
     web_server: "apache",
     php_version: "8.5",
     database: "mysql",
-    database_version: "mysql-8.4",
+    database_version: "apt-default",
     redis: "enable",
-    mail_mode: "local-postfix",
+    mail_mode: "none",
     app_package: "gnuboard7",
     web_root_mode: "public-html",
     www_mode: "redirect-to-www",
@@ -819,7 +822,14 @@ function formValues() {
   const values = {};
   const form = new FormData(nodes.optionsForm);
   form.forEach((value, key) => {
-    if (key === "site_password" || key === "site_password_confirm" || key === "database_password" || key === "database_password_confirm") {
+    if (
+      key === "site_password"
+      || key === "site_password_confirm"
+      || key === "database_password"
+      || key === "database_password_confirm"
+      || key === "smtp_password"
+      || key === "smtp_password_confirm"
+    ) {
       return;
     }
     values[key] = value;
@@ -1117,6 +1127,9 @@ function optionPayload() {
     smtp_host: mailMode === "smtp-relay" ? form.get("smtp_host")?.trim() : null,
     smtp_port: mailMode === "smtp-relay" ? Number(form.get("smtp_port") || 587) : 587,
     smtp_from: mailMode === "smtp-relay" ? form.get("smtp_from")?.trim() : null,
+    smtp_username: mailMode === "smtp-relay" ? form.get("smtp_username")?.trim() : null,
+    smtp_password: mailMode === "smtp-relay" ? form.get("smtp_password") : null,
+    smtp_password_confirm: mailMode === "smtp-relay" ? form.get("smtp_password_confirm") : null,
     smtp_encryption: mailMode === "smtp-relay" ? form.get("smtp_encryption") : "starttls",
     security_profile: form.get("security_profile"),
     ssh_policy: form.get("ssh_policy"),
@@ -1127,7 +1140,23 @@ function optionPayload() {
 }
 
 function validateSitePassword(payload) {
-  return sitePasswordError(payload) || databaseError(payload) || appTemplateError(payload);
+  return sitePasswordError(payload) || databaseError(payload) || mailError(payload) || appTemplateError(payload);
+}
+
+function mailError(payload) {
+  if (payload.mail_mode !== "smtp-relay") {
+    return "";
+  }
+  if (!payload.smtp_host) return "SMTP 서버를 입력하세요.";
+  if (!payload.smtp_from) return "보내는 주소를 입력하세요.";
+  if (!payload.smtp_username) return "SMTP 계정을 입력하세요.";
+  if (!payload.smtp_password) return "SMTP 비밀번호를 입력하세요.";
+  if (payload.smtp_password !== payload.smtp_password_confirm) return "SMTP 비밀번호 확인이 일치하지 않습니다.";
+  if (payload.smtp_password.length < 8) return "SMTP 비밀번호는 8자 이상이어야 합니다.";
+  if (/["\\\n\r\x00-\x1F\x7F]/.test(payload.smtp_username) || /["\\\n\r\x00-\x1F\x7F]/.test(payload.smtp_password)) {
+    return "SMTP 인증 정보에 큰따옴표, 백슬래시, 줄바꿈, 제어문자를 사용할 수 없습니다.";
+  }
+  return "";
 }
 
 const sitePasswordAlertMessages = [
@@ -1401,20 +1430,19 @@ function refreshFormState(options = {}) {
   }
 
   const smtpEnabled = nodes.mailMode.value === "smtp-relay";
-  [nodes.smtpHost, nodes.smtpPort, nodes.smtpFrom, nodes.smtpEncryption].forEach((node) => {
+  [
+    nodes.smtpHost,
+    nodes.smtpPort,
+    nodes.smtpFrom,
+    nodes.smtpUsername,
+    nodes.smtpPassword,
+    nodes.smtpPasswordConfirm,
+    nodes.smtpEncryption,
+  ].forEach((node) => {
     node.disabled = !smtpEnabled;
   });
 
-  const database = nodes.optionsForm.elements.database.value;
-  if (database === "mariadb") {
-    nodes.databaseVersion.value = "apt-default";
-    nodes.databaseVersion.disabled = true;
-  } else {
-    if (nodes.databaseVersion.value === "apt-default") {
-      nodes.databaseVersion.value = "mysql-8.4";
-    }
-    nodes.databaseVersion.disabled = false;
-  }
+  nodes.databaseVersion.value = "apt-default";
 
   syncDatabaseDefaults();
   refreshSecurityGuidance();
@@ -1451,6 +1479,8 @@ function planRequestSignature(payload = optionPayload()) {
     site_password_confirm: _sitePasswordConfirm,
     database_password: _databasePassword,
     database_password_confirm: _databasePasswordConfirm,
+    smtp_password: _smtpPassword,
+    smtp_password_confirm: _smtpPasswordConfirm,
     ...safePayload
   } = payload;
   return JSON.stringify(safePayload);
@@ -1497,11 +1527,9 @@ function databaseLabel(value) {
 
 function databaseVersionLabel(value) {
   const labels = {
-    "apt-default": "Ubuntu apt 기본값",
-    "mysql-8.0": "MySQL 8.0 계열",
-    "mysql-8.4": "MySQL 8.4 LTS 계열",
+    "apt-default": "Ubuntu 24.04 apt 실제 설치 버전",
   };
-  return labels[value] || value || "Ubuntu apt 기본값";
+  return labels[value] || "Ubuntu 24.04 apt 실제 설치 버전";
 }
 
 function appPackageLabel(value) {
@@ -2377,6 +2405,66 @@ function failedStageFromReport(report) {
   return null;
 }
 
+const reportFailureSections = [
+  ["safety_checks", "설치 안전 점검"],
+  ["preinstall_package_checks", "설치 전 패키지 점검"],
+  ["package_checks", "패키지 설치"],
+  ["service_checks", "서비스 점검"],
+  ["port_checks", "포트 점검"],
+  ["network_checks", "네트워크 점검"],
+  ["vhost_checks", "웹서버 설정"],
+  ["runtime_checks", "PHP 런타임"],
+  ["database_checks", "데이터베이스"],
+  ["mail_checks", "메일"],
+  ["certbot_checks", "SSL/Certbot"],
+  ["app_checks", "웹앱"],
+  ["app_requirements", "앱 요구사항"],
+];
+
+function reportFailureChecks(report = {}) {
+  const failures = [];
+  reportFailureSections.forEach(([key, label]) => {
+    (Array.isArray(report[key]) ? report[key] : [])
+      .filter((check) => check?.status === "fail")
+      .forEach((check) => failures.push({
+        ...check,
+        name: `${label} · ${checkDisplayName(check.name)}`,
+      }));
+  });
+
+  if (report.problem && !failures.some((check) => check.message === report.problem)) {
+    failures.unshift({
+      name: "설치 중단 원인",
+      status: "fail",
+      message: report.problem,
+    });
+  }
+  return failures;
+}
+
+function reportFailureMessage(report = {}) {
+  const failures = reportFailureChecks(report);
+  if (failures.length) {
+    return `${failures[0].name}: ${failures[0].message}`;
+  }
+  return "중단 원인이 리포트에 기록되지 않았습니다. 상세 로그와 상태 파일을 확인하세요.";
+}
+
+function reportFailureCard(report = {}) {
+  if (isInstallCompleted(report)) {
+    return "";
+  }
+  const failures = reportFailureChecks(report);
+  if (!failures.length) {
+    return checksCard("중단 원인", [{
+      name: "원인 기록 누락",
+      status: "unknown",
+      message: "실패 체크가 저장되지 않았습니다. 상세 로그와 상태 파일을 확인하세요.",
+    }], "report-failures");
+  }
+  return checksCard("중단 원인", failures, "report-failures");
+}
+
 function applyInstallStagesFromReport(report) {
   installStageOrder.forEach((stage) => markStage(stage, "대기"));
   const completed = phaseCompletedStages[report?.phase] || [];
@@ -2421,7 +2509,7 @@ function renderInstallReport(report) {
   const title = completed ? "서버 세팅 및 앱 배치 완료" : "설치 중단 리포트";
   const note = completed
     ? link.hint
-    : (report.problem || "아직 모든 서버 세팅이 끝나지 않았습니다. 실패 항목을 해결한 뒤 초기화 또는 재시도를 진행하세요.");
+    : reportFailureMessage(report);
   nodes.reportOutput.innerHTML = [
     reportSummaryCard(title, [
       ["도메인", report.domain],
@@ -2437,6 +2525,7 @@ function renderInstallReport(report) {
       ["웹루트", report.web_root],
       ["메일", mailModeLabel(report.mail_mode)],
       ["SMTP 서버", report.smtp_host || "-"],
+      ["SMTP 계정", report.smtp_username || "-"],
       ["DNS/IP 확인", report.dns_check ? "수행" : "건너뜀"],
       ["단계", report.phase],
       ["상태 파일", report.state_path],
@@ -2445,6 +2534,7 @@ function renderInstallReport(report) {
       ["설정 안내서", report.setup_guide_path || "-"],
       ["복구 매니페스트", report.backup_manifest_path || "-"],
     ], note),
+    reportFailureCard(report),
     completionStateCard(report),
     reportDownloadCard(report, "방금 생성됨"),
     operationsGuideCard(report, link),
@@ -2454,7 +2544,6 @@ function renderInstallReport(report) {
       "7단계 세부 설정에서 웹서버, PHP 런타임, DB, SSL, 메일, 웹앱 카드를 항목별로 열어 확인합니다.",
       "각 카드는 설정값, 관련 파일, 실행/재시작 명령, 검증 결과를 따로 보여줍니다.",
     ]),
-    report.problem ? listCard("중단 원인", [report.problem]) : "",
   ].join("");
 
   hydrateIcons(nodes.reportOutput);
@@ -2504,7 +2593,7 @@ function renderSavedReport(payload) {
   const title = completed ? "저장된 완료 리포트" : "저장된 중단 리포트";
   const note = completed
     ? link.hint
-    : (report.problem || "아직 모든 서버 세팅이 끝나지 않았습니다. 실패 항목을 해결한 뒤 초기화 또는 재시도를 진행하세요.");
+    : reportFailureMessage(report);
   nodes.reportOutput.innerHTML = [
     reportSummaryCard(title, [
       ["리포트 파일", payload.path],
@@ -2522,11 +2611,13 @@ function renderSavedReport(payload) {
       ["웹루트", report.web_root || "-"],
       ["메일", mailModeLabel(report.mail_mode)],
       ["SMTP 서버", report.smtp_host || "-"],
+      ["SMTP 계정", report.smtp_username || "-"],
       ["DNS/IP 확인", report.dns_check ? "수행" : "건너뜀"],
       ["설정 안내서", report.setup_guide_path || "-"],
       ["복구 매니페스트", report.backup_manifest_path || "-"],
       ["소유 파일 수", ownedFileCountLabel(report)],
     ], note),
+    reportFailureCard(report),
     completionStateCard(report),
     reportDownloadCard(report, payload.path),
     operationsGuideCard(report, link),
@@ -2535,7 +2626,6 @@ function renderSavedReport(payload) {
       "7단계 세부 설정에서 웹서버, PHP 런타임, DB, SSL, 메일, 웹앱 카드를 항목별로 열어 확인합니다.",
       "각 카드는 설정값, 관련 파일, 실행/재시작 명령, 검증 결과를 따로 보여줍니다.",
     ]),
-    report.problem ? listCard("문제", [report.problem]) : "",
   ].join("");
   hydrateIcons(nodes.reportOutput);
   setReportReady(true);
@@ -3030,6 +3120,7 @@ function provisioningActions(report = {}) {
       settings: [
         ["방식", mailModeLabel(report.mail_mode)],
         ["SMTP 서버", report.smtp_host || "-"],
+        ["SMTP 계정", report.smtp_username || "-"],
         ["SMTP 포트", report.smtp_port || "-"],
         ["발신 주소", report.smtp_from || "-"],
         ["서비스", mailSkipped ? "-" : "postfix"],

@@ -21,6 +21,8 @@ pub struct InstallPlan {
     pub smtp_host: Option<String>,
     pub smtp_port: Option<u16>,
     pub smtp_from: Option<String>,
+    pub smtp_username: Option<String>,
+    pub smtp_password_policy: &'static str,
     pub smtp_encryption: Option<String>,
     pub security_profile: String,
     pub ssh_policy: String,

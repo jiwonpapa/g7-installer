@@ -105,7 +105,7 @@ pub(super) const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
         opcache_memory: "192M",
         db_buffer_pool: "1G",
         db_max_connections: "100",
-        db_tmp_table_size: "128M",
+        db_tmp_table_size: "32M",
         redis_maxmemory: "256M",
         nginx_worker_processes: "min(vCPU,2)",
         nginx_worker_connections: "2048",
@@ -135,7 +135,7 @@ pub(super) const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
         opcache_memory: "256M",
         db_buffer_pool: "2G",
         db_max_connections: "150",
-        db_tmp_table_size: "256M",
+        db_tmp_table_size: "64M",
         redis_maxmemory: "512M",
         nginx_worker_processes: "min(vCPU,4)",
         nginx_worker_connections: "4096",
@@ -165,7 +165,7 @@ pub(super) const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
         opcache_memory: "512M",
         db_buffer_pool: "5G",
         db_max_connections: "250",
-        db_tmp_table_size: "512M",
+        db_tmp_table_size: "64M",
         redis_maxmemory: "1G",
         nginx_worker_processes: "min(vCPU,4)",
         nginx_worker_connections: "8192",
@@ -195,7 +195,7 @@ pub(super) const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
         opcache_memory: "768M",
         db_buffer_pool: "10G",
         db_max_connections: "400",
-        db_tmp_table_size: "512M",
+        db_tmp_table_size: "128M",
         redis_maxmemory: "2G",
         nginx_worker_processes: "min(vCPU,8)",
         nginx_worker_connections: "16384",
@@ -225,7 +225,7 @@ pub(super) const MEMORY_SIZING_PRESETS: [MemorySizingPreset; 7] = [
         opcache_memory: "min(max(RAM*2%, 768M), 1G)",
         db_buffer_pool: "min(RAM*40%, 24G) for single DB host",
         db_max_connections: "min(800, RAM_GB*12)",
-        db_tmp_table_size: "min(1G, RAM*2%)",
+        db_tmp_table_size: "128M default, raise only from measured workload",
         redis_maxmemory: "min(RAM*6%, 4G)",
         nginx_worker_processes: "min(vCPU,16)",
         nginx_worker_connections: "min(32768, RAM_GB*512)",
@@ -250,12 +250,18 @@ pub struct ResolvedMemorySizing {
     pub total_memory_kib: u64,
     pub vcpu_count: usize,
     pub swap_size: String,
+    pub os_reserve_mib: u64,
+    pub php_budget_mib: u64,
+    pub php_worker_memory_mib: u64,
+    pub php_process_manager: String,
     pub php_max_children: u16,
     pub php_start_servers: u16,
     pub php_min_spare_servers: u16,
     pub php_max_spare_servers: u16,
     pub php_memory_limit: String,
     pub php_upload_limit: String,
+    pub php_post_limit: String,
+    pub nginx_client_max_body_size: String,
     pub opcache_memory: String,
     pub db_buffer_pool: String,
     pub db_max_connections: u16,
@@ -266,7 +272,13 @@ pub struct ResolvedMemorySizing {
     pub nginx_worker_rlimit_nofile: u32,
     pub nginx_keepalive_timeout: String,
     pub nginx_fastcgi_buffers: String,
+    pub apache_start_servers: u16,
+    pub apache_server_limit: u16,
+    pub apache_threads_per_child: u16,
     pub apache_max_request_workers: u16,
+    pub apache_min_spare_threads: u16,
+    pub apache_max_spare_threads: u16,
+    pub apache_max_connections_per_child: u32,
     pub note: String,
 }
 
@@ -279,10 +291,33 @@ pub fn resolve_memory_sizing(total_memory_kib: u64, vcpu_count: usize) -> Resolv
         return resolved_formula_sizing(preset, total_memory_kib, total_mib, vcpu_count);
     }
 
-    let (php_start_servers, php_min_spare_servers, php_max_spare_servers) =
-        php_process_counts_for_preset(preset.key);
+    let os_reserve_mib = memory_value_mib(preset.os_reserve).unwrap_or(512);
+    let db_buffer_pool_mib = memory_value_mib(preset.db_buffer_pool).unwrap_or(384);
+    let redis_mib = memory_value_mib(preset.redis_maxmemory).unwrap_or(128);
+    let opcache_mib = memory_value_mib(preset.opcache_memory).unwrap_or(128);
+    let web_overhead_mib = web_overhead_mib_for_preset(preset.key);
+    let php_worker_memory_mib = php_worker_memory_mib_for_preset(preset.key);
+    let php_budget_mib = total_mib.saturating_sub(
+        os_reserve_mib + db_buffer_pool_mib + redis_mib + opcache_mib + web_overhead_mib,
+    );
+    let memory_limited_children = (php_budget_mib / php_worker_memory_mib).max(1);
+    let cpu_limited_children = vcpu_count as u64 * php_cpu_multiplier_for_preset(preset.key);
+    let preset_children = preset.php_max_children.parse::<u64>().unwrap_or(8);
+    let php_max_children = preset_children
+        .min(memory_limited_children)
+        .min(cpu_limited_children)
+        .max(1) as u16;
+    let (base_start, base_min_spare, base_max_spare) = php_process_counts_for_preset(preset.key);
+    let php_start_servers = base_start.min(php_max_children);
+    let php_min_spare_servers = base_min_spare.min(php_max_children);
+    let php_max_spare_servers = base_max_spare.min(php_max_children);
     let nginx_worker_processes = nginx_worker_processes_for_preset(preset.key, vcpu_count);
-    let db_max_connections = preset.db_max_connections.parse::<u16>().unwrap_or(100);
+    let db_connection_cap = preset.db_max_connections.parse::<u16>().unwrap_or(100);
+    let db_admin_margin = db_admin_margin_for_preset(preset.key);
+    let db_max_connections = php_max_children
+        .saturating_add(db_admin_margin)
+        .max(20)
+        .min(db_connection_cap);
     let nginx_worker_connections = preset
         .nginx_worker_connections
         .parse::<u32>()
@@ -295,6 +330,9 @@ pub fn resolve_memory_sizing(total_memory_kib: u64, vcpu_count: usize) -> Resolv
         .apache_max_request_workers
         .parse::<u16>()
         .unwrap_or(100);
+    let (apache_min_spare_threads, apache_max_spare_threads) =
+        apache_spare_threads_for_preset(preset.key);
+    let php_upload_mib = memory_value_mib(preset.php_upload_limit).unwrap_or(64);
 
     ResolvedMemorySizing {
         tier_key: preset.key.to_string(),
@@ -302,12 +340,22 @@ pub fn resolve_memory_sizing(total_memory_kib: u64, vcpu_count: usize) -> Resolv
         total_memory_kib,
         vcpu_count,
         swap_size: canonical_swap_size(preset.swap),
-        php_max_children: preset.php_max_children.parse::<u16>().unwrap_or(8),
+        os_reserve_mib,
+        php_budget_mib,
+        php_worker_memory_mib,
+        php_process_manager: if preset.key == "tier_1gb" {
+            "ondemand".to_string()
+        } else {
+            "dynamic".to_string()
+        },
+        php_max_children,
         php_start_servers,
         php_min_spare_servers,
         php_max_spare_servers,
         php_memory_limit: preset.php_memory_limit.to_string(),
         php_upload_limit: preset.php_upload_limit.to_string(),
+        php_post_limit: format!("{}M", php_upload_mib + 16),
+        nginx_client_max_body_size: format!("{}M", php_upload_mib + 24),
         opcache_memory: preset.opcache_memory.to_string(),
         db_buffer_pool: preset.db_buffer_pool.to_string(),
         db_max_connections,
@@ -318,7 +366,16 @@ pub fn resolve_memory_sizing(total_memory_kib: u64, vcpu_count: usize) -> Resolv
         nginx_worker_rlimit_nofile,
         nginx_keepalive_timeout: preset.nginx_keepalive_timeout.to_string(),
         nginx_fastcgi_buffers: preset.nginx_fastcgi_buffers.to_string(),
+        apache_start_servers: preset.apache_start_servers.parse::<u16>().unwrap_or(2),
+        apache_server_limit: preset.apache_server_limit.parse::<u16>().unwrap_or(4),
+        apache_threads_per_child: preset.apache_threads_per_child.parse::<u16>().unwrap_or(25),
         apache_max_request_workers,
+        apache_min_spare_threads,
+        apache_max_spare_threads,
+        apache_max_connections_per_child: preset
+            .apache_max_connections_per_child
+            .parse::<u32>()
+            .unwrap_or(3000),
         note: preset.note.to_string(),
     }
 }
@@ -350,6 +407,74 @@ pub(super) fn php_process_counts_for_preset(key: &str) -> (u16, u16, u16) {
         "tier_16gb" => (8, 8, 16),
         "tier_32gb" => (12, 12, 24),
         _ => (16, 16, 48),
+    }
+}
+
+pub(super) fn memory_value_mib(value: &str) -> Option<u64> {
+    let normalized = value.trim().to_ascii_lowercase();
+    let digits = normalized
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>()
+        .parse::<u64>()
+        .ok()?;
+    if normalized.starts_with("max(") || normalized.starts_with("min(") {
+        return None;
+    }
+    Some(if normalized.contains('g') {
+        digits.saturating_mul(1024)
+    } else {
+        digits
+    })
+}
+
+pub(super) fn php_worker_memory_mib_for_preset(key: &str) -> u64 {
+    match key {
+        "tier_1gb" | "tier_2gb" => 96,
+        "tier_4gb" => 112,
+        _ => 128,
+    }
+}
+
+pub(super) fn web_overhead_mib_for_preset(key: &str) -> u64 {
+    match key {
+        "tier_1gb" => 96,
+        "tier_2gb" => 128,
+        "tier_4gb" => 160,
+        "tier_8gb" => 192,
+        "tier_16gb" => 256,
+        _ => 384,
+    }
+}
+
+pub(super) fn php_cpu_multiplier_for_preset(key: &str) -> u64 {
+    match key {
+        "tier_1gb" | "tier_2gb" => 4,
+        "tier_4gb" => 6,
+        "tier_8gb" => 8,
+        "tier_16gb" => 10,
+        _ => 12,
+    }
+}
+
+pub(super) fn db_admin_margin_for_preset(key: &str) -> u16 {
+    match key {
+        "tier_1gb" | "tier_2gb" => 12,
+        "tier_4gb" => 16,
+        "tier_8gb" => 20,
+        "tier_16gb" => 24,
+        _ => 32,
+    }
+}
+
+pub(super) fn apache_spare_threads_for_preset(key: &str) -> (u16, u16) {
+    match key {
+        "tier_1gb" => (10, 25),
+        "tier_2gb" => (25, 50),
+        "tier_4gb" => (25, 75),
+        "tier_8gb" => (50, 100),
+        "tier_16gb" => (75, 150),
+        _ => (100, 200),
     }
 }
 
@@ -393,27 +518,74 @@ pub(super) fn resolved_formula_sizing(
         total_memory_kib,
         vcpu_count,
         swap_size: canonical_swap_size(preset.swap),
+        os_reserve_mib: ((total_mib * 10) / 100).max(4096),
+        php_budget_mib: (php_max_children as u64).saturating_mul(128),
+        php_worker_memory_mib: 128,
+        php_process_manager: "dynamic".to_string(),
         php_max_children,
         php_start_servers,
         php_min_spare_servers: php_spare,
         php_max_spare_servers: php_spare.saturating_mul(2).min(php_max_children),
         php_memory_limit: "512M".to_string(),
         php_upload_limit: "256M".to_string(),
+        php_post_limit: "288M".to_string(),
+        nginx_client_max_body_size: "296M".to_string(),
         opcache_memory: format!("{opcache_mib}M"),
         db_buffer_pool: format!("{db_buffer_pool_gb}G"),
         db_max_connections,
-        db_tmp_table_size: format!("{db_tmp_table_mib}M"),
+        db_tmp_table_size: format!("{}M", db_tmp_table_mib.min(128)),
         redis_maxmemory: format!("{redis_mib}M"),
         nginx_worker_processes,
         nginx_worker_connections,
         nginx_worker_rlimit_nofile,
         nginx_keepalive_timeout: "30s".to_string(),
         nginx_fastcgi_buffers: "64 32k".to_string(),
+        apache_start_servers: vcpu_count.min(8) as u16,
+        apache_server_limit: apache_max_request_workers.div_ceil(25),
+        apache_threads_per_child: 25,
         apache_max_request_workers,
+        apache_min_spare_threads: apache_max_request_workers / 4,
+        apache_max_spare_threads: apache_max_request_workers / 2,
+        apache_max_connections_per_child: 10000,
         note: preset.note.to_string(),
     }
 }
 
 pub(super) fn canonical_swap_size(value: &str) -> String {
     value.split_whitespace().next().unwrap_or("2GB").to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{memory_value_mib, resolve_memory_sizing, web_overhead_mib_for_preset};
+
+    #[test]
+    fn fixed_tiers_keep_php_workers_inside_shared_memory_budget() {
+        for gib in [1_u64, 2, 4, 8, 16, 32] {
+            let sizing = resolve_memory_sizing(gib * 1024 * 1024, 8);
+            let total_mib = sizing.total_memory_kib / 1024;
+            let committed = sizing.os_reserve_mib
+                + memory_value_mib(&sizing.db_buffer_pool).unwrap()
+                + memory_value_mib(&sizing.redis_maxmemory).unwrap()
+                + memory_value_mib(&sizing.opcache_memory).unwrap()
+                + web_overhead_mib_for_preset(&sizing.tier_key)
+                + sizing.php_max_children as u64 * sizing.php_worker_memory_mib;
+            assert!(
+                committed <= total_mib,
+                "{} overcommits memory: {} > {} MiB",
+                sizing.tier_label,
+                committed,
+                total_mib
+            );
+            assert!(sizing.db_max_connections >= sizing.php_max_children);
+        }
+    }
+
+    #[test]
+    fn large_tier_caps_per_connection_database_memory() {
+        let sizing = resolve_memory_sizing(64 * 1024 * 1024, 32);
+        assert_eq!(sizing.db_tmp_table_size, "128M");
+        assert!(sizing.php_max_children <= 192);
+        assert!(sizing.db_max_connections <= 800);
+    }
 }

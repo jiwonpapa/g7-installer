@@ -23,6 +23,8 @@ pub struct InstallReport {
     pub smtp_host: Option<String>,
     pub smtp_port: Option<u16>,
     pub smtp_from: Option<String>,
+    pub smtp_username: Option<String>,
+    pub smtp_password_policy: &'static str,
     pub smtp_encryption: Option<String>,
     pub dns_check: bool,
     pub security_profile: String,
@@ -329,6 +331,13 @@ pub(super) fn config_content(plan: &plan::InstallPlan) -> String {
     if let Some(from) = &plan.smtp_from {
         content.push_str(&format!("smtp_from = \"{from}\"\n"));
     }
+    if let Some(username) = &plan.smtp_username {
+        content.push_str(&format!("smtp_username = \"{username}\"\n"));
+        content.push_str(&format!(
+            "smtp_password_policy = \"{}\"\n",
+            plan.smtp_password_policy
+        ));
+    }
     if let Some(encryption) = &plan.smtp_encryption {
         content.push_str(&format!("smtp_encryption = \"{encryption}\"\n"));
     }
@@ -467,6 +476,14 @@ pub(super) fn report_content(
     value.insert("smtp_host".to_string(), serde_json::json!(&plan.smtp_host));
     value.insert("smtp_port".to_string(), serde_json::json!(plan.smtp_port));
     value.insert("smtp_from".to_string(), serde_json::json!(&plan.smtp_from));
+    value.insert(
+        "smtp_username".to_string(),
+        serde_json::json!(&plan.smtp_username),
+    );
+    value.insert(
+        "smtp_password_policy".to_string(),
+        serde_json::json!(plan.smtp_password_policy),
+    );
     value.insert(
         "smtp_encryption".to_string(),
         serde_json::json!(&plan.smtp_encryption),
@@ -714,6 +731,16 @@ pub(super) fn setup_guide_content(
     content.push_str(&format!(
         "- DB 비밀번호 위치: `{SECRETS_PATH}` (root만 읽기)\n"
     ));
+    if plan.mail_mode == "smtp-relay" {
+        content.push_str(&format!(
+            "- SMTP 계정: `{}`; 비밀번호 위치: `{SECRETS_PATH}` (root만 읽기)\n",
+            plan.smtp_username.as_deref().unwrap_or("-")
+        ));
+    } else if plan.mail_mode == "local-postfix" {
+        content.push_str(
+            "- 로컬 Postfix는 외부 25번 포트, PTR, SPF/DKIM 및 발신 IP 평판을 별도로 확인해야 합니다.\n",
+        );
+    }
     content.push_str("\n## 서비스 명령\n\n");
     content.push_str(&format!(
         "- 웹서버 상태: `sudo systemctl status {web_service}`\n"

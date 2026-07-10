@@ -55,10 +55,17 @@ pub(super) fn install_laravel_app<R: CommandRunner>(
         read_database_password(paths)?.ok_or_else(|| Error::InstallVerificationFailed {
             checks: format!("database password was not found at {SECRETS_PATH}"),
         })?;
+    let smtp_password = read_smtp_password(paths)?;
     write_existing_file(
         paths,
         &format!("{}/.env", plan.web_root),
-        &laravel_env_content(plan, &db_password, app_url, laravel_runtime_kind(plan))?,
+        &laravel_env_content(
+            plan,
+            &db_password,
+            app_url,
+            laravel_runtime_kind(plan),
+            smtp_password.as_deref(),
+        )?,
     )?;
 
     let mut checks = vec![
