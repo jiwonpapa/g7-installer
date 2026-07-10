@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout tagged source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
 
       - name: Install Rust targets
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
@@ -26,6 +28,7 @@ jobs:
         run: |
           version="$(sed -n 's/^version = "\(.*\)"/\1/p' crates/g7-cli/Cargo.toml | head -n 1)"
           test "${GITHUB_REF_NAME}" = "v${version}"
+          test "$(git cat-file -t "refs/tags/${GITHUB_REF_NAME}")" = "tag"
 
       - name: Verify tagged source
         run: |

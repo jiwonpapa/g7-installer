@@ -19,3 +19,6 @@
 실제 서버 검증은 승인된 폐기 가능 Ubuntu VPS에서
 `.github/workflows/ops-harness.yml`을 수동 실행합니다. 운영 Let's Encrypt 발급은
 일반 테스트에 사용하지 않습니다.
+
+릴리스 태그는 `git tag -a vX.Y.Z -m "release X.Y.Z"` 형식의 annotated tag로 만들며,
+릴리스 워크플로가 crate 버전 일치와 태그 형식을 검증합니다.
