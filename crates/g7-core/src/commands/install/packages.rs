@@ -461,25 +461,13 @@ pub(super) fn verify_certbot_readiness<R: CommandRunner>(
         "certbot-certificate",
         format!("Existing certificate directory found for {}.", plan.domain),
     ));
-
-    match probe.certbot_renew_dry_run(&plan.domain) {
-        Ok(output) if output.status == 0 => checks.push(InstallCheck::pass(
-            "certbot-renew-dry-run",
-            "certbot renew --dry-run completed successfully.",
-        )),
-        Ok(output) => checks.push(InstallCheck::fail(
-            "certbot-renew-dry-run",
-            format!(
-                "certbot renew --dry-run failed with status {}: {}",
-                output.status,
-                output.stderr.trim()
-            ),
-        )),
-        Err(err) => checks.push(InstallCheck::fail(
-            "certbot-renew-dry-run",
-            format!("Could not run certbot renew --dry-run: {err}"),
-        )),
-    }
+    checks.push(InstallCheck {
+        name: "certbot-renew-dry-run".to_string(),
+        status: "deferred".to_string(),
+        message:
+            "기존 인증서의 갱신 웹루트를 현재 사이트에 맞춘 뒤 TLS 단계에서 갱신 검증을 실행합니다."
+                .to_string(),
+    });
 
     checks
 }

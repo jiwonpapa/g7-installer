@@ -855,8 +855,48 @@ fn php_runtime_failures_block_app_phase() {
     ])
     .expect("php extension failure should block");
 
-    assert!(message.contains("PHP 런타임 진단 실패"));
+    assert!(message.contains("서버 런타임 검증 실패"));
     assert!(message.contains("php-extension:redis"));
+}
+
+#[test]
+fn redis_runtime_uses_decimal_memory_units() {
+    assert_eq!(super::redis_memory_value_bytes("128M"), Some(128_000_000));
+    assert_eq!(super::redis_memory_value_bytes("1G"), Some(1_000_000_000));
+    assert_eq!(super::memory_value_bytes("128M"), Some(134_217_728));
+}
+
+#[test]
+fn existing_certificate_defers_renewal_until_tls_webroot_is_repaired()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let fs_root = create_temp_fs_root()?;
+    fs::create_dir_all(fs_root.join("etc/letsencrypt/live/example.com"))?;
+    let plan = super::plan::build_with_options(
+        "example.com".to_string(),
+        super::plan::PlanOptions::default(),
+    )?;
+    let runner = FakeCommandRunner::default();
+    let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
+    let checks = super::verify_certbot_readiness(
+        &probe,
+        &plan,
+        &[super::InstallCheck::pass("certbot.timer", "active")],
+    );
+
+    assert!(
+        checks
+            .iter()
+            .any(|check| { check.name == "certbot-certificate" && check.status == "pass" })
+    );
+    assert!(
+        checks
+            .iter()
+            .any(|check| { check.name == "certbot-renew-dry-run" && check.status == "deferred" })
+    );
+    assert!(probe.runner().recorded().is_empty());
+
+    fs::remove_dir_all(fs_root)?;
+    Ok(())
 }
 
 #[test]
@@ -1534,7 +1574,7 @@ fn push_runtime_database_tls_outputs(
             "protected-mode\nyes\n".to_string(),
             format!(
                 "maxmemory\n{}\n",
-                super::memory_value_bytes(&sizing.redis_maxmemory).unwrap()
+                super::redis_memory_value_bytes(&sizing.redis_maxmemory).unwrap()
             ),
             "maxmemory-policy\nvolatile-lru\n".to_string(),
         ];

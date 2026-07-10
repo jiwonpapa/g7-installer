@@ -535,7 +535,7 @@ pub(super) fn blocking_runtime_failure(checks: &[InstallCheck]) -> Option<String
         None
     } else {
         Some(format!(
-            "PHP 런타임 진단 실패. 웹앱 설치를 시작하지 않습니다: {}",
+            "서버 런타임 검증 실패. 웹앱 설치를 시작하지 않습니다: {}",
             failures.join("; ")
         ))
     }
@@ -570,14 +570,15 @@ pub(super) fn apply_redis_runtime<R: CommandRunner>(
         .map_err(|error| command_error("redis-restart", "systemctl restart redis-server", error))?;
     require_success("redis-restart", "systemctl restart redis-server", output)?;
 
-    let expected_maxmemory = memory_value_bytes(&sizing.redis_maxmemory).ok_or_else(|| {
-        Error::InstallVerificationFailed {
-            checks: format!(
-                "Redis maxmemory value `{}` could not be converted to bytes",
-                sizing.redis_maxmemory
-            ),
-        }
-    })?;
+    let expected_maxmemory =
+        redis_memory_value_bytes(&sizing.redis_maxmemory).ok_or_else(|| {
+            Error::InstallVerificationFailed {
+                checks: format!(
+                    "Redis maxmemory value `{}` could not be converted to bytes",
+                    sizing.redis_maxmemory
+                ),
+            }
+        })?;
     let expected = [
         ("bind", "127.0.0.1".to_string()),
         ("protected-mode", "yes".to_string()),
@@ -653,6 +654,26 @@ pub(super) fn memory_value_bytes(value: &str) -> Option<u64> {
         1024_u64.pow(2)
     } else if normalized.ends_with('k') || normalized.ends_with("kb") {
         1024
+    } else {
+        1
+    };
+    digits.checked_mul(multiplier)
+}
+
+pub(super) fn redis_memory_value_bytes(value: &str) -> Option<u64> {
+    let normalized = value.trim().to_ascii_lowercase();
+    let digits = normalized
+        .chars()
+        .take_while(|character| character.is_ascii_digit())
+        .collect::<String>()
+        .parse::<u64>()
+        .ok()?;
+    let multiplier = if normalized.ends_with('g') || normalized.ends_with("gb") {
+        1000_u64.pow(3)
+    } else if normalized.ends_with('m') || normalized.ends_with("mb") {
+        1000_u64.pow(2)
+    } else if normalized.ends_with('k') || normalized.ends_with("kb") {
+        1000
     } else {
         1
     };
