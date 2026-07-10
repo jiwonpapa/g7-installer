@@ -739,14 +739,15 @@
         <button>close</button>
       </form>
     </dialog>
-    <div id="operation-overlay" class="operation-overlay" role="alertdialog" aria-modal="true" aria-labelledby="operation-overlay-title" aria-describedby="operation-overlay-message" hidden>
+    <dialog id="operation-overlay" class="operation-overlay" aria-labelledby="operation-overlay-title" aria-describedby="operation-overlay-message" hidden>
       <section class="operation-overlay-box">
         <div id="operation-overlay-spinner" class="operation-spinner" aria-hidden="true"></div>
         <h2 id="operation-overlay-title">초기화 중입니다.</h2>
         <p id="operation-overlay-message">서버 정리 작업이 끝날 때까지 이 화면을 닫지 마세요.</p>
+        <div id="operation-overlay-log-slot" class="operation-overlay-log-slot"></div>
         <button id="operation-overlay-confirm" class="btn btn-primary icon-button hidden" type="button" data-icon="check">확인</button>
       </section>
-    </div>
+    </dialog>
     <div id="floating-help" class="floating-help" role="tooltip" hidden></div>
     <script type="module" src="/app.js?v=__G7INST_ASSET_VERSION__"></script>
   </body>

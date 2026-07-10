@@ -206,6 +206,16 @@ async function startServer(options = {}) {
       json(response, mockReport());
       return;
     }
+    if (pathname === "/api/reset") {
+      await new Promise((resolve) => setTimeout(resolve, options.resetDelayMs || 0));
+      json(response, {
+        dry_run: false,
+        actions: [{ resource: "site:g7", status: "removed", message: "사이트 리소스 정리 완료" }],
+        removed: ["/var/lib/g7-installer/state.json"],
+        missing: [],
+      });
+      return;
+    }
     if (pathname === "/api/provision/action") {
       json(response, {
         action: "security",
@@ -340,11 +350,38 @@ test("install uses one modal graph and groups PHP packages", async ({ page }, te
     await expect(page.locator("#install-stages .install-graph-node")).toHaveCount(9);
     await expect(page.locator('[data-package-group="php"]')).toContainText("PHP 8.5 런타임 · 2개");
     await expect(page.locator("#install-log-slot #live-log")).toHaveCount(1);
+    await expect(page.locator("#install-log-slot #log-dock[open]")).toHaveCount(1);
+    await expect(page.locator("#install-log-slot #live-log")).toBeVisible();
     await expect(page.locator("#live-log")).toHaveCount(1);
     await page.screenshot({ path: testInfo.outputPath("install-progress-modal.png"), fullPage: false });
 
     await expect(page).toHaveURL(/\/setup\/result/, { timeout: 5000 });
     await expect(page.locator("#install-progress-dialog[open]")).toHaveCount(0);
+    await expect(page.locator("#log-dock-home #live-log")).toHaveCount(1);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("reset overlay shows the shared live log expanded", async ({ page }, testInfo) => {
+  const { server, baseUrl } = await startServer({ resetDelayMs: 900 });
+  try {
+    await page.setViewportSize({ width: 610, height: 476 });
+    await page.goto(`${baseUrl}/setup/result?token=e2e`);
+    await page.locator("#reset-button").click();
+    await page.locator("#recovery-confirm-yes").click();
+
+    await expect(page.locator("#operation-overlay:not([hidden])")).toBeVisible();
+    await expect(page.locator("#operation-overlay-log-slot #live-log")).toHaveCount(1);
+    await expect(page.locator("#operation-overlay-log-slot #log-dock[open]")).toHaveCount(1);
+    await expect(page.locator("#operation-overlay-log-slot #live-log")).toBeVisible();
+    const resetOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(resetOverflow).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: testInfo.outputPath("reset-live-log-overlay.png"), fullPage: false });
+
+    await expect(page.getByRole("heading", { name: "초기화 완료되었습니다." })).toBeVisible();
+    await page.locator("#operation-overlay-confirm").click();
+    await expect(page.locator("#operation-overlay[hidden]")).toHaveCount(1);
     await expect(page.locator("#log-dock-home #live-log")).toHaveCount(1);
   } finally {
     await new Promise((resolve) => server.close(resolve));

@@ -107,6 +107,7 @@ const nodes = {
   operationOverlayMessage: document.querySelector("#operation-overlay-message"),
   operationOverlaySpinner: document.querySelector("#operation-overlay-spinner"),
   operationOverlayConfirm: document.querySelector("#operation-overlay-confirm"),
+  operationOverlayLogSlot: document.querySelector("#operation-overlay-log-slot"),
   promoPanel: document.querySelector("#promo-panel"),
   summaryPanel: document.querySelector("#summary-panel"),
   floatingHelp: document.querySelector("#floating-help"),
@@ -418,6 +419,7 @@ function openInstallProgressDialog() {
   nodes.installProgressDialog.dataset.outcome = "running";
   nodes.installProgressClose.disabled = true;
   setButtonLabel(nodes.installProgressClose, "설치 진행 중");
+  nodes.logDock.open = true;
   moveLogDock(nodes.installLogSlot);
   if (!nodes.installProgressDialog.open) {
     nodes.installProgressDialog.showModal();
@@ -456,7 +458,12 @@ function showOperationOverlay(title, message, options = {}) {
   const loading = options.loading !== false;
   nodes.operationOverlayTitle.textContent = title;
   nodes.operationOverlayMessage.textContent = message;
+  nodes.logDock.open = true;
+  moveLogDock(nodes.operationOverlayLogSlot);
   nodes.operationOverlay.hidden = false;
+  if (!nodes.operationOverlay.open) {
+    nodes.operationOverlay.showModal();
+  }
   nodes.operationOverlaySpinner.hidden = !loading;
   nodes.operationOverlayConfirm.classList.toggle("hidden", loading);
   nodes.operationOverlayConfirm.disabled = loading;
@@ -471,10 +478,14 @@ function hideOperationOverlay() {
     return;
   }
 
+  if (nodes.operationOverlay.open) {
+    nodes.operationOverlay.close();
+  }
   nodes.operationOverlay.hidden = true;
   nodes.operationOverlaySpinner.hidden = false;
   nodes.operationOverlayConfirm.classList.add("hidden");
   nodes.operationOverlayConfirm.disabled = true;
+  moveLogDock(nodes.logDockHome);
 }
 
 function waitForOperationOverlayConfirm() {
@@ -4161,6 +4172,10 @@ function bindEvents() {
     if (resolve) {
       resolve();
     }
+  });
+
+  nodes.operationOverlay?.addEventListener("cancel", (event) => {
+    event.preventDefault();
   });
 
   nodes.installProgressClose?.addEventListener("click", () => {

@@ -908,7 +908,11 @@
   }
 
   .operation-overlay {
-    @apply fixed inset-0 z-[100] grid place-items-center bg-neutral/55 px-4 backdrop-blur-sm;
+    @apply fixed inset-0 m-0 grid h-full max-h-none w-full max-w-none place-items-center border-0 bg-neutral/55 px-4 backdrop-blur-sm;
+  }
+
+  .operation-overlay::backdrop {
+    @apply bg-neutral/55 backdrop-blur-sm;
   }
 
   .operation-overlay[hidden] {
@@ -916,7 +920,7 @@
   }
 
   .operation-overlay-box {
-    @apply grid w-full max-w-sm justify-items-center gap-4 rounded-lg border border-base-300 bg-base-100 p-6 text-center shadow-2xl;
+    @apply grid w-full max-w-2xl justify-items-center gap-4 rounded-lg border border-base-300 bg-base-100 p-5 text-center shadow-2xl md:p-6;
   }
 
   .operation-overlay-box h2 {
@@ -930,6 +934,18 @@
   .operation-spinner {
     @apply h-12 w-12 rounded-full border-4 border-base-300 border-t-primary;
     animation: g7inst-spin 0.9s linear infinite;
+  }
+
+  .operation-overlay-log-slot {
+    @apply w-full min-w-0 text-left;
+  }
+
+  .operation-overlay-log-slot .log-dock {
+    @apply rounded-md border border-base-300 bg-base-200/40;
+  }
+
+  .operation-overlay-log-slot .log-box {
+    @apply max-h-52 min-h-36;
   }
 
   body[data-operation-locked="true"] .app-shell {
