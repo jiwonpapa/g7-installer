@@ -4,6 +4,17 @@
 
 ## Unreleased
 
+## 0.2.38 - 2026-07-10
+
+### Fixed
+
+- Nginx가 `/api` 아래의 동적 CSS/JavaScript 응답을 정적 파일로 가로채 404를 반환하던 문제 수정
+
+### Changed
+
+- Nginx vhost에서 불필요한 확장자 캐시 규칙과 G7 전용 `/app`, `/apps` 자동 프록시 제거
+- 정적 파일과 동적 애플리케이션 요청을 기본 `try_files` front controller 흐름으로 단순화
+
 ## 0.2.37 - 2026-07-10
 
 ### Fixed

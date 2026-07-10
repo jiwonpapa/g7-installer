@@ -68,14 +68,15 @@ fn install_writes_prepared_state_and_owned_files()
     assert!(fs_root.join("etc/nginx/sites-available/g7.conf").exists());
     assert!(fs_root.join("etc/nginx/sites-enabled/g7.conf").exists());
     let nginx_vhost = fs::read_to_string(fs_root.join("etc/nginx/sites-available/g7.conf"))?;
-    assert!(nginx_vhost.contains("proxy_pass http://127.0.0.1:8080;"));
-    assert!(nginx_vhost.contains("location /app"));
     assert!(nginx_vhost.contains("access_log /var/log/nginx/g7-access.log;"));
     assert!(!nginx_vhost.contains("g7_timing"));
     assert!(nginx_vhost.contains("client_max_body_size"));
     assert!(nginx_vhost.contains("fastcgi_buffers"));
-    assert!(nginx_vhost.contains("location ^~ /build/"));
-    assert!(nginx_vhost.contains("public, max-age=2592000, immutable"));
+    assert!(nginx_vhost.contains("try_files $uri $uri/ /index.php?$query_string;"));
+    assert!(!nginx_vhost.contains("location ~*"));
+    assert!(!nginx_vhost.contains("location /app"));
+    assert!(!nginx_vhost.contains("location /apps"));
+    assert!(!nginx_vhost.contains("proxy_pass http://127.0.0.1:8080;"));
     assert!(
         !fs_root
             .join("etc/nginx/conf.d/g7-runtime-tuning.conf")
@@ -609,6 +610,10 @@ fn install_configures_frankenphp_edge_runtime()
     let vhost = fs::read_to_string(fs_root.join("etc/nginx/sites-available/g7.conf"))?;
     assert!(vhost.contains("proxy_pass http://127.0.0.1:7080;"));
     assert!(!vhost.contains("fastcgi_pass"));
+    assert!(!vhost.contains("location ~*"));
+    assert!(!vhost.contains("location /app"));
+    assert!(!vhost.contains("location /apps"));
+    assert!(!vhost.contains("proxy_pass http://127.0.0.1:8080;"));
     assert!(
         report
             .app_checks
