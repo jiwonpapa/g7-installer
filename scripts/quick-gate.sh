@@ -14,6 +14,11 @@ echo "[quick-gate] setup auth smoke"
 bash scripts/setup-auth-smoke.sh
 echo "[quick-gate] javascript syntax"
 node --check web/app.js
+echo "[quick-gate] public documentation scope"
+if rg -n -i 'wordpress|워드프레스' README.md SPEC.md DEVELOPMENT_CONSTITUTION.md CHANGELOG.md docs; then
+  echo "public documentation must describe the G7-only app scope" >&2
+  exit 1
+fi
 echo "[quick-gate] cargo fmt"
 cargo fmt --check
 echo "[quick-gate] state and system adapter unit tests"

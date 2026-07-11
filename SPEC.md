@@ -316,7 +316,6 @@ crates/
           gnuboard7.rs
           laravel.rs
           runtime.rs
-          wordpress.rs
       plan/
         builder.rs
         defaults.rs
