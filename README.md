@@ -106,15 +106,26 @@ VPS 업체와 관계없이 SSH 접속 계정에서 아래 명령이 성공하면
 sudo -n true && echo "sudo OK" || echo "sudo 비밀번호 필요"
 ```
 
-`sudo OK`가 나오면 위의 한 줄 설치 명령을 그대로 실행합니다. `sudo 비밀번호 필요`가 나오면 설치 명령이 요청할 때 터미널에 비밀번호를 입력해도 됩니다. sudo 권한 자체가 없다면 VPS 콘솔이나 root 계정으로 먼저 권한을 부여해야 하며, 설치기가 스스로 sudo 권한을 만들 수는 없습니다.
+결과에 따라 처리합니다.
 
-설치 후 `g7inst`만 비밀번호 없이 재실행하려면 `sudo visudo -f /etc/sudoers.d/g7inst`를 열고 `SSH_USER`를 실제 접속 계정으로 바꿔 아래 한 줄을 넣습니다.
+- `sudo OK`: 위의 한 줄 설치 명령을 그대로 실행합니다.
+- `sudo 비밀번호 필요`: 설치 명령이 요청할 때 터미널에 sudo 비밀번호를 입력합니다.
+- sudo 권한 없음: VPS 콘솔이나 root 계정으로 먼저 권한을 부여합니다. 설치기가 스스로 sudo 권한을 만들 수는 없습니다.
 
-```text
-SSH_USER ALL=(root) NOPASSWD: SETENV: /usr/local/bin/g7inst
+설치 후 `g7inst`만 비밀번호 없이 재실행하려면 먼저 접속 계정명을 확인하고 sudoers 파일을 엽니다.
+
+```bash
+whoami
+sudo EDITOR=nano visudo -f /etc/sudoers.d/g7inst
 ```
 
-저장 후 검사합니다.
+`whoami` 결과가 `ubuntu`라면 열린 파일에 다음 한 줄을 넣습니다. 다른 계정이면 `ubuntu`를 실제 계정명으로 바꿉니다.
+
+```text
+ubuntu ALL=(root) NOPASSWD: SETENV: /usr/local/bin/g7inst
+```
+
+`Ctrl+O`, `Enter`, `Ctrl+X` 순서로 저장하고 종료한 뒤 검사합니다.
 
 ```bash
 sudo chmod 0440 /etc/sudoers.d/g7inst
