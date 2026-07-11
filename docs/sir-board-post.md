@@ -5,13 +5,13 @@
 ## 제목
 
 ```text
-[공개 베타] 새 Ubuntu VPS에 그누보드7/WordPress 서버를 준비하는 G7 Installer
+[공개 베타] 새 Ubuntu VPS에 그누보드7 서버를 준비하는 G7 Installer
 ```
 
 ## 게시용 본문
 
 ````markdown
-새 Ubuntu 24.04 VPS에서 그누보드7 또는 WordPress를 올릴 때, 서버 패키지와 도메인 연결을 웹 마법사로 준비하는 `G7 Installer`를 공개 베타로 배포합니다.
+새 Ubuntu 24.04 VPS에서 그누보드7을 올릴 때, 서버 패키지와 도메인 연결을 웹 마법사로 준비하는 `G7 Installer`를 공개 베타로 배포합니다.
 
 GitHub: https://github.com/jiwonpapa/g7-installer
 
@@ -25,14 +25,12 @@ GitHub: https://github.com/jiwonpapa/g7-installer
 - 도메인과 `www` DNS/IP 확인, vhost 생성, Let's Encrypt 인증서 발급 또는 기존 인증서 재사용·갱신 점검
 - 사이트 Linux 계정, 웹루트, DB와 DB 계정 생성
 - 그누보드7은 GitHub 공식 최신 안정 Release를 매번 받아 Git 무결성·필수 빌드 파일을 검증하고, `.env.example` 기반 `.env`를 사이트 계정 전용 `0600` 권한으로 준비
-- WordPress는 공식 최신 zip을 받아 공식 설치 화면으로 연결
 - 설치 중 실시간 로그, 중단 리포트, 안전한 이어서 진행, 상세 설정 안내서 제공
 
 ### 먼저 알아둘 범위
 
 - `completed`는 서버 프로비저닝 완료입니다. CMS 관리자 설치까지 끝났다는 뜻은 아닙니다.
 - 그누보드7은 결과 리포트의 `/install` 링크에서 공식 설치 화면을 한 번 더 진행합니다. Composer/Vendor, 관리자 계정, 확장, 마이그레이션은 그누보드7 공식 설치기가 담당합니다.
-- WordPress도 결과 리포트의 `/wp-admin/install.php` 링크에서 공식 설치를 마칩니다.
 - UFW, fail2ban, 기존 운영 서버 이전, 운영 데이터 백업은 범위 밖입니다. VPS 제공자 방화벽과 별도 유지보수 도구로 관리합니다.
 - 재설치 초기화는 신규 VPS 테스트용입니다. 운영 데이터가 있으면 먼저 VPS 스냅샷 또는 별도 백업을 만드세요. 기존 Let's Encrypt 인증서는 중복 발급 제한을 피하기 위해 보존 우선입니다.
 
@@ -71,7 +69,7 @@ http://127.0.0.1:7717/?token=...
 
 웹 UI에서 도메인, 사이트 계정/SFTP 비밀번호, DB 계정, 웹서버와 PHP 옵션을 확인한 뒤 진행하면 됩니다. 서버 root 비밀번호는 웹 UI에 입력하지 않습니다. 사이트 계정 비밀번호는 SFTP/파일 관리용이며 sudo 권한을 주지 않습니다.
 
-설치가 끝나면 결과 리포트의 `앱 링크`를 열어 그누보드7 또는 WordPress 공식 설치 화면을 마무리합니다.
+설치가 끝나면 결과 리포트의 `앱 링크`를 열어 그누보드7 공식 설치 화면을 마무리합니다.
 
 ### 참고 문서
 

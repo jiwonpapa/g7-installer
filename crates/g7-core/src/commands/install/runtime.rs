@@ -331,7 +331,7 @@ pub(super) fn php_runtime_diagnostic_checks<R: CommandRunner>(
     checks.push(InstallCheck::pass(
         "phpinfo-summary",
         format!(
-            "{} 기준 PHP 정보를 파싱했습니다: PHP {}, SAPI={}, ini={}, scan_dir={}.",
+            "{} 기준 PHP 정보를 파싱했습니다: PHP {}, SAPI={}, ini={}, scan_dir={}, timezone={}.",
             if plan.web_server == "frankenphp" {
                 "CLI ini"
             } else {
@@ -340,7 +340,8 @@ pub(super) fn php_runtime_diagnostic_checks<R: CommandRunner>(
             fact(&facts, "php_version"),
             fact(&facts, "sapi"),
             fact(&facts, "loaded_ini"),
-            fact(&facts, "scan_dir")
+            fact(&facts, "scan_dir"),
+            fact(&facts, "date.timezone")
         ),
     ));
 

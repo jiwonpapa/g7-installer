@@ -828,11 +828,21 @@ fn install_applies_apache_vhost_runtime_tls_and_app_link()
     let paths = InstallPaths::with_root(&fs_root);
 
     let report = run_with_probe_and_paths("example.com".to_string(), options, &probe, &paths)?;
+    let commands = probe.runner().recorded();
 
     assert_eq!(report.web_server, "apache");
     assert_eq!(report.app_url, "https://www.example.com/install");
     assert!(fs_root.join("etc/apache2/sites-available/g7.conf").exists());
     assert!(fs_root.join("etc/apache2/sites-enabled/g7.conf").exists());
+    assert!(commands.iter().any(|command| {
+        command.program == "curl"
+            && command
+                .args
+                .contains(&OsString::from("Host: www.example.com"))
+            && command
+                .args
+                .contains(&OsString::from("http://127.0.0.1/g7inst-ready.php"))
+    }));
     let apache_vhost = fs::read_to_string(fs_root.join("etc/apache2/sites-available/g7.conf"))?;
     assert!(!apache_vhost.contains("ProxyPass /app"));
     assert!(!apache_vhost.contains("ProxyPass /apps"));

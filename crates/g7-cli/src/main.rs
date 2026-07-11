@@ -51,7 +51,7 @@ enum Command {
         /// Use local test mode without public DNS or Let's Encrypt.
         #[arg(long, default_value_t = false)]
         local_test: bool,
-        /// Public app profile: gnuboard7 or wordpress.
+        /// Public app profile: gnuboard7.
         #[arg(long = "app", visible_alias = "app-package", default_value_t = plan::DEFAULT_APP_PROFILE.to_string())]
         app_profile: String,
         /// Public web server: nginx or apache.
@@ -126,7 +126,7 @@ enum Command {
         /// Use local test mode without public DNS or Let's Encrypt.
         #[arg(long, default_value_t = false)]
         local_test: bool,
-        /// Public app profile: gnuboard7 or wordpress.
+        /// Public app profile: gnuboard7.
         #[arg(long = "app", visible_alias = "app-package", default_value_t = plan::DEFAULT_APP_PROFILE.to_string())]
         app_profile: String,
         /// Public web server: nginx or apache.

@@ -8,6 +8,13 @@ struct ResumeRecovery {
     resume_reason: Option<String>,
 }
 
+#[derive(Default)]
+struct G7InstallEvidence {
+    database_created: bool,
+    install_completed: bool,
+    install_lock_path: Option<String>,
+}
+
 pub(super) fn recovery_status() -> RecoveryApiStatus {
     let metadata_paths = installer_metadata_paths()
         .into_iter()
@@ -29,6 +36,7 @@ pub(super) fn recovery_status() -> RecoveryApiStatus {
     let restore_status = resume.restore_status;
     let resume_reason = resume.resume_reason;
     let can_reset = has_installer_metadata;
+    let g7_evidence = g7_install_evidence();
     let recommended_action = if can_resume {
         "resume"
     } else if can_rollback {
@@ -36,7 +44,7 @@ pub(super) fn recovery_status() -> RecoveryApiStatus {
     } else {
         "manual"
     };
-    let message = match recommended_action {
+    let mut message = match recommended_action {
         "resume" if can_retry_step => {
             "실패한 단계의 변경을 복원한 뒤 해당 단계부터 다시 실행할 수 있습니다."
         }
@@ -52,6 +60,11 @@ pub(super) fn recovery_status() -> RecoveryApiStatus {
         }
     }
     .to_string();
+    if g7_evidence.install_completed {
+        message = format!(
+            "그누보드7 DB 생성 기록과 설치 완료 잠금 파일을 확인했습니다. 이미 그누보드7 설치가 완료된 서버입니다. {message}"
+        );
+    }
 
     RecoveryApiStatus {
         can_resume,
@@ -65,6 +78,56 @@ pub(super) fn recovery_status() -> RecoveryApiStatus {
         metadata_paths,
         rollback_reason,
         resume_reason,
+        g7_database_created: g7_evidence.database_created,
+        g7_install_completed: g7_evidence.install_completed,
+        g7_install_lock_path: g7_evidence.install_lock_path,
+    }
+}
+
+fn g7_install_evidence() -> G7InstallEvidence {
+    let report = match fs::read(REPORT_PATH)
+        .ok()
+        .and_then(|payload| serde_json::from_slice::<serde_json::Value>(&payload).ok())
+    {
+        Some(report) => report,
+        None => return G7InstallEvidence::default(),
+    };
+    classify_g7_install_evidence(&report, |path| fs::metadata(path).is_ok())
+}
+
+fn classify_g7_install_evidence(
+    report: &serde_json::Value,
+    path_exists: impl Fn(&str) -> bool,
+) -> G7InstallEvidence {
+    if report
+        .get("app_profile")
+        .and_then(serde_json::Value::as_str)
+        != Some("gnuboard7")
+    {
+        return G7InstallEvidence::default();
+    }
+
+    let database_created = report
+        .get("database_checks")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|checks| {
+            checks.iter().any(|check| {
+                check.get("name").and_then(serde_json::Value::as_str) == Some("database-created")
+                    && check.get("status").and_then(serde_json::Value::as_str) == Some("pass")
+            })
+        });
+    let install_lock_path = report
+        .get("web_root")
+        .and_then(serde_json::Value::as_str)
+        .filter(|path| path.starts_with("/home/") || path.starts_with("/var/www/"))
+        .map(|web_root| format!("{web_root}/storage/app/g7_installed"));
+    let install_completed =
+        database_created && install_lock_path.as_deref().is_some_and(&path_exists);
+
+    G7InstallEvidence {
+        database_created,
+        install_completed,
+        install_lock_path,
     }
 }
 
@@ -126,7 +189,7 @@ pub(super) fn installer_metadata_paths() -> [&'static str; 6] {
 
 #[cfg(test)]
 mod tests {
-    use super::classify_resume_state;
+    use super::{classify_g7_install_evidence, classify_resume_state};
     use g7_state::state::{InstallerPhase, InstallerState};
 
     #[test]
@@ -154,6 +217,28 @@ mod tests {
         assert_eq!(
             recovery.resume_reason.as_deref(),
             Some("설치가 이미 완료되었습니다.")
+        );
+    }
+
+    #[test]
+    fn g7_install_evidence_requires_database_and_install_lock() {
+        let report = serde_json::json!({
+            "app_profile": "gnuboard7",
+            "web_root": "/home/g7/public_html",
+            "database_checks": [
+                {"name": "database-created", "status": "pass", "message": "created"}
+            ]
+        });
+
+        let evidence = classify_g7_install_evidence(&report, |path| {
+            path == "/home/g7/public_html/storage/app/g7_installed"
+        });
+
+        assert!(evidence.database_created);
+        assert!(evidence.install_completed);
+        assert_eq!(
+            evidence.install_lock_path.as_deref(),
+            Some("/home/g7/public_html/storage/app/g7_installed")
         );
     }
 }

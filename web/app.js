@@ -93,6 +93,8 @@ const nodes = {
   recoveryConfirmTitle: document.querySelector("#recovery-confirm-title"),
   recoveryConfirmMessage: document.querySelector("#recovery-confirm-message"),
   recoveryConfirmSummary: document.querySelector("#recovery-confirm-summary"),
+  recoveryConfirmPhrase: document.querySelector("#recovery-confirm-phrase"),
+  recoveryConfirmInput: document.querySelector("#recovery-confirm-input"),
   recoveryConfirmYes: document.querySelector("#recovery-confirm-yes"),
   provisionRefreshButton: document.querySelector("#provision-refresh-button"),
   provisionActionDialog: document.querySelector("#provision-action-dialog"),
@@ -261,7 +263,7 @@ const templates = {
 
 const publicInstallTemplates = new Set(Object.keys(templates));
 const publicWebServers = new Set(["nginx", "apache"]);
-const publicAppPackages = new Set(["gnuboard7", "wordpress"]);
+const publicAppPackages = new Set(["gnuboard7"]);
 
 let operationOverlayResolve = null;
 
@@ -342,6 +344,9 @@ function setOperationLocked(locked) {
   document.body.dataset.operationLocked = locked ? "true" : "false";
 
   document.querySelectorAll("button, input, select, textarea").forEach((control) => {
+    if (control.dataset.operationLockExempt === "true") {
+      return;
+    }
     if (locked) {
       if (!Object.prototype.hasOwnProperty.call(control.dataset, "lockPrevDisabled")) {
         control.dataset.lockPrevDisabled = control.disabled ? "true" : "false";
@@ -1186,7 +1191,7 @@ const sitePasswordAlertMessages = [
   "DB 비밀번호에 사용할 수 없는 문자가 있습니다.",
   "공개 설치기는 권장 설치 또는 Apache 호환 템플릿만 지원합니다.",
   "공개 설치기는 Nginx 또는 Apache만 지원합니다.",
-  "공개 설치기는 그누보드7 또는 WordPress만 지원합니다.",
+  "공개 설치기는 그누보드7만 지원합니다.",
 ];
 
 function selectedInstallTemplate() {
@@ -1216,7 +1221,7 @@ function appTemplateError(payload = optionPayload()) {
     return "공개 설치기는 Nginx 또는 Apache만 지원합니다.";
   }
   if (!publicAppPackages.has(payload.app_package)) {
-    return "공개 설치기는 그누보드7 또는 WordPress만 지원합니다.";
+    return "공개 설치기는 그누보드7만 지원합니다.";
   }
   return null;
 }
@@ -2572,6 +2577,7 @@ function renderInstallReport(report) {
     ], note),
     reportFailureCard(report),
     completionStateCard(report),
+    phpInfoCard(report),
     reportDownloadCard(report, "방금 생성됨"),
     operationsGuideCard(report, link),
     healthChecklistCard(report),
@@ -2655,6 +2661,7 @@ function renderSavedReport(payload) {
     ], note),
     reportFailureCard(report),
     completionStateCard(report),
+    phpInfoCard(report),
     reportDownloadCard(report, payload.path),
     operationsGuideCard(report, link),
     healthChecklistCard(report),
@@ -2718,6 +2725,57 @@ function reportValueHtml(value) {
     return text;
   }
   return escapeHtml(text);
+}
+
+function runtimeCheck(report, name) {
+  return (Array.isArray(report?.runtime_checks) ? report.runtime_checks : [])
+    .find((check) => check?.name === name);
+}
+
+function checkMessageValue(message, key) {
+  const escapedKey = String(key).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = String(message || "").match(new RegExp(`${escapedKey}=([^,]+)`));
+  return match?.[1]?.trim().replace(/\.$/, "") || "-";
+}
+
+function phpInfoCard(report = {}) {
+  const summary = runtimeCheck(report, "phpinfo-summary");
+  if (!summary && !isInstallCompleted(report)) {
+    return "";
+  }
+  const limits = runtimeCheck(report, "php-runtime-limits");
+  const pool = runtimeCheck(report, "php-fpm-pool-values");
+  const summaryMessage = summary?.message || "";
+  const version = summaryMessage.match(/:\s*PHP\s+([^,]+)/)?.[1]?.trim() || report.php_version || "-";
+  const extensions = (Array.isArray(report.runtime_checks) ? report.runtime_checks : [])
+    .filter((check) => check?.status === "pass" && String(check?.name || "").startsWith("php-extension:"))
+    .map((check) => check.name.slice("php-extension:".length))
+    .sort();
+  const rows = [
+    ["PHP 버전", version],
+    ["SAPI", checkMessageValue(summaryMessage, "SAPI")],
+    ["로드된 php.ini", checkMessageValue(summaryMessage, "ini")],
+    ["추가 ini 스캔 경로", checkMessageValue(summaryMessage, "scan_dir")],
+    ["시간대", checkMessageValue(summaryMessage, "timezone")],
+    ["메모리 한도", checkMessageValue(limits?.message, "memory_limit")],
+    ["파일 업로드 한도", checkMessageValue(limits?.message, "upload_max_filesize")],
+    ["POST 한도", checkMessageValue(limits?.message, "post_max_size")],
+    ["최대 실행시간", checkMessageValue(limits?.message, "max_execution_time")],
+    ["최대 입력 변수", checkMessageValue(limits?.message, "max_input_vars")],
+    ["OPcache 메모리", checkMessageValue(limits?.message, "opcache.memory_consumption")],
+    ["PHP-FPM 사용자", checkMessageValue(pool?.message, "user")],
+    ["PHP-FPM 방식", checkMessageValue(pool?.message, "pm")],
+    ["PHP-FPM 최대 자식", checkMessageValue(pool?.message, "max_children")],
+    ["필수 확장", extensions.length ? extensions.join(", ") : "확인 결과 없음"],
+  ];
+
+  return reportSummaryCard(
+    "PHP 환경 요약",
+    rows,
+    summary?.status === "pass"
+      ? "phpinfo() 전체 페이지는 보안상 공개하지 않고 설치기가 파싱한 필수 정보만 표시합니다."
+      : "PHP 환경 정보가 아직 수집되지 않았습니다. PHP 런타임 단계를 완료한 뒤 표시됩니다.",
+  );
 }
 
 function ownedFileCountLabel(report = {}) {
@@ -3794,14 +3852,18 @@ function recoveryConfirmContent(action) {
     };
   }
 
+  const installed = Boolean(state.recoveryStatus?.g7_install_completed);
   return {
     title: "재설치 초기화를 실행할까요?",
-    message: "신규 VPS 전용 작업입니다. 설치기가 만든 계정, DB, 서비스, 웹루트/설정 파일, 패키지, 메타데이터를 정리합니다. Let's Encrypt 인증서는 보존합니다.",
+    message: installed
+      ? "그누보드7 DB 생성 기록과 설치 완료 잠금 파일이 확인되었습니다. 이미 설치가 완료된 사이트이며, 초기화하면 사이트 데이터가 삭제됩니다."
+      : "초기화하면 설치기가 만든 사이트 계정, 웹파일, DB와 DB 계정, 서비스, 설정, 설치 패키지와 상태 기록이 삭제됩니다.",
     yesClass: "btn btn-primary icon-button",
     rows: [
-      ["대상", "installer가 생성한 사이트 계정과 해당 계정의 프로세스/로그인 세션, DB/DB 계정, 서비스, 웹루트/설정 파일, 새 패키지, 상태 파일"],
+      ["설치 상태", installed ? "그누보드7 설치 완료 증거 확인됨" : "그누보드7 설치 완료 증거 없음"],
+      ["삭제", "installer가 생성한 사이트 계정과 해당 계정의 프로세스/로그인 세션, 웹파일 전체, DB/DB 계정, 서비스, 설정 파일, 새 패키지, 상태 파일"],
       ["보존", "현재 설치기 웹 세션, Ubuntu SSH 접속, SSH 터널, Let's Encrypt 인증서"],
-      ["보존", "설치 전부터 있던 패키지, 운영자가 만든 파일, Let's Encrypt 인증서"],
+      ["주의", "삭제된 사이트 파일과 DB 데이터는 이 설치기로 복구할 수 없습니다."],
       ["실행 후", "서버 점검 단계로 돌아가 다시 설치할 수 있습니다."],
     ],
   };
@@ -3819,7 +3881,11 @@ function recoveryConfirmSummaryHtml(action) {
 
 function confirmRecoveryAction(action) {
   const content = recoveryConfirmContent(action);
+  const requiresPhrase = action === "reset";
   if (!nodes.recoveryConfirmDialog?.showModal) {
+    if (requiresPhrase) {
+      return Promise.resolve(window.prompt(`${content.message}\n계속하려면 '초기화'를 입력하세요.`) === "초기화");
+    }
     return Promise.resolve(window.confirm(content.message));
   }
 
@@ -3827,12 +3893,25 @@ function confirmRecoveryAction(action) {
   nodes.recoveryConfirmMessage.textContent = content.message;
   nodes.recoveryConfirmSummary.innerHTML = recoveryConfirmSummaryHtml(action);
   nodes.recoveryConfirmYes.className = content.yesClass;
+  setButtonLabel(nodes.recoveryConfirmYes, requiresPhrase ? "초기화 실행" : "실행");
+  nodes.recoveryConfirmPhrase.hidden = !requiresPhrase;
+  nodes.recoveryConfirmInput.value = "";
+  nodes.recoveryConfirmYes.disabled = requiresPhrase;
+  nodes.recoveryConfirmInput.oninput = () => {
+    nodes.recoveryConfirmYes.disabled = nodes.recoveryConfirmInput.value.trim() !== "초기화";
+  };
   nodes.recoveryConfirmDialog.returnValue = "cancel";
   nodes.recoveryConfirmDialog.showModal();
+  if (requiresPhrase) {
+    nodes.recoveryConfirmInput.focus();
+  }
 
   return new Promise((resolve) => {
     nodes.recoveryConfirmDialog.addEventListener("close", () => {
-      resolve(nodes.recoveryConfirmDialog.returnValue === "confirm");
+      const confirmed = nodes.recoveryConfirmDialog.returnValue === "confirm"
+        && (!requiresPhrase || nodes.recoveryConfirmInput.value.trim() === "초기화");
+      nodes.recoveryConfirmInput.oninput = null;
+      resolve(confirmed);
     }, { once: true });
   });
 }
@@ -4021,7 +4100,9 @@ async function runRecoveryAction(action, button) {
     log(action === "rollback" ? "패키지 되돌리기 실행" : "리셋 실행");
     const report = await apiFetch(endpoint, {
       method: "POST",
-      body: JSON.stringify({ dry_run: false }),
+      body: JSON.stringify(action === "reset"
+        ? { dry_run: false, confirmation: "초기화" }
+        : { dry_run: false }),
     });
 
     if (action === "rollback") {

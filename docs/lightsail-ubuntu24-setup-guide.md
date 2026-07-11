@@ -2,7 +2,7 @@
 
 `g7inst` 실서버 테스트용 Ubuntu VPS를 만드는 상세 설명입니다. 그누보드 설치, 관리자 설정, FTP/SFTP 업로드 정도는 해본 사용자를 기준으로 합니다.
 
-현재 문서는 Public Beta 기준입니다. 새 Ubuntu 24.04 VPS에서 그누보드7 또는 WordPress 설치 기반을 만드는 흐름만 다룹니다.
+현재 문서는 Public Beta 기준입니다. 새 Ubuntu 24.04 VPS에서 그누보드7 설치 기반을 만드는 흐름만 다룹니다.
 
 짧은 순서만 필요하면 [초보용 설치 안내](beginner-install.md)를 먼저 봅니다.
 
@@ -291,7 +291,9 @@ sudo cat /var/log/g7-installer/report.json
 sudo less /var/log/g7-installer/setup-guide.md
 ```
 
-리포트 단계가 `completed`이면 서버 프로비저닝이 끝난 상태입니다. 패키지, Nginx/Apache vhost, PHP/DB 튜닝, DB 계정, 앱 파일 배치, 설정 안내서 저장까지 끝났다는 뜻이며 CMS 관리자 설치 완료를 뜻하지는 않습니다. SSL은 DNS/IP 검증과 인증서 발급 조건이 맞을 때 적용되며, 보류나 실패가 있으면 리포트에 표시됩니다. 그누보드7은 GitHub 공식 최신 안정 Release와 필수 빌드 파일을 검증하고 `.env.example`에서 사이트 계정 전용 `0600` 권한의 `.env`를 준비한 뒤 브라우저 `/install`로 인계합니다. 결과 리포트의 `앱 링크`에서 Composer/Vendor, 관리자 계정, 확장과 마이그레이션을 진행합니다. WordPress도 결과 리포트의 공식 설치 링크에서 마칩니다.
+리포트 단계가 `completed`이면 서버 프로비저닝이 끝난 상태입니다. 패키지, Nginx/Apache vhost, PHP/DB 튜닝, DB 계정, 앱 파일 배치, 설정 안내서 저장까지 끝났다는 뜻이며 CMS 관리자 설치 완료를 뜻하지는 않습니다. SSL은 DNS/IP 검증과 인증서 발급 조건이 맞을 때 적용되며, 보류나 실패가 있으면 리포트에 표시됩니다. 그누보드7은 GitHub 공식 최신 안정 Release와 필수 빌드 파일을 검증하고 `.env.example`에서 사이트 계정 전용 `0600` 권한의 `.env`를 준비한 뒤 브라우저 `/install`로 인계합니다. 결과 리포트의 `앱 링크`에서 Composer/Vendor, 관리자 계정, 확장과 마이그레이션을 진행합니다.
+
+완료 리포트의 `PHP 환경 요약`은 PHP 버전, ini 경로, 시간대, 주요 한도, OPcache, PHP-FPM pool과 필수 확장을 보여줍니다. 전체 `phpinfo()` 페이지는 외부에 공개하지 않습니다. 재설치 초기화는 확인창에 `초기화`를 입력해야 실행되며 사이트 계정, 웹파일, DB/DB 계정, 서비스, 설정과 설치 패키지를 삭제합니다. G7 DB와 설치 잠금 파일이 확인되면 이미 설치 완료된 사이트라고 경고하고, Let's Encrypt 인증서는 보존합니다.
 
 ## 11. 다른 Ubuntu VPS에서 쓰기
 

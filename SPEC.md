@@ -2,9 +2,9 @@
 
 ## 1. 목적
 
-G7 Installer는 새 Ubuntu VPS에 그누보드7/WordPress 중심의 PHP 웹앱 운영 환경을 자동 구성하는 Rust 기반 서버 CLI입니다.
+G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 자동 구성하는 Rust 기반 서버 CLI입니다.
 
-목표는 초보 사용자가 VPS에 접속한 뒤 최소 명령으로 그누보드7 또는 WordPress 설치 기반을 완료하게 하는 것입니다.
+목표는 초보 사용자가 VPS에 접속한 뒤 최소 명령으로 그누보드7 설치 기반을 완료하게 하는 것입니다.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7-installer/main/scripts/bootstrap.sh | sudo bash
@@ -32,7 +32,6 @@ jiwonpapa/g7-installer
 G7 본체와의 관계:
 
 - 그누보드7은 GitHub 공식 최신 안정 Release를 조회·clone하고 배포 후 Git 필수 파일을 재검증한 뒤 `.env.example`에서 소유자 전용 `0600` 권한의 `.env`를 준비하고 공식 브라우저 `/install`로 인계합니다. Composer/Vendor, 관리자 계정, 확장과 마이그레이션은 G7 공식 설치기가 담당합니다.
-- WordPress는 최신 배포 zip을 받아 설치 화면으로 연결합니다.
 - 각 앱 본체 레포를 직접 수정하지 않습니다.
 
 ## 3. 지원 범위
@@ -45,7 +44,7 @@ OS: Ubuntu 24.04 LTS
 웹서버: Nginx 기본, Apache 선택 옵션
 PHP: PHP-FPM 8.5 기본, 8.3 선택 옵션
 DB: MySQL 기본, MariaDB 선택 옵션
-앱 프로파일: gnuboard7 기본, WordPress 선택 옵션
+공개 앱 프로파일: gnuboard7 단일 지원
 HTTPS: Certbot Let's Encrypt
 Cache/Queue: Redis 기본 지원
 메일: local Postfix 기본, SMTP relay 선택
@@ -104,7 +103,7 @@ sudo g7inst reset --yes
 ```bash
 --local-test
 --web-server nginx|apache
---app gnuboard7|wordpress
+--app gnuboard7
 --php-version 8.3|8.5
 --database mariadb|mysql
 --site-user g7
@@ -163,7 +162,7 @@ sudo g7inst reset --yes
 16. 선택 DB 설치
 17. DB 및 DB 사용자 생성, 앱 DB 비밀번호 적용
 18. 선택 앱 소스 다운로드
-19. 그누보드7 최신 안정 Release 검증·공식 `/install` 인계 또는 WordPress 최신 설치 화면 준비
+19. 그누보드7 최신 안정 Release 검증 및 공식 `/install` 인계
 20. 선택한 웹루트(`/home/<site-user>/public_html`, `/home/<site-user>/www`, `/var/www/<domain>`, custom)에 배치
 21. `.env` 생성 및 앱 런타임 설정
 22. 메일 발송 설정 반영

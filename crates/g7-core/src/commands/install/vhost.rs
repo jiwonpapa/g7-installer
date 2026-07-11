@@ -135,20 +135,21 @@ pub(super) fn apply_vhost_phase<R: CommandRunner>(
     }
 
     let smoke_host = primary_http_host(plan);
-    match probe.http_host_smoke(&smoke_host) {
+    let smoke_path = format!("/{PHP_READY_FILENAME}");
+    match probe.http_host_path_smoke(&smoke_host, &smoke_path) {
         Ok(true) => checks.push(InstallCheck::pass(
             "http-smoke",
-            format!("HTTP smoke passed for Host: {smoke_host}."),
+            format!("HTTP smoke passed for Host: {smoke_host}, Path: {smoke_path}."),
         )),
         Ok(false) => {
             return Err(Error::InstallVerificationFailed {
-                checks: format!("HTTP smoke failed for Host: {smoke_host}"),
+                checks: format!("HTTP smoke failed for Host: {smoke_host}, Path: {smoke_path}"),
             });
         }
         Err(err) => {
             return Err(command_error(
                 "http-smoke",
-                format!("curl -H 'Host: {smoke_host}' http://127.0.0.1/"),
+                format!("curl -H 'Host: {smoke_host}' http://127.0.0.1{smoke_path}"),
                 err,
             ));
         }

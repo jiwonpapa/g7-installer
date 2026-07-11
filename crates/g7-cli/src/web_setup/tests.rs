@@ -361,7 +361,9 @@ fn public_wizard_rejects_unsupported_runtime_and_apps() {
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
 
     request.app_package = "wordpress".to_string();
-    assert!(super::validate_template_app_request(&request).is_ok());
+    let error = super::validate_template_app_request(&request)
+        .expect_err("must reject WordPress from the public wizard");
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
 }
 
 #[test]
@@ -684,11 +686,36 @@ async fn status_report_reset_and_rollback_error_paths_are_json()
     assert_eq!(recovery_payload["can_rollback"], false);
     assert_eq!(recovery_payload["recommended_action"], "manual");
 
+    let confirmation_error = match api_reset(
+        axum::extract::State(state.clone()),
+        peer(),
+        headers.clone(),
+        Json(super::ResetRequest {
+            dry_run: true,
+            confirmation: String::new(),
+        }),
+    )
+    .await
+    {
+        Ok(_) => panic!("reset without confirmation must fail"),
+        Err(error) => error,
+    };
+    assert_eq!(confirmation_error.status, StatusCode::BAD_REQUEST);
+    assert!(
+        confirmation_error
+            .hint
+            .expect("confirmation hint")
+            .contains("초기화")
+    );
+
     let reset_error = match api_reset(
         axum::extract::State(state.clone()),
         peer(),
         headers.clone(),
-        Json(super::ResetRequest { dry_run: true }),
+        Json(super::ResetRequest {
+            dry_run: true,
+            confirmation: "초기화".to_string(),
+        }),
     )
     .await
     {

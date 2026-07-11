@@ -60,8 +60,17 @@ function mockReport() {
     service_checks: [{ name: "nginx", status: "pass", message: "서비스가 실행 중입니다." }],
     port_checks: [{ name: "port-80", status: "pass", message: "80 포트 확인" }],
     network_checks: [],
-    runtime_checks: [{ name: "php-runtime-limits", status: "pass", message: "PHP 한도 설정 확인" }],
-    database_checks: [{ name: "database-user", status: "pass", message: "DB 계정 확인" }],
+    runtime_checks: [
+      { name: "phpinfo-summary", status: "pass", message: "FPM ini 기준 PHP 정보를 파싱했습니다: PHP 8.5.8, SAPI=cli, ini=/etc/php/8.5/fpm/php.ini, scan_dir=/etc/php/8.5/fpm/conf.d, timezone=Asia/Seoul." },
+      { name: "php-runtime-limits", status: "pass", message: "PHP 한도 적용 확인: memory_limit=256M, upload_max_filesize=64M, post_max_size=72M, max_execution_time=120, max_input_vars=3000, opcache.memory_consumption=128." },
+      { name: "php-fpm-pool-values", status: "pass", message: "PHP-FPM pool 확인: user=g7devops, group=www-data, pm=ondemand, max_children=8, max_requests=500." },
+      { name: "php-extension:mbstring", status: "pass", message: "PHP 확장 mbstring 로드 확인." },
+      { name: "php-extension:redis", status: "pass", message: "PHP 확장 redis 로드 확인." },
+    ],
+    database_checks: [
+      { name: "database-created", status: "pass", message: "DB 생성 확인" },
+      { name: "database-user-created", status: "pass", message: "DB 계정 확인" },
+    ],
     firewall_checks: [{ name: "network-boundary", status: "manual", message: "VPS 제공자 방화벽 또는 별도 유지보수 앱에서 관리하세요." }],
     mail_checks: [{ name: "postfix", status: "pass", message: "Postfix 발송 확인" }],
     certbot_checks: [{ name: "tls-certificate", status: "pass", message: "인증서 확인" }],
@@ -160,6 +169,9 @@ async function startServer(options = {}) {
         metadata_paths: ["/var/lib/g7-installer/state.json"],
         rollback_reason: "앱/DB/인증서 단계 이후에는 reset을 사용합니다.",
         resume_reason: "현재 단계에서는 이어서 진행할 수 없습니다.",
+        g7_database_created: false,
+        g7_install_completed: false,
+        g7_install_lock_path: null,
       });
       return;
     }
@@ -206,6 +218,13 @@ async function startServer(options = {}) {
     }
     if (pathname === "/api/install/prepare") {
       await new Promise((resolve) => setTimeout(resolve, options.installDelayMs || 0));
+      if (options.installFailure) {
+        json(response, {
+          error: "mock vhost failure",
+          hint: "복원된 실패 단계를 다시 실행하세요.",
+        }, 500);
+        return;
+      }
       json(response, mockReport());
       return;
     }
@@ -261,6 +280,9 @@ test("wizard routes render report, downloads, and provision cards", async ({ pag
     await expect(page.locator("#live-log")).toHaveCount(1);
     await expect(page.locator("#install-live-log")).toHaveCount(0);
     await expect(page.getByText("설치 완료 상태")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "PHP 환경 요약" })).toBeVisible();
+    await expect(page.getByText("/etc/php/8.5/fpm/php.ini", { exact: true })).toBeVisible();
+    await expect(page.getByText("mbstring, redis", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: /리포트 JSON/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /설정 안내서 MD/ })).toBeVisible();
 
@@ -334,6 +356,7 @@ test("plan route auto-generates a review after doctor pass", async ({ page }) =>
     await expect(page.locator('input[name="app_package"][value="gnuboard7-octane"]')).toHaveCount(0);
     await expect(page.locator('input[name="app_package"][value="laravel"]')).toHaveCount(0);
     await expect(page.locator('input[name="app_package"][value="laravel-octane"]')).toHaveCount(0);
+    await expect(page.locator('input[name="app_package"][value="wordpress"]')).toHaveCount(0);
     await expect(page.locator('select[name="web_server"] option[value="frankenphp"]')).toHaveCount(0);
     await page.fill("#site-password", "Test-only_9x!");
     await page.fill("#site-password-confirm", "Test-only_9x!");
@@ -393,12 +416,65 @@ test("install uses one modal graph and groups PHP packages", async ({ page }, te
   }
 });
 
+test("failed install unlocks the modal and exposes the restored step retry", async ({ page }) => {
+  const { server, baseUrl } = await startServer({
+    reportExists: false,
+    installFailure: true,
+    recovery: {
+      can_resume: true,
+      can_retry_step: true,
+      can_reset: true,
+      can_rollback: false,
+      recommended_action: "resume",
+      failed_step: "vhost",
+      restore_status: "restored",
+      message: "실패한 단계의 변경을 복원한 뒤 해당 단계부터 다시 실행할 수 있습니다.",
+      metadata_paths: ["/var/lib/g7-installer/state.json"],
+      rollback_reason: "현재 단계에서는 패키지 되돌리기를 사용할 수 없습니다.",
+      resume_reason: null,
+    },
+  });
+  try {
+    await page.goto(`${baseUrl}/setup/doctor?token=e2e`);
+    await page.getByRole("button", { name: "점검 실행" }).click();
+    await page.getByRole("button", { name: "다음: 설치 방식" }).click();
+    for (const [selector, value] of [
+      ["#site-password", "Test-only_9x!"],
+      ["#site-password-confirm", "Test-only_9x!"],
+      ["#database-name-input", "g7devops"],
+      ["#database-user-input", "g7devops"],
+      ["#database-password", "Test-only_9x!"],
+      ["#database-password-confirm", "Test-only_9x!"],
+    ]) {
+      await page.fill(selector, value);
+    }
+    await page.getByRole("button", { name: "다음: 사양 확정" }).last().click();
+    await page.getByRole("button", { name: "이 사양으로 진행" }).click();
+    await page.getByRole("button", { name: "기본 구성 시작" }).click();
+    await page.getByRole("button", { name: "시작", exact: true }).click();
+
+    const closeButton = page.locator("#install-progress-close");
+    await expect(closeButton).toHaveText(/닫고 문제 해결/);
+    await expect(closeButton).toBeEnabled();
+    await closeButton.click();
+    await expect(page.locator("#install-progress-dialog[open]")).toHaveCount(0);
+    await expect(page.locator('[data-view="report"] [data-recovery-action="resume"]')).toBeVisible();
+    await expect(page.locator('[data-view="report"] [data-recovery-action="resume"]')).toBeEnabled();
+    await expect(page.locator('[data-view="report"] [data-recovery-action="resume"]')).toHaveText(/현재 단계 다시 실행/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("reset overlay shows the shared live log expanded", async ({ page }, testInfo) => {
   const { server, baseUrl } = await startServer({ resetDelayMs: 900 });
   try {
     await page.setViewportSize({ width: 610, height: 476 });
     await page.goto(`${baseUrl}/setup/result?token=e2e`);
     await page.locator("#reset-button").click();
+    await expect(page.locator("#recovery-confirm-yes")).toBeDisabled();
+    await page.fill("#recovery-confirm-input", "초기화");
+    await expect(page.locator("#recovery-confirm-yes")).toBeEnabled();
     await page.locator("#recovery-confirm-yes").click();
 
     await expect(page.locator("#operation-overlay:not([hidden])")).toBeVisible();
@@ -413,6 +489,42 @@ test("reset overlay shows the shared live log expanded", async ({ page }, testIn
     await page.locator("#operation-overlay-confirm").click();
     await expect(page.locator("#operation-overlay[hidden]")).toHaveCount(1);
     await expect(page.locator("#log-dock-home #live-log")).toHaveCount(1);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("reset confirmation warns when a completed G7 install is detected", async ({ page }) => {
+  const { server, baseUrl } = await startServer({
+    recovery: {
+      can_resume: false,
+      can_retry_step: false,
+      can_reset: true,
+      can_rollback: false,
+      recommended_action: "manual",
+      failed_step: null,
+      restore_status: null,
+      message: "그누보드7 DB 생성 기록과 설치 완료 잠금 파일을 확인했습니다.",
+      metadata_paths: ["/var/lib/g7-installer/state.json"],
+      rollback_reason: "운영 데이터가 있어 패키지 되돌리기를 사용할 수 없습니다.",
+      resume_reason: "설치가 이미 완료되었습니다.",
+      g7_database_created: true,
+      g7_install_completed: true,
+      g7_install_lock_path: "/home/g7devops/public_html/storage/app/g7_installed",
+    },
+  });
+  try {
+    await page.goto(`${baseUrl}/setup/result?token=e2e`);
+    await page.locator("#reset-button").click();
+    await expect(page.getByText(/이미 설치가 완료된 사이트/)).toBeVisible();
+    await expect(page.getByText(/웹파일 전체, DB\/DB 계정/)).toBeVisible();
+    await expect(page.getByText(/복구할 수 없습니다/)).toBeVisible();
+    await expect(page.locator("#recovery-confirm-yes")).toBeDisabled();
+    await page.fill("#recovery-confirm-input", "초기화 아님");
+    await expect(page.locator("#recovery-confirm-yes")).toBeDisabled();
+    await page.fill("#recovery-confirm-input", "초기화");
+    await expect(page.locator("#recovery-confirm-yes")).toBeEnabled();
+    await page.getByRole("button", { name: "아니오" }).click();
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

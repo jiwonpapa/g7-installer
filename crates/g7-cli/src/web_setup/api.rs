@@ -123,6 +123,8 @@ pub(super) struct SetupRequest {
 pub(super) struct ResetRequest {
     #[serde(default)]
     pub(super) dry_run: bool,
+    #[serde(default)]
+    pub(super) confirmation: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -389,6 +391,9 @@ pub(super) struct RecoveryApiStatus {
     pub(super) metadata_paths: Vec<String>,
     pub(super) rollback_reason: Option<String>,
     pub(super) resume_reason: Option<String>,
+    pub(super) g7_database_created: bool,
+    pub(super) g7_install_completed: bool,
+    pub(super) g7_install_lock_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -682,6 +687,13 @@ pub(super) async fn api_reset(
     let session = require_authenticated_session(&state, &headers, peer.ip())?;
     require_csrf(&headers, &session)?;
 
+    if request.confirmation.trim() != "초기화" {
+        return Err(
+            ApiError::bad_request("재설치 초기화 확인 문구가 일치하지 않습니다.")
+                .with_hint("초기화를 실행하려면 확인 입력란에 `초기화`를 정확히 입력하세요."),
+        );
+    }
+
     if state.install_running.swap(true, Ordering::SeqCst) {
         return Err(ApiError::conflict(
             "reset is blocked while install is running",
@@ -942,11 +954,11 @@ pub(super) fn validate_template_app_request(
         );
     }
 
-    if !matches!(app_package, "gnuboard7" | "wordpress") {
-        return Err(ApiError::bad_request(
-            "공개 설치기는 그누보드7 또는 WordPress 앱만 지원합니다.",
-        )
-        .with_hint("설치할 앱을 그누보드7 또는 WordPress로 바꾸세요."));
+    if app_package != "gnuboard7" {
+        return Err(
+            ApiError::bad_request("공개 설치기는 그누보드7 앱만 지원합니다.")
+                .with_hint("설치할 앱을 그누보드7로 바꾸세요."),
+        );
     }
 
     Ok(())
