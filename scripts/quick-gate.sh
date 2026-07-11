@@ -16,6 +16,8 @@ echo "[quick-gate] javascript syntax"
 node --check web/app.js
 echo "[quick-gate] cargo fmt"
 cargo fmt --check
+echo "[quick-gate] state and system adapter unit tests"
+cargo test --locked -p g7-state -p g7-system --lib
 echo "[quick-gate] g7-core unit tests"
 cargo test --locked -p g7-core --lib
 echo "[quick-gate] g7-cli web/controller tests"

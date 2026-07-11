@@ -1,5 +1,13 @@
 use super::*;
 
+struct ResumeRecovery {
+    can_resume: bool,
+    can_retry_step: bool,
+    failed_step: Option<String>,
+    restore_status: Option<String>,
+    resume_reason: Option<String>,
+}
+
 pub(super) fn recovery_status() -> RecoveryApiStatus {
     let metadata_paths = installer_metadata_paths()
         .into_iter()
@@ -14,39 +22,25 @@ pub(super) fn recovery_status() -> RecoveryApiStatus {
     };
 
     let has_installer_metadata = !metadata_paths.is_empty();
-    let (can_resume, resume_reason) = match read_state_file(std::path::Path::new(STATE_PATH)) {
-        Ok(state)
-            if matches!(
-                state.phase.as_str(),
-                "database-configured" | "app-configured" | "tls-enabled"
-            ) =>
-        {
-            (true, None)
-        }
-        Ok(state) => (
-            false,
-            Some(format!(
-                "현재 단계 `{}`는 안전한 이어서 진행 경계가 아닙니다.",
-                state.phase
-            )),
-        ),
-        Err(error) => (
-            false,
-            Some(format!("설치 상태를 읽을 수 없습니다: {error}")),
-        ),
-    };
-    let can_reset = has_installer_metadata && !can_rollback;
+    let resume = classify_resume_state(read_state_file(std::path::Path::new(STATE_PATH)));
+    let can_resume = resume.can_resume;
+    let can_retry_step = resume.can_retry_step;
+    let failed_step = resume.failed_step;
+    let restore_status = resume.restore_status;
+    let resume_reason = resume.resume_reason;
+    let can_reset = has_installer_metadata;
     let recommended_action = if can_resume {
         "resume"
     } else if can_rollback {
         "rollback"
-    } else if can_reset {
-        "reset"
     } else {
         "manual"
     };
     let message = match recommended_action {
-        "resume" => "안전하게 저장된 단계부터 설치를 이어서 진행할 수 있습니다.",
+        "resume" if can_retry_step => {
+            "실패한 단계의 변경을 복원한 뒤 해당 단계부터 다시 실행할 수 있습니다."
+        }
+        "resume" => "저장된 마지막 정상 단계부터 설치를 이어서 진행할 수 있습니다.",
         "rollback" => {
             "설치 직후 패키지 되돌리기가 가능합니다. 설치기가 새로 넣은 패키지만 제거하고 메타데이터를 정리합니다."
         }
@@ -61,13 +55,61 @@ pub(super) fn recovery_status() -> RecoveryApiStatus {
 
     RecoveryApiStatus {
         can_resume,
+        can_retry_step,
         can_reset,
         can_rollback,
         recommended_action,
+        failed_step,
+        restore_status,
         message,
         metadata_paths,
         rollback_reason,
         resume_reason,
+    }
+}
+
+fn classify_resume_state(
+    result: std::io::Result<g7_state::state::InstallerState>,
+) -> ResumeRecovery {
+    match result {
+        Ok(state) if state.phase != g7_state::state::InstallerPhase::Completed.as_str() => {
+            let failed = state.current_step.clone().or_else(|| {
+                state
+                    .steps
+                    .iter()
+                    .rev()
+                    .find(|step| step.status == "failed")
+                    .map(|step| step.id.clone())
+            });
+            let restore = failed.as_ref().and_then(|id| {
+                state
+                    .steps
+                    .iter()
+                    .find(|step| &step.id == id)
+                    .and_then(|step| step.restore_status.clone())
+            });
+            ResumeRecovery {
+                can_resume: true,
+                can_retry_step: failed.is_some(),
+                failed_step: failed,
+                restore_status: restore,
+                resume_reason: None,
+            }
+        }
+        Ok(_) => ResumeRecovery {
+            can_resume: false,
+            can_retry_step: false,
+            failed_step: None,
+            restore_status: None,
+            resume_reason: Some("설치가 이미 완료되었습니다.".to_string()),
+        },
+        Err(error) => ResumeRecovery {
+            can_resume: false,
+            can_retry_step: false,
+            failed_step: None,
+            restore_status: None,
+            resume_reason: Some(format!("설치 상태를 읽을 수 없습니다: {error}")),
+        },
     }
 }
 
@@ -80,4 +122,38 @@ pub(super) fn installer_metadata_paths() -> [&'static str; 6] {
         LOCAL_HOSTS_PATH,
         ROLLBACK_PATH,
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::classify_resume_state;
+    use g7_state::state::{InstallerPhase, InstallerState};
+
+    #[test]
+    fn failed_restored_step_is_exposed_as_retryable() {
+        let mut state = InstallerState::new("install-id".to_string(), "example.com".to_string());
+        state.begin_step("runtime");
+        state.fail_step("runtime", "invalid php config", true);
+
+        let recovery = classify_resume_state(Ok(state));
+
+        assert!(recovery.can_resume);
+        assert!(recovery.can_retry_step);
+        assert_eq!(recovery.failed_step.as_deref(), Some("runtime"));
+        assert_eq!(recovery.restore_status.as_deref(), Some("restored"));
+    }
+
+    #[test]
+    fn completed_install_is_not_resumable() {
+        let mut state = InstallerState::new("install-id".to_string(), "example.com".to_string());
+        state.set_phase(InstallerPhase::Completed);
+
+        let recovery = classify_resume_state(Ok(state));
+
+        assert!(!recovery.can_resume);
+        assert_eq!(
+            recovery.resume_reason.as_deref(),
+            Some("설치가 이미 완료되었습니다.")
+        );
+    }
 }

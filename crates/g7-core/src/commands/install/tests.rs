@@ -3,7 +3,10 @@ use crate::Error;
 use g7_state::owned_files::OWNED_FILES_PATH;
 use g7_state::state::STATE_PATH;
 use g7_system::SystemProbe;
-use g7_system::command::{CommandOutput, FakeCommandRunner};
+use g7_system::command::{
+    CommandError, CommandOutput, CommandRunner, CommandSpec, FakeCommandRunner,
+};
+use std::cell::Cell;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -57,6 +60,14 @@ fn install_writes_prepared_state_and_owned_files()
     assert!(fs_root.join("var/log/g7-installer/report.json").exists());
     assert!(fs_root.join("var/backups/g7-installer").exists());
     assert!(fs_root.join(strip_root(STATE_PATH)).exists());
+    let state = g7_state::state::read_state_file(&fs_root.join(strip_root(STATE_PATH)))?;
+    assert_eq!(state.version, g7_state::state::STATE_VERSION);
+    assert!(state.current_step.is_none());
+    for step in [
+        "packages", "site", "vhost", "runtime", "database", "tls", "app",
+    ] {
+        assert!(state.step_is_completed(step), "incomplete step: {step}");
+    }
     assert!(fs_root.join(strip_root(OWNED_FILES_PATH)).exists());
     assert!(fs_root.join("home/g7/public_html").exists());
     assert!(fs_root.join("home/g7/public_html/public").exists());
@@ -118,6 +129,20 @@ fn install_writes_prepared_state_and_owned_files()
     assert!(database_runtime.contains("long_query_time = 1"));
     assert!(database_runtime.contains("min_examined_row_limit = 100"));
     assert!(fs_root.join("etc/g7-installer/secrets.toml").exists());
+    assert!(
+        !fs_root
+            .join("var/lib/g7-installer/pending-secrets.toml")
+            .exists()
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(fs_root.join("etc/g7-installer/secrets.toml"))?
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+    }
     assert!(fs_root.join("var/log/g7-installer/setup-guide.md").exists());
     assert!(
         report
@@ -860,6 +885,245 @@ fn php_runtime_failures_block_app_phase() {
 }
 
 #[test]
+fn php_candidate_failure_never_writes_active_runtime_files()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let fs_root = create_temp_fs_root()?;
+    let paths = InstallPaths::with_root(&fs_root);
+    let plan = super::plan::build_with_options(
+        "example.com".to_string(),
+        super::plan::PlanOptions::default(),
+    )?;
+    let runner = FakeCommandRunner::default();
+    runner.push_output(CommandOutput::failure(78, "invalid pool directive"));
+    let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
+    let mut owned = Vec::new();
+
+    let error = super::apply_runtime_phase(&probe, &paths, &plan, &mut owned)
+        .expect_err("candidate validation must fail");
+
+    assert!(matches!(
+        error,
+        Error::InstallCommandFailed {
+            step: "php-fpm-candidate-test",
+            ..
+        }
+    ));
+    assert!(!paths.resolve(&super::php_ini_override_path(&plan)).exists());
+    assert!(!paths.resolve(&super::php_pool_path(&plan)).exists());
+    assert!(
+        fs::read_dir(paths.resolve(crate::installer_paths::CANDIDATE_DIR))?
+            .next()
+            .is_none()
+    );
+    assert_eq!(probe.runner().recorded().len(), 1);
+
+    fs::remove_dir_all(fs_root)?;
+    Ok(())
+}
+
+#[test]
+fn database_candidate_failure_never_writes_active_config()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let fs_root = create_temp_fs_root()?;
+    let paths = InstallPaths::with_root(&fs_root);
+    let plan = super::plan::build_with_options(
+        "example.com".to_string(),
+        super::plan::PlanOptions::default(),
+    )?;
+    let runner = FakeCommandRunner::default();
+    runner.push_output(CommandOutput::failure(1, "unknown variable"));
+    let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
+    let mut owned = Vec::new();
+
+    let error = super::apply_database_phase(
+        &probe,
+        &paths,
+        &plan,
+        &mut owned,
+        Some("database-secret"),
+        None,
+    )
+    .expect_err("candidate validation must fail");
+
+    assert!(matches!(
+        error,
+        Error::InstallCommandFailed {
+            step: "database-candidate-test",
+            ..
+        }
+    ));
+    assert!(!paths.resolve(super::database_config_path(&plan)).exists());
+    assert!(
+        fs::read_dir(paths.resolve(crate::installer_paths::CANDIDATE_DIR))?
+            .next()
+            .is_none()
+    );
+    assert_eq!(probe.runner().recorded().len(), 1);
+
+    fs::remove_dir_all(fs_root)?;
+    Ok(())
+}
+
+#[test]
+fn pending_secrets_escape_quotes_without_exposing_plain_toml_syntax() {
+    let db = "db\\\"secret\nnext";
+    let site = "site\\\"secret";
+    let smtp = "smtp\\\"secret";
+    let content = super::pending_secrets_content(db, Some(site), Some(smtp));
+    let parsed = content.parse::<toml::Table>().expect("valid secrets TOML");
+
+    assert_eq!(parsed["database_password"].as_str(), Some(db));
+    assert_eq!(parsed["site_password"].as_str(), Some(site));
+    assert_eq!(parsed["smtp_password"].as_str(), Some(smtp));
+}
+
+#[test]
+fn pending_secret_reader_round_trips_special_characters()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let fs_root = create_temp_fs_root()?;
+    let paths = InstallPaths::with_root(&fs_root);
+    let db = "db\\\"secret\nnext";
+    let site = "site\\\"secret";
+    let target = paths.resolve(crate::installer_paths::PENDING_SECRETS_PATH);
+    fs::create_dir_all(target.parent().expect("pending secret parent"))?;
+    fs::write(
+        &target,
+        super::pending_secrets_content(db, Some(site), None),
+    )?;
+
+    assert_eq!(super::read_database_password(&paths)?.as_deref(), Some(db));
+    assert_eq!(super::read_site_password(&paths)?.as_deref(), Some(site));
+
+    fs::remove_dir_all(fs_root)?;
+    Ok(())
+}
+
+#[test]
+fn package_retry_keeps_original_preinstall_baseline()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let plan = super::plan::build_with_options(
+        "example.com".to_string(),
+        super::plan::PlanOptions::default(),
+    )?;
+    let baseline = super::package_names(&plan)
+        .into_iter()
+        .map(|name| super::InstallCheck {
+            name,
+            status: "not-installed".to_string(),
+            message: "original baseline".to_string(),
+        })
+        .collect::<Vec<_>>();
+    let runner = FakeCommandRunner::default();
+    runner.push_output(CommandOutput::failure(100, "apt update failed"));
+    let probe = SystemProbe::new(runner);
+
+    let failure = super::apply_package_phase_with_baseline(&probe, &plan, Some(&baseline))
+        .expect_err("package phase must fail");
+
+    assert_eq!(failure.summary.preinstall_package_checks, baseline);
+    assert_eq!(probe.runner().recorded().len(), 1);
+    Ok(())
+}
+
+#[test]
+fn runtime_failure_restores_then_resume_completes_from_failed_step()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let os_release_path = write_temp_os_release()?;
+    let fs_root = create_temp_fs_root()?;
+    prepare_webserver_test_files(&fs_root)?;
+    let options = super::plan::PlanOptions::default();
+    let plan = super::plan::build_with_options("example.com".to_string(), options.clone())?;
+    let runner = FakeCommandRunner::default();
+    runner.push_output(CommandOutput::success("0\n"));
+    runner.push_output(CommandOutput::success("inactive\n"));
+    runner.push_output(CommandOutput::success("inactive\n"));
+    runner.push_output(CommandOutput::success(""));
+    runner.push_output(CommandOutput::success(""));
+    push_successful_apply_outputs_with_certbot(
+        &runner,
+        &plan,
+        false,
+        CommandOutput::success("cert issued\n"),
+    );
+    let probe = SystemProbe::new(FailOnceRunner::new(
+        runner,
+        "php-fpm8.5 -y",
+        CommandOutput::failure(78, "invalid generated pool"),
+    ))
+    .with_os_release_path(&os_release_path)
+    .with_fs_root(&fs_root);
+    let paths = InstallPaths::with_root(&fs_root);
+
+    let error = match run_with_probe_and_paths("example.com".to_string(), options, &probe, &paths) {
+        Ok(_) => return Err(std::io::Error::other("runtime candidate should fail").into()),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        error,
+        Error::InstallCommandFailed {
+            step: "php-fpm-candidate-test",
+            ..
+        }
+    ));
+    let failed_state = g7_state::state::read_state_file(&fs_root.join(strip_root(STATE_PATH)))?;
+    assert_eq!(failed_state.current_step.as_deref(), Some("runtime"));
+    assert_eq!(
+        failed_state
+            .steps
+            .iter()
+            .find(|step| step.id == "runtime")
+            .and_then(|step| step.restore_status.as_deref()),
+        Some("restored")
+    );
+
+    let resume_runner = FakeCommandRunner::default();
+    resume_runner.push_output(CommandOutput::success("0\n"));
+    resume_runner.push_output(CommandOutput::success("active\n"));
+    resume_runner.push_output(CommandOutput::success("inactive\n"));
+    resume_runner.push_output(CommandOutput::success(""));
+    resume_runner.push_output(CommandOutput::success(""));
+    push_runtime_database_tls_outputs(
+        &resume_runner,
+        &plan,
+        CommandOutput::success("cert issued\n"),
+    );
+    let resume_probe = SystemProbe::new(resume_runner)
+        .with_os_release_path(&os_release_path)
+        .with_fs_root(&fs_root);
+    let report = match super::resume_with_probe_and_paths(&resume_probe, &paths) {
+        Ok(report) => report,
+        Err(error) => {
+            let commands = resume_probe
+                .runner()
+                .recorded()
+                .into_iter()
+                .map(|spec| spec.display())
+                .collect::<Vec<_>>()
+                .join(" | ");
+            return Err(std::io::Error::other(format!(
+                "resume failed: {error}; commands: {commands}"
+            ))
+            .into());
+        }
+    };
+
+    assert_eq!(report.phase, "completed");
+    let completed_state = g7_state::state::read_state_file(&fs_root.join(strip_root(STATE_PATH)))?;
+    let runtime = completed_state
+        .steps
+        .iter()
+        .find(|step| step.id == "runtime")
+        .ok_or_else(|| std::io::Error::other("runtime step missing"))?;
+    assert_eq!(runtime.status, "completed");
+    assert_eq!(runtime.attempts, 2);
+    assert!(completed_state.current_step.is_none());
+
+    fs::remove_file(os_release_path)?;
+    fs::remove_dir_all(fs_root)?;
+    Ok(())
+}
+
+#[test]
 fn redis_runtime_uses_decimal_memory_units() {
     assert_eq!(super::redis_memory_value_bytes("128M"), Some(128_000_000));
     assert_eq!(super::redis_memory_value_bytes("1G"), Some(1_000_000_000));
@@ -1394,15 +1658,7 @@ fn clean_probe_with_uid_for_options_and_certbot(
     options: &super::plan::PlanOptions,
     certbot_output: CommandOutput,
 ) -> std::result::Result<SystemProbe<FakeCommandRunner>, Box<dyn std::error::Error>> {
-    fs::create_dir_all(fs_root.join("etc/nginx/sites-enabled"))?;
-    fs::create_dir_all(fs_root.join("etc/nginx/sites-available"))?;
-    fs::create_dir_all(fs_root.join("etc/nginx/conf.d"))?;
-    fs::write(
-        fs_root.join("etc/nginx/nginx.conf"),
-        "user www-data;\nworker_processes auto;\npid /run/nginx.pid;\nevents {\n    worker_connections 768;\n}\nhttp {\n    include /etc/nginx/conf.d/*.conf;\n    include /etc/nginx/sites-enabled/*;\n}\n",
-    )?;
-    fs::create_dir_all(fs_root.join("etc/apache2/conf-available"))?;
-    fs::create_dir_all(fs_root.join("etc/apache2/conf-enabled"))?;
+    prepare_webserver_test_files(fs_root)?;
     let runner = FakeCommandRunner::default();
     runner.push_output(CommandOutput::success(uid));
     runner.push_output(CommandOutput::success("inactive\n"));
@@ -1420,6 +1676,21 @@ fn clean_probe_with_uid_for_options_and_certbot(
     Ok(SystemProbe::new(runner)
         .with_os_release_path(os_release_path)
         .with_fs_root(fs_root))
+}
+
+fn prepare_webserver_test_files(
+    fs_root: &Path,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    fs::create_dir_all(fs_root.join("etc/nginx/sites-enabled"))?;
+    fs::create_dir_all(fs_root.join("etc/nginx/sites-available"))?;
+    fs::create_dir_all(fs_root.join("etc/nginx/conf.d"))?;
+    fs::write(
+        fs_root.join("etc/nginx/nginx.conf"),
+        "user www-data;\nworker_processes auto;\npid /run/nginx.pid;\nevents {\n    worker_connections 768;\n}\nhttp {\n    include /etc/nginx/conf.d/*.conf;\n    include /etc/nginx/sites-enabled/*;\n}\n",
+    )?;
+    fs::create_dir_all(fs_root.join("etc/apache2/conf-available"))?;
+    fs::create_dir_all(fs_root.join("etc/apache2/conf-enabled"))?;
+    Ok(())
 }
 
 fn push_successful_apply_outputs_with_certbot(
@@ -1558,6 +1829,12 @@ fn push_runtime_database_tls_outputs(
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
     } else {
+        runner.push_output(CommandOutput::success(
+            "configuration file test is successful\n",
+        ));
+        runner.push_output(CommandOutput::success(
+            "configuration file test is successful\n",
+        ));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
@@ -1565,6 +1842,14 @@ fn push_runtime_database_tls_outputs(
         runner.push_output(CommandOutput::success(""));
     }
     if install_plan.redis_mode == "enable" {
+        for value in [
+            "bind\n127.0.0.1\n",
+            "protected-mode\nyes\n",
+            "maxmemory\n0\n",
+            "maxmemory-policy\nnoeviction\n",
+        ] {
+            runner.push_output(CommandOutput::success(value));
+        }
         for _ in 0..6 {
             runner.push_output(CommandOutput::success("OK\n"));
         }
@@ -1586,6 +1871,8 @@ fn push_runtime_database_tls_outputs(
         install_plan,
     )));
     runner.push_output(CommandOutput::success(""));
+    runner.push_output(CommandOutput::success(""));
+    runner.push_output(CommandOutput::success(""));
     runner.push_output(CommandOutput::success(
         successful_database_effective_output(),
     ));
@@ -1604,6 +1891,9 @@ fn push_runtime_database_tls_outputs(
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success("renew ok\n"));
+        } else {
+            runner.push_output(CommandOutput::success(""));
+            runner.push_output(CommandOutput::success(""));
         }
     } else if install_plan.deployment_mode == "public" && install_plan.web_server == "apache" {
         runner.push_output(CommandOutput::success(""));
@@ -1621,6 +1911,9 @@ fn push_runtime_database_tls_outputs(
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success("renew ok\n"));
+        } else {
+            runner.push_output(CommandOutput::success(""));
+            runner.push_output(CommandOutput::success(""));
         }
     } else if install_plan.deployment_mode == "public" && install_plan.web_server == "frankenphp" {
         runner.push_output(CommandOutput::success(""));
@@ -1635,6 +1928,9 @@ fn push_runtime_database_tls_outputs(
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success("renew ok\n"));
+        } else {
+            runner.push_output(CommandOutput::success(""));
+            runner.push_output(CommandOutput::success(""));
         }
     }
     push_successful_app_outputs(runner, install_plan);
@@ -1747,11 +2043,11 @@ fn push_successful_app_outputs(
             }
             runner.push_output(CommandOutput::success("npm install ok\n"));
             runner.push_output(CommandOutput::success("npm build ok\n"));
-            runner.push_output(CommandOutput::success("key generated\n"));
             runner.push_output(CommandOutput::success("storage linked\n"));
             runner.push_output(CommandOutput::success("migrated\n"));
             runner.push_output(CommandOutput::success("optimized\n"));
             runner.push_output(CommandOutput::success("artisan about\n"));
+            runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success(""));
             runner.push_output(CommandOutput::success(""));
@@ -1826,6 +2122,36 @@ fn strip_root(path: &str) -> &str {
     match path.strip_prefix('/') {
         Some(stripped) => stripped,
         None => path,
+    }
+}
+
+struct FailOnceRunner {
+    inner: FakeCommandRunner,
+    needle: String,
+    replacement: CommandOutput,
+    failed: Cell<bool>,
+}
+
+impl FailOnceRunner {
+    fn new(inner: FakeCommandRunner, needle: &str, replacement: CommandOutput) -> Self {
+        Self {
+            inner,
+            needle: needle.to_string(),
+            replacement,
+            failed: Cell::new(false),
+        }
+    }
+}
+
+impl CommandRunner for FailOnceRunner {
+    fn run(&self, spec: &CommandSpec) -> std::result::Result<CommandOutput, CommandError> {
+        let output = self.inner.run(spec)?;
+        if !self.failed.get() && spec.display().contains(&self.needle) {
+            self.failed.set(true);
+            Ok(self.replacement.clone())
+        } else {
+            Ok(output)
+        }
     }
 }
 

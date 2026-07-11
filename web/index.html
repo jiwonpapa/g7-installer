@@ -121,7 +121,7 @@
               <div class="recovery-actions">
                 <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="refresh-cw" data-recovery-refresh>복구 상태 새로고침</button>
                 <button class="btn btn-sm btn-primary icon-button" type="button" data-icon="play" data-recovery-action="resume">이어서 진행</button>
-                <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="rotate-ccw" data-recovery-action="reset">재설치 초기화</button>
+                <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="rotate-ccw" data-recovery-action="reset">전체 초기화</button>
                 <button class="btn btn-sm btn-error icon-button" type="button" data-icon="undo-2" data-recovery-action="rollback">패키지 되돌리기</button>
               </div>
             </section>
@@ -550,7 +550,7 @@
               <div class="recovery-actions">
                 <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="refresh-cw" data-recovery-refresh>복구 상태 새로고침</button>
                 <button class="btn btn-sm btn-primary icon-button" type="button" data-icon="play" data-recovery-action="resume">이어서 진행</button>
-                <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="rotate-ccw" data-recovery-action="reset">재설치 초기화</button>
+                <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="rotate-ccw" data-recovery-action="reset">전체 초기화</button>
                 <button class="btn btn-sm btn-error icon-button" type="button" data-icon="undo-2" data-recovery-action="rollback">패키지 되돌리기</button>
               </div>
             </section>
@@ -569,16 +569,24 @@
               </div>
               <div class="flex flex-wrap gap-2">
                 <button id="report-button" class="btn btn-outline icon-button" type="button" data-icon="refresh-cw">리포트 새로고침</button>
-                <button id="reset-button" class="btn btn-outline icon-button" type="button" data-icon="rotate-ccw" data-recovery-action="reset">재설치 초기화</button>
+                <button class="btn btn-primary icon-button" type="button" data-icon="play" data-recovery-action="resume" hidden>이어서 진행</button>
+                <button id="reset-button" class="btn btn-outline icon-button" type="button" data-icon="rotate-ccw" data-recovery-action="reset">전체 초기화</button>
                 <button id="rollback-button" class="btn btn-error icon-button" type="button" data-icon="undo-2" data-recovery-action="rollback">패키지 되돌리기</button>
               </div>
             </div>
             <div class="action-help-grid mt-5">
               <div><strong>리포트 새로고침</strong><span>서버에 저장된 결과만 다시 불러옵니다.</span></div>
+              <div><strong>현재 단계 재시도</strong><span>실패 단계에서 바뀐 설정을 복원한 뒤 해당 단계만 다시 적용하고 검증합니다.</span></div>
               <div><strong>재설치 초기화</strong><span>installer가 만든 사이트 계정의 서비스·프로세스·로그인 세션과 DB, 웹루트, 패키지, 메타데이터를 정리합니다. 설치기 세션·SSH 터널·인증서는 보존합니다.</span></div>
               <div><strong>패키지 되돌리기</strong><span>설치 직후 운영 데이터가 없을 때만 패키지 제거를 시도합니다.</span></div>
             </div>
             <div id="report-status" class="mt-5 hidden"></div>
+            <section class="alert alert-info mt-5" data-recovery-summary hidden>
+              <div>
+                <strong>중단 단계 복구 가능</strong>
+                <p data-recovery-summary-message></p>
+              </div>
+            </section>
             <progress id="report-progress" class="progress progress-primary mt-5 hidden w-full" value="0" max="100"></progress>
             <div id="report-output" class="report-panel mt-5">
               <div class="empty-state">아직 리포트가 없습니다.</div>

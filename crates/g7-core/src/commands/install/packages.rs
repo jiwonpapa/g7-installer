@@ -4,15 +4,27 @@ pub(super) fn apply_package_phase<R: CommandRunner>(
     probe: &SystemProbe<R>,
     plan: &plan::InstallPlan,
 ) -> std::result::Result<ApplySummary, Box<PackagePhaseFailure>> {
+    apply_package_phase_with_baseline(probe, plan, None)
+}
+
+pub(super) fn apply_package_phase_with_baseline<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    plan: &plan::InstallPlan,
+    preserved_baseline: Option<&[InstallCheck]>,
+) -> std::result::Result<ApplySummary, Box<PackagePhaseFailure>> {
     let packages = package_names(plan);
     let services = managed_services(plan);
     let ports = managed_ports(plan);
-    let preinstall_package_checks =
-        inspect_preinstall_packages(probe, &packages).map_err(|error| PackagePhaseFailure {
-            error,
-            summary: ApplySummary::default(),
-            completed_steps: Vec::new(),
-        })?;
+    let preinstall_package_checks = match preserved_baseline.filter(|checks| !checks.is_empty()) {
+        Some(checks) => checks.to_vec(),
+        None => {
+            inspect_preinstall_packages(probe, &packages).map_err(|error| PackagePhaseFailure {
+                error,
+                summary: ApplySummary::default(),
+                completed_steps: Vec::new(),
+            })?
+        }
+    };
     let mut summary = ApplySummary {
         preinstall_package_checks,
         ..ApplySummary::default()

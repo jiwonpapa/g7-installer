@@ -26,9 +26,10 @@ use crate::commands::doctor::{self, DoctorCheckStatus};
 use crate::commands::plan;
 use crate::defaults::*;
 use crate::installer_paths::{
-    BACKUP_DIR, BACKUP_MANIFEST_PATH, COMMAND_AUDIT_LOG_PATH, CONFIG_PATH, ETC_DIR, LIB_DIR,
-    LOCAL_HOSTS_PATH, LOG_DIR, LOG_PATH, NGINX_MAIN_BACKUP_PATH, NGINX_MAIN_CONFIG_PATH,
-    REPORT_PATH, ROLLBACK_PATH, SECRETS_PATH, SETUP_GUIDE_PATH,
+    BACKUP_DIR, BACKUP_MANIFEST_PATH, CANDIDATE_DIR, COMMAND_AUDIT_LOG_PATH, CONFIG_PATH, ETC_DIR,
+    LIB_DIR, LOCAL_HOSTS_PATH, LOG_DIR, LOG_PATH, NGINX_MAIN_BACKUP_PATH, NGINX_MAIN_CONFIG_PATH,
+    PENDING_SECRETS_PATH, REPORT_PATH, ROLLBACK_PATH, SECRETS_PATH, SETUP_GUIDE_PATH,
+    TRANSACTION_DIR,
 };
 use crate::{Error, Result};
 use g7_state::owned_files::{OWNED_FILES_PATH, OwnedFiles, read_owned_files, write_owned_files};
@@ -50,6 +51,7 @@ mod report;
 mod runtime;
 mod site;
 mod tls;
+mod transaction;
 mod vhost;
 
 pub use orchestrator::{
@@ -65,6 +67,7 @@ use report::*;
 use runtime::*;
 use site::*;
 use tls::*;
+use transaction::*;
 use vhost::*;
 
 #[cfg(test)]

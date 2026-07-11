@@ -12,6 +12,7 @@ pub(super) fn apply_runtime_phase<R: CommandRunner>(
     let mut checks = Vec::new();
     let sizing = detected_memory_sizing(probe);
     let ini_path = php_ini_override_path(plan);
+    let ini_content = php_ini_override_content(&sizing);
 
     checks.push(InstallCheck::pass(
         "server-sizing",
@@ -24,7 +25,17 @@ pub(super) fn apply_runtime_phase<R: CommandRunner>(
         ),
     ));
 
-    write_new_file(paths, &ini_path, &php_ini_override_content(&sizing), owned)?;
+    if plan.web_server != "frankenphp" {
+        checks.push(validate_php_runtime_candidates(
+            probe,
+            paths,
+            plan,
+            &sizing,
+            &ini_content,
+        )?);
+    }
+
+    write_owned_file(paths, &ini_path, &ini_content, owned)?;
     checks.push(InstallCheck::pass(
         "php-runtime-ini",
         format!("Created PHP runtime override at {ini_path}."),
@@ -33,7 +44,7 @@ pub(super) fn apply_runtime_phase<R: CommandRunner>(
     if matches!(plan.web_server.as_str(), "nginx" | "frankenphp") {
         checks.push(apply_nginx_worker_tuning(paths, &sizing, owned)?);
     } else if plan.web_server == "apache" {
-        write_new_file(
+        write_owned_file(
             paths,
             APACHE_RUNTIME_AVAILABLE,
             &apache_mpm_runtime_content(&sizing),
@@ -95,7 +106,7 @@ pub(super) fn apply_runtime_phase<R: CommandRunner>(
         ));
 
         let pool_path = php_pool_path(plan);
-        write_new_file(paths, &pool_path, &php_pool_content(plan, &sizing), owned)?;
+        write_owned_file(paths, &pool_path, &php_pool_content(plan, &sizing), owned)?;
         checks.push(InstallCheck::pass(
             "php-fpm-pool",
             format!(
@@ -177,6 +188,15 @@ pub(super) fn apply_runtime_phase<R: CommandRunner>(
         ));
     } else {
         let fpm_service = format!("php{}-fpm", plan.php_version);
+        let test_command = format!("php-fpm{} -t", plan.php_version);
+        let output = probe
+            .php_fpm_config_test(&plan.php_version)
+            .map_err(|err| command_error("php-fpm-configtest", &test_command, err))?;
+        require_success("php-fpm-configtest", &test_command, output)?;
+        checks.push(InstallCheck::pass(
+            "php-fpm-configtest",
+            format!("{test_command}로 PHP-FPM 설정 문법을 검증했습니다."),
+        ));
         let output = probe.reload_service(&fpm_service).map_err(|err| {
             command_error(
                 "php-fpm-reload",
@@ -238,6 +258,42 @@ pub(super) fn apply_runtime_phase<R: CommandRunner>(
     checks.extend(php_runtime_diagnostic_checks(probe, paths, plan, &sizing));
 
     Ok(checks)
+}
+
+fn validate_php_runtime_candidates<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+    sizing: &plan::ResolvedMemorySizing,
+    ini_content: &str,
+) -> Result<InstallCheck> {
+    let ini_candidate = format!("{CANDIDATE_DIR}/php-{}.ini", plan.site_user);
+    let pool_candidate = format!("{CANDIDATE_DIR}/php-{}-pool.conf", plan.site_user);
+    let fpm_candidate = format!("{CANDIDATE_DIR}/php-{}-fpm.conf", plan.site_user);
+    let ini_path = write_validation_candidate(paths, &ini_candidate, ini_content)?;
+    let pool_path =
+        write_validation_candidate(paths, &pool_candidate, &php_pool_content(plan, sizing))?;
+    let global_content = format!(
+        "[global]\nerror_log = /dev/stderr\ninclude = {}\n",
+        pool_path.display()
+    );
+    let fpm_path = write_validation_candidate(paths, &fpm_candidate, &global_content)?;
+    let command = format!(
+        "php-fpm{} -y {} -c {} -t",
+        plan.php_version,
+        fpm_path.display(),
+        ini_path.display()
+    );
+    let validation = probe.php_fpm_candidate_config_test(&plan.php_version, &fpm_path, &ini_path);
+    remove_validation_candidates(paths, &[&ini_candidate, &pool_candidate, &fpm_candidate])?;
+    let output =
+        validation.map_err(|err| command_error("php-fpm-candidate-test", &command, err))?;
+    require_success("php-fpm-candidate-test", &command, output)?;
+
+    Ok(InstallCheck::pass(
+        "php-fpm-candidate-test",
+        "PHP ini와 FPM pool 후보 파일을 활성 설정 교체 전에 검증했습니다.",
+    ))
 }
 
 pub(super) fn php_runtime_diagnostic_checks<R: CommandRunner>(
@@ -545,6 +601,34 @@ pub(super) fn apply_redis_runtime<R: CommandRunner>(
     probe: &SystemProbe<R>,
     sizing: &plan::ResolvedMemorySizing,
 ) -> Result<Vec<InstallCheck>> {
+    let previous = redis_runtime_snapshot(probe)?;
+    match apply_redis_runtime_inner(probe, sizing) {
+        Ok(checks) if checks.iter().all(|check| check.status != "fail") => Ok(checks),
+        Ok(mut checks) => {
+            restore_redis_runtime(probe, &previous)?;
+            checks.push(InstallCheck::pass(
+                "redis-runtime-restore",
+                "Redis 검증 실패로 변경 전 설정을 자동 복원했습니다.",
+            ));
+            Ok(checks)
+        }
+        Err(error) => {
+            if let Err(restore_error) = restore_redis_runtime(probe, &previous) {
+                return Err(Error::InstallVerificationFailed {
+                    checks: format!(
+                        "Redis 적용 실패 후 기존 설정 복원도 실패했습니다: apply={error}; restore={restore_error}"
+                    ),
+                });
+            }
+            Err(error)
+        }
+    }
+}
+
+fn apply_redis_runtime_inner<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    sizing: &plan::ResolvedMemorySizing,
+) -> Result<Vec<InstallCheck>> {
     let settings = [
         ("bind", "127.0.0.1".to_string()),
         ("protected-mode", "yes".to_string()),
@@ -624,6 +708,58 @@ pub(super) fn apply_redis_runtime<R: CommandRunner>(
             ),
         ),
     ])
+}
+
+fn redis_runtime_snapshot<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+) -> Result<Vec<(String, String)>> {
+    ["bind", "protected-mode", "maxmemory", "maxmemory-policy"]
+        .iter()
+        .map(|key| {
+            let output = probe.redis_config_get(key).map_err(|error| {
+                command_error("redis-snapshot", format!("CONFIG GET {key}"), error)
+            })?;
+            require_success(
+                "redis-snapshot",
+                format!("CONFIG GET {key}"),
+                output.clone(),
+            )?;
+            let value = redis_config_value(&output.stdout, key).ok_or_else(|| {
+                Error::InstallVerificationFailed {
+                    checks: format!("Redis snapshot did not return `{key}`"),
+                }
+            })?;
+            Ok(((*key).to_string(), value))
+        })
+        .collect()
+}
+
+fn restore_redis_runtime<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    previous: &[(String, String)],
+) -> Result<()> {
+    for (key, value) in previous {
+        let output = probe
+            .redis_config_set(key, value)
+            .map_err(|error| command_error("redis-restore", format!("CONFIG SET {key}"), error))?;
+        require_success("redis-restore", format!("CONFIG SET {key}"), output)?;
+    }
+    let output = probe
+        .redis_config_rewrite()
+        .map_err(|error| command_error("redis-restore-rewrite", "CONFIG REWRITE", error))?;
+    require_success("redis-restore-rewrite", "CONFIG REWRITE", output)?;
+    let output = probe.restart_service("redis-server").map_err(|error| {
+        command_error(
+            "redis-restore-restart",
+            "systemctl restart redis-server",
+            error,
+        )
+    })?;
+    require_success(
+        "redis-restore-restart",
+        "systemctl restart redis-server",
+        output,
+    )
 }
 
 pub(super) fn redis_config_value(output: &str, key: &str) -> Option<String> {

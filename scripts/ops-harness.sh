@@ -23,7 +23,7 @@ DATABASE="${G7_OPS_DATABASE:-mysql}"
 REDIS="${G7_OPS_REDIS:-enable}"
 MAIL_MODE="${G7_OPS_MAIL_MODE:-none}"
 WWW_MODE="${G7_OPS_WWW_MODE:-redirect-to-root}"
-STEPS="${G7_OPS_STEPS:-fresh-doctor,plan,install,report-contract,setup-guide,app-smoke,post-install-doctor,reset-dry-run,reset,fresh-doctor-after-reset}"
+STEPS="${G7_OPS_STEPS:-fresh-doctor,plan,install,report-contract,state-contract,setup-guide,app-smoke,post-install-doctor,reset-dry-run,reset,fresh-doctor-after-reset}"
 STEPS="${STEPS// /}"
 PRE_CLEAN="${G7_OPS_PRE_CLEAN:-auto}"
 ALLOW_LOCAL_TEST="${G7_OPS_ALLOW_LOCAL_TEST:-0}"
@@ -269,6 +269,39 @@ for section in sections:
 PY
 }
 
+validate_state_contract() {
+  local state_path="$1"
+  python3 - "${state_path}" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    state = json.load(handle)
+
+if state.get("version") != 2:
+    raise SystemExit(f"unexpected state version: {state.get('version')}")
+if state.get("phase") != "completed":
+    raise SystemExit(f"unexpected state phase: {state.get('phase')}")
+if state.get("current_step") is not None:
+    raise SystemExit(f"current_step remains set: {state.get('current_step')}")
+
+steps = {item.get("id"): item for item in state.get("steps") or []}
+required = {"packages", "site", "vhost", "runtime", "database", "tls", "app"}
+missing = sorted(required - set(steps))
+if missing:
+    raise SystemExit(f"missing installer steps: {', '.join(missing)}")
+failed = [
+    f"{name}={steps[name].get('status')}"
+    for name in sorted(required)
+    if steps[name].get("status") != "completed"
+]
+if failed:
+    raise SystemExit(f"non-completed installer steps: {', '.join(failed)}")
+if any((steps[name].get("attempts") or 0) < 1 for name in required):
+    raise SystemExit("one or more installer steps have no recorded attempt")
+PY
+}
+
 write_new_package_list() {
   local report_path="$1"
   local output_path="$2"
@@ -401,6 +434,7 @@ run_install_cycle() {
   local report_json
   local reset_dry_run_output
   local report_path
+  local state_path
   local package_list_path
   local certificate_present="no"
   local site_user
@@ -409,6 +443,7 @@ run_install_cycle() {
 
   remote_bin_q="$(quote "${REMOTE_BIN}")"
   report_path="${REPORT_DIR}/${cycle}-report.json"
+  state_path="${REPORT_DIR}/${cycle}-state.json"
   package_list_path="${REPORT_DIR}/${cycle}-new-packages.txt"
   args="$(install_args)"
   env_prefix="$(install_env_prefix)"
@@ -455,6 +490,18 @@ PY
     validate_report "${report_path}"
   else
     log "${cycle}: install report contract skipped"
+  fi
+
+  if step_enabled state-contract; then
+    log "${cycle}: resumable state and transaction contract"
+    sudo_capture "${cycle}-state-json" "cat /var/lib/g7-installer/state.json" >"${state_path}"
+    validate_state_contract "${state_path}"
+    sudo_sh_capture "${cycle}-pending-secrets-absent" "test ! -e /var/lib/g7-installer/pending-secrets.toml"
+    sudo_sh_capture "${cycle}-candidate-files-absent" "test ! -d /var/lib/g7-installer/candidates || ! find /var/lib/g7-installer/candidates -type f -print -quit | grep -q ."
+    sudo_sh_capture "${cycle}-transactions-finished" "test ! -d /var/lib/g7-installer/transactions || ! grep -R -q '\"status\": \"started\"' /var/lib/g7-installer/transactions"
+    sudo_sh_capture "${cycle}-secrets-mode" "test \"\$(stat -c %a /etc/g7-installer/secrets.toml)\" = 600"
+  else
+    log "${cycle}: state contract skipped"
   fi
 
   if step_enabled setup-guide; then

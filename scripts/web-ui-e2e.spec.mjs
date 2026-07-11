@@ -148,11 +148,14 @@ async function startServer(options = {}) {
       return;
     }
     if (pathname === "/api/recovery") {
-      json(response, {
+      json(response, options.recovery || {
         can_resume: false,
+        can_retry_step: false,
         can_reset: true,
         can_rollback: false,
-        recommended_action: "reset",
+        recommended_action: "manual",
+        failed_step: null,
+        restore_status: null,
         message: "설치기 소유 기록이 있어 재설치 초기화가 가능합니다.",
         metadata_paths: ["/var/lib/g7-installer/state.json"],
         rollback_reason: "앱/DB/인증서 단계 이후에는 reset을 사용합니다.",
@@ -286,6 +289,33 @@ test("saved interrupted report exposes the exact failed check", async ({ page })
     await page.goto(`${baseUrl}/setup/result?token=e2e`);
     await expect(page.getByText("중단 원인")).toBeVisible();
     await expect(page.getByText("TLS configuration failed: renewal webroot points to /home/old/public_html/public", { exact: true })).toBeVisible();
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("restored failed step is offered as an in-place retry", async ({ page }) => {
+  const { server, baseUrl } = await startServer({
+    recovery: {
+      can_resume: true,
+      can_retry_step: true,
+      can_reset: true,
+      can_rollback: false,
+      recommended_action: "resume",
+      failed_step: "runtime",
+      restore_status: "restored",
+      message: "실패한 단계의 변경을 복원한 뒤 해당 단계부터 다시 실행할 수 있습니다.",
+      metadata_paths: ["/var/lib/g7-installer/state.json"],
+      rollback_reason: "현재 단계에서는 패키지 되돌리기를 사용할 수 없습니다.",
+      resume_reason: null,
+    },
+  });
+  try {
+    await page.goto(`${baseUrl}/setup/result?token=e2e`);
+    const message = page.locator("[data-recovery-summary]:visible [data-recovery-summary-message]");
+    await expect(message).toContainText("실패 단계: runtime");
+    await expect(message).toContainText("자동 복원되었습니다");
+    await expect(page.locator('[data-view="report"] [data-recovery-action="resume"]')).toHaveText(/현재 단계 다시 실행/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

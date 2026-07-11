@@ -197,7 +197,7 @@ pub(super) fn write_secret_file(
     content: &str,
     owned: &mut Vec<String>,
 ) -> Result<()> {
-    write_new_file(paths, path, content, owned)?;
+    write_owned_file(paths, path, content, owned)?;
     #[cfg(unix)]
     {
         let target = paths.resolve(path);

@@ -56,17 +56,33 @@ pub(super) fn install_laravel_app<R: CommandRunner>(
             checks: format!("database password was not found at {SECRETS_PATH}"),
         })?;
     let smtp_password = read_smtp_password(paths)?;
-    write_existing_file(
-        paths,
-        &format!("{}/.env", plan.web_root),
-        &laravel_env_content(
-            plan,
-            &db_password,
-            app_url,
-            laravel_runtime_kind(plan),
-            smtp_password.as_deref(),
-        )?,
-    )?;
+    let env_path = format!("{}/.env", plan.web_root);
+    let env_created = if paths.resolve(&env_path).exists() {
+        if !owned.iter().any(|path| path == &env_path) {
+            if owned.iter().any(|path| path == &plan.web_root) {
+                owned.push(env_path.clone());
+            } else {
+                return Err(Error::InstallVerificationFailed {
+                    checks: format!("{env_path} exists outside an installer-owned web root"),
+                });
+            }
+        }
+        false
+    } else {
+        write_owned_file(
+            paths,
+            &env_path,
+            &laravel_env_content(
+                plan,
+                &db_password,
+                app_url,
+                laravel_runtime_kind(plan),
+                smtp_password.as_deref(),
+            )?,
+            owned,
+        )?;
+        true
+    };
 
     let mut checks = vec![
         InstallCheck::pass(
@@ -79,8 +95,14 @@ pub(super) fn install_laravel_app<R: CommandRunner>(
         InstallCheck::pass(
             "app-env",
             format!(
-                "Wrote Laravel .env with DB name `{}` and user `{}`; password remains in {SECRETS_PATH}.",
-                plan.database_name, plan.database_user
+                "{} Laravel .env with DB name `{}` and user `{}`; password remains in {SECRETS_PATH}.",
+                if env_created {
+                    "Created"
+                } else {
+                    "Preserved existing"
+                },
+                plan.database_name,
+                plan.database_user
             ),
         ),
     ];

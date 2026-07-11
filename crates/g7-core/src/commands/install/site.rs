@@ -44,8 +44,11 @@ pub(super) fn apply_site_phase<R: CommandRunner>(
         ));
     }
 
-    require_empty_or_absent_dir(paths, &plan.web_root)?;
-    require_empty_or_absent_dir(paths, &plan.app_document_root)?;
+    let ready_path = ready_probe_path(plan);
+    if !owned.iter().any(|path| path == &ready_path) {
+        require_empty_or_absent_dir(paths, &plan.web_root)?;
+        require_empty_or_absent_dir(paths, &plan.app_document_root)?;
+    }
     create_owned_dir_if_absent(paths, &plan.web_root, owned)?;
     create_owned_dir_if_absent(paths, &plan.app_document_root, owned)?;
     checks.push(InstallCheck::pass(
@@ -53,8 +56,7 @@ pub(super) fn apply_site_phase<R: CommandRunner>(
         format!("Created or verified {}.", plan.app_document_root),
     ));
 
-    let ready_path = ready_probe_path(plan);
-    write_new_file(paths, &ready_path, ready_probe_content(), owned)?;
+    write_owned_file(paths, &ready_path, ready_probe_content(), owned)?;
     checks.push(InstallCheck::pass(
         "php-ready-probe",
         format!("Wrote temporary PHP smoke file {}.", ready_path),
@@ -94,7 +96,7 @@ pub(super) fn install_placeholder_app(
     owned: &mut Vec<String>,
 ) -> Result<Vec<InstallCheck>> {
     let index_path = format!("{}/index.php", plan.app_document_root);
-    write_new_file(paths, &index_path, &placeholder_app_content(plan), owned)?;
+    write_owned_file(paths, &index_path, &placeholder_app_content(plan), owned)?;
     Ok(vec![
         InstallCheck {
             name: "app-source".to_string(),
@@ -279,7 +281,9 @@ pub(super) fn create_owned_dir(
         path: path.to_string(),
         source,
     })?;
-    owned.push(path.to_string());
+    if !owned.iter().any(|owned_path| owned_path == path) {
+        owned.push(path.to_string());
+    }
     Ok(())
 }
 
@@ -308,6 +312,28 @@ pub(super) fn create_owned_symlink(
 ) -> Result<()> {
     let source_path = paths.resolve(source);
     let link_path = paths.resolve(link);
+    if let Ok(metadata) = fs::symlink_metadata(&link_path) {
+        if !owned.iter().any(|owned_path| owned_path == link) {
+            return Err(Error::InstallVerificationFailed {
+                checks: format!("{link} already exists and is not installer-owned"),
+            });
+        }
+        if metadata.file_type().is_symlink()
+            && fs::read_link(&link_path).ok().as_ref() == Some(&source_path)
+        {
+            return Ok(());
+        }
+        if metadata.file_type().is_symlink() || metadata.is_file() {
+            fs::remove_file(&link_path).map_err(|source| Error::FileWriteFailed {
+                path: link.to_string(),
+                source,
+            })?;
+        } else {
+            return Err(Error::InstallVerificationFailed {
+                checks: format!("{link} exists but is not a replaceable file or symlink"),
+            });
+        }
+    }
     if let Some(parent) = link_path.parent() {
         fs::create_dir_all(parent).map_err(|source| Error::FileWriteFailed {
             path: parent.display().to_string(),
@@ -328,7 +354,9 @@ pub(super) fn create_owned_symlink(
             checks: "symlink creation is supported only on unix platforms".to_string(),
         });
     }
-    owned.push(link.to_string());
+    if !owned.iter().any(|owned_path| owned_path == link) {
+        owned.push(link.to_string());
+    }
     Ok(())
 }
 
@@ -339,28 +367,50 @@ pub(super) fn write_new_file(
     owned: &mut Vec<String>,
 ) -> Result<()> {
     let target = paths.resolve(path);
+    if target.exists() {
+        return Err(Error::InstallVerificationFailed {
+            checks: format!("{path} already exists; refusing to replace an untracked file"),
+        });
+    }
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|source| Error::FileWriteFailed {
             path: parent.display().to_string(),
             source,
         })?;
     }
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&target)
-        .map_err(|source| Error::FileWriteFailed {
+    g7_state::atomic::atomic_write(&target, content.as_bytes()).map_err(|source| {
+        Error::FileWriteFailed {
             path: path.to_string(),
             source,
-        })?;
-
-    file.write_all(content.as_bytes())
-        .map_err(|source| Error::FileWriteFailed {
+        }
+    })?;
+    #[cfg(unix)]
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o644)).map_err(|source| {
+        Error::FileWriteFailed {
             path: path.to_string(),
             source,
-        })?;
+        }
+    })?;
     owned.push(path.to_string());
     Ok(())
+}
+
+pub(super) fn write_owned_file(
+    paths: &InstallPaths,
+    path: &str,
+    content: &str,
+    owned: &mut Vec<String>,
+) -> Result<()> {
+    if paths.resolve(path).exists() {
+        if !owned.iter().any(|owned_path| owned_path == path) {
+            return Err(Error::InstallVerificationFailed {
+                checks: format!("{path} already exists and is not installer-owned"),
+            });
+        }
+        write_existing_file(paths, path, content)
+    } else {
+        write_new_file(paths, path, content, owned)
+    }
 }
 
 pub(super) fn write_managed_marker_file(
@@ -423,8 +473,70 @@ pub(super) fn write_existing_file(paths: &InstallPaths, path: &str, content: &st
             source,
         })?;
     }
-    fs::write(&target, content).map_err(|source| Error::FileWriteFailed {
-        path: path.to_string(),
-        source,
-    })
+    #[cfg(unix)]
+    let mode = fs::metadata(&target)
+        .ok()
+        .map(|metadata| metadata.permissions().mode())
+        .unwrap_or(0o644);
+    g7_state::atomic::atomic_write(&target, content.as_bytes()).map_err(|source| {
+        Error::FileWriteFailed {
+            path: path.to_string(),
+            source,
+        }
+    })?;
+    #[cfg(unix)]
+    fs::set_permissions(&target, fs::Permissions::from_mode(mode)).map_err(|source| {
+        Error::FileWriteFailed {
+            path: path.to_string(),
+            source,
+        }
+    })?;
+    Ok(())
+}
+
+pub(super) fn write_validation_candidate(
+    paths: &InstallPaths,
+    path: &str,
+    content: &str,
+) -> Result<PathBuf> {
+    let target = paths.resolve(path);
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|source| Error::FileWriteFailed {
+            path: parent.display().to_string(),
+            source,
+        })?;
+    }
+    g7_state::atomic::atomic_write(&target, content.as_bytes()).map_err(|source| {
+        Error::FileWriteFailed {
+            path: path.to_string(),
+            source,
+        }
+    })?;
+    #[cfg(unix)]
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).map_err(|source| {
+        Error::FileWriteFailed {
+            path: path.to_string(),
+            source,
+        }
+    })?;
+    Ok(target)
+}
+
+pub(super) fn remove_validation_candidates(
+    paths: &InstallPaths,
+    candidates: &[&str],
+) -> Result<()> {
+    for candidate in candidates {
+        match fs::remove_file(paths.resolve(candidate)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(Error::FileWriteFailed {
+                    path: (*candidate).to_string(),
+                    source,
+                });
+            }
+        }
+    }
+    Ok(())
 }

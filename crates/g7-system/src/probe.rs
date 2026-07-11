@@ -17,7 +17,10 @@ use crate::archive::{
 use crate::certbot::{certonly_webroot, delete_cert, reconfigure_webroot, renew_dry_run};
 use crate::command::CommandSpec;
 use crate::command::{CommandError, CommandOutput, CommandRunner, RealCommandRunner};
-use crate::database::{DatabaseEngine, apply_sql};
+use crate::database::{
+    DatabaseEngine, apply_sql, candidate_config_test as database_candidate_config_test,
+    config_test as database_config_test,
+};
 use crate::mail::{postconf_set, postfix_preseed};
 use crate::network::{
     dns_ipv4_records, dns_ipv6_records, http_host_path_smoke, http_host_smoke, public_ipv4,
@@ -26,6 +29,7 @@ use crate::network::{
 use crate::nginx::config_test as nginx_config_test;
 use crate::os::{OsRelease, OsReleaseError, read_os_release};
 use crate::package::{PackageStatus, package_status};
+use crate::php::{fpm_candidate_config_test, fpm_config_test};
 use crate::port::{PortStatus, tcp_port_status};
 use crate::privilege::{Privilege, current_privilege};
 use crate::redis::{
@@ -33,7 +37,7 @@ use crate::redis::{
     config_set as redis_config_set,
 };
 use crate::service::{ServiceActivity, disable_now, enable_now, is_active, reload, restart, start};
-use crate::systemd::daemon_reload;
+use crate::systemd::{daemon_reload, verify_units};
 use std::net::IpAddr;
 
 #[derive(Debug)]
@@ -202,6 +206,22 @@ impl<R: CommandRunner> SystemProbe<R> {
         apply_sql(&self.runner, engine, sql).map_err(SystemProbeError::Command)
     }
 
+    pub fn database_config_test(
+        &self,
+        engine: DatabaseEngine,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        database_config_test(&self.runner, engine).map_err(SystemProbeError::Command)
+    }
+
+    pub fn database_candidate_config_test(
+        &self,
+        engine: DatabaseEngine,
+        candidate: &Path,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        database_candidate_config_test(&self.runner, engine, candidate)
+            .map_err(SystemProbeError::Command)
+    }
+
     pub fn redis_config_set(
         &self,
         key: &str,
@@ -230,6 +250,13 @@ impl<R: CommandRunner> SystemProbe<R> {
         daemon_reload(&self.runner).map_err(SystemProbeError::Command)
     }
 
+    pub fn systemd_verify_units(
+        &self,
+        units: &[PathBuf],
+    ) -> Result<CommandOutput, SystemProbeError> {
+        verify_units(&self.runner, units).map_err(SystemProbeError::Command)
+    }
+
     pub fn disable_service_now(&self, service: &str) -> Result<CommandOutput, SystemProbeError> {
         disable_now(&self.runner, service).map_err(SystemProbeError::Command)
     }
@@ -252,6 +279,20 @@ impl<R: CommandRunner> SystemProbe<R> {
 
     pub fn apache_config_test(&self) -> Result<CommandOutput, SystemProbeError> {
         apache_config_test(&self.runner).map_err(SystemProbeError::Command)
+    }
+
+    pub fn php_fpm_config_test(&self, version: &str) -> Result<CommandOutput, SystemProbeError> {
+        fpm_config_test(&self.runner, version).map_err(SystemProbeError::Command)
+    }
+
+    pub fn php_fpm_candidate_config_test(
+        &self,
+        version: &str,
+        fpm_config: &Path,
+        php_ini: &Path,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        fpm_candidate_config_test(&self.runner, version, fpm_config, php_ini)
+            .map_err(SystemProbeError::Command)
     }
 
     pub fn apache_enable_module(&self, module: &str) -> Result<CommandOutput, SystemProbeError> {

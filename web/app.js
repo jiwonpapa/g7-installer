@@ -1603,13 +1603,27 @@ function renderRecoveryStatus(status) {
     const paths = panel.querySelector("[data-recovery-paths]");
 
     if (message) {
-      message.textContent = status?.message || "설치기 소유 흔적을 확인하지 못했습니다.";
+      const failed = status?.failed_step ? ` 실패 단계: ${status.failed_step}.` : "";
+      const restored = status?.restore_status === "restored" ? " 해당 단계 변경은 자동 복원되었습니다." : "";
+      message.textContent = `${status?.message || "설치기 소유 흔적을 확인하지 못했습니다."}${failed}${restored}`;
     }
     if (paths) {
       const rows = status?.metadata_paths?.length
         ? status.metadata_paths.map((path) => `<li>${escapeHtml(path)}</li>`).join("")
         : `<li>설치기 소유 기록 없음</li>`;
       paths.innerHTML = rows;
+    }
+  });
+
+  document.querySelectorAll("[data-recovery-summary]").forEach((summary) => {
+    summary.hidden = !status?.can_resume;
+    const message = summary.querySelector("[data-recovery-summary-message]");
+    if (message) {
+      const failed = status?.failed_step ? ` 실패 단계: ${status.failed_step}.` : "";
+      const restored = status?.restore_status === "restored"
+        ? " 해당 단계의 파일 변경은 자동 복원되었습니다."
+        : "";
+      message.textContent = `${status?.message || "저장된 단계부터 이어서 진행할 수 있습니다."}${failed}${restored}`;
     }
   });
 
@@ -1621,9 +1635,13 @@ function renderRecoveryStatus(status) {
   });
 
   recoveryActionButtons("resume").forEach((button) => {
+    button.hidden = !status?.can_resume;
     button.disabled = !status?.can_resume;
+    setButtonLabel(button, status?.can_retry_step ? "현재 단계 다시 실행" : "이어서 진행");
     button.title = status?.can_resume
-      ? "저장된 안전 단계부터 설치를 이어서 진행합니다."
+      ? (status?.can_retry_step
+        ? "복원된 실패 단계를 다시 적용하고 검증한 뒤 다음 단계로 진행합니다."
+        : "저장된 마지막 정상 단계부터 설치를 이어서 진행합니다.")
       : (status?.resume_reason || "현재 단계에서는 이어서 진행할 수 없습니다.");
   });
 
@@ -2255,7 +2273,14 @@ async function runResumeAction(button, statusNode) {
     setButtonLabel(button, "이어가는 중");
     setOperationLocked(true);
     setInstallRunning(true);
-    setAlert(statusNode, "info", "설치 이어서 진행", "저장된 안전 단계부터 서버 설정을 계속합니다. 실시간 로그에서 실행 내용을 확인할 수 있습니다.");
+    setAlert(
+      statusNode,
+      "info",
+      state.recoveryStatus?.can_retry_step ? "실패 단계 다시 실행" : "설치 이어서 진행",
+      state.recoveryStatus?.can_retry_step
+        ? "자동 복원된 실패 단계를 다시 적용하고 검증합니다. 성공하면 다음 단계로 계속 진행합니다."
+        : "저장된 마지막 정상 단계부터 서버 설정을 계속합니다. 실시간 로그에서 실행 내용을 확인할 수 있습니다.",
+    );
     const report = await apiFetch("/api/install/resume", {
       method: "POST",
       body: JSON.stringify({}),

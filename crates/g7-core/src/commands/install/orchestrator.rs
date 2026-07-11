@@ -96,18 +96,6 @@ pub fn resume_with_probe_and_paths<R: CommandRunner>(
             reason: "installation is already completed".to_string(),
         });
     }
-    if !matches!(
-        state.phase.as_str(),
-        "database-configured" | "app-configured" | "tls-enabled"
-    ) {
-        return Err(Error::ResumeUnavailable {
-            reason: format!(
-                "phase `{}` is before the safe post-database resume boundary; use rollback/reset",
-                state.phase
-            ),
-        });
-    }
-
     let report_value = read_report_value(paths)?;
     let mut options = plan_options_from_report(&report_value)?;
     options.database_password = read_database_password(paths)?;
@@ -127,7 +115,57 @@ pub fn resume_with_probe_and_paths<R: CommandRunner>(
         owned_files_path: &owned_files_path,
     };
 
+    if let Some(step) = state.current_step.clone()
+        && restore_unfinished_transaction(paths, &state.install_id, &step)?
+    {
+        let error = state
+            .steps
+            .iter()
+            .find(|record| record.id == step)
+            .and_then(|record| record.last_error.clone())
+            .unwrap_or_else(|| "이전 실행이 설정 적용 중 중단되었습니다.".to_string());
+        state.fail_step(&step, error, true);
+        state.completed_steps = completed_steps.clone();
+        persist_progress(
+            &progress,
+            &mut owned_files,
+            &owned_file_list,
+            &state,
+            &install_plan,
+            &apply_summary,
+            None,
+        )?;
+    }
+
+    resume_pre_tls_steps(
+        probe,
+        paths,
+        &install_plan,
+        &mut state,
+        &mut apply_summary,
+        &mut owned_files,
+        &mut owned_file_list,
+        &mut completed_steps,
+        &progress,
+    )?;
+
     if !tls_is_ready(&apply_summary.certbot_checks) {
+        let transaction = StepTransaction::begin(
+            paths,
+            &state.install_id,
+            "tls",
+            &tls_transaction_files(&install_plan),
+        )?;
+        state.begin_step("tls");
+        persist_resume_step(
+            &progress,
+            &mut owned_files,
+            &owned_file_list,
+            &mut state,
+            &install_plan,
+            &apply_summary,
+            None,
+        )?;
         match apply_tls_phase(
             probe,
             paths,
@@ -148,8 +186,18 @@ pub fn resume_with_probe_and_paths<R: CommandRunner>(
                 } else if tls_is_ready(&apply_summary.certbot_checks) {
                     mark_step(&mut completed_steps, "tls-skipped");
                 }
+                transaction.complete()?;
+                if tls_passed || tls_is_ready(&apply_summary.certbot_checks) {
+                    state.complete_step("tls");
+                } else {
+                    state.fail_step("tls", "TLS 설정이 보류되었습니다.", false);
+                }
             }
             Err(err) => {
+                let restored = transaction.restore().is_ok();
+                if restored {
+                    let _ = reload_restored_web_service(probe, &install_plan);
+                }
                 apply_summary.certbot_checks = if is_letsencrypt_rate_limited(&err) {
                     vec![InstallCheck::warn(
                         "tls-rate-limited",
@@ -162,6 +210,7 @@ pub fn resume_with_probe_and_paths<R: CommandRunner>(
                     )]
                 };
                 mark_step(&mut completed_steps, "tls-deferred");
+                state.fail_step("tls", err.to_string(), restored);
             }
         }
         state.completed_steps = completed_steps.clone();
@@ -178,6 +227,22 @@ pub fn resume_with_probe_and_paths<R: CommandRunner>(
 
     let app_ready = app_is_ready(&completed_steps, &apply_summary.app_checks);
     if !app_ready {
+        let transaction = StepTransaction::begin(
+            paths,
+            &state.install_id,
+            "app",
+            &app_transaction_files(&install_plan),
+        )?;
+        state.begin_step("app");
+        persist_resume_step(
+            &progress,
+            &mut owned_files,
+            &owned_file_list,
+            &mut state,
+            &install_plan,
+            &apply_summary,
+            None,
+        )?;
         match apply_app_phase(
             probe,
             paths,
@@ -202,12 +267,23 @@ pub fn resume_with_probe_and_paths<R: CommandRunner>(
                 if state.phase != InstallerPhase::TlsEnabled.as_str() {
                     state.set_phase(InstallerPhase::AppConfigured);
                 }
+                if source_ready {
+                    state.complete_step("app");
+                } else {
+                    state.fail_step("app", "웹앱 소스 준비가 보류되었습니다.", false);
+                }
+                transaction.complete()?;
             }
             Err(err) => {
+                let restored = transaction.restore().is_ok();
+                if restored {
+                    let _ = reload_restored_app_runtime(probe, &install_plan);
+                }
                 apply_summary.app_checks = vec![InstallCheck::fail(
                     "app-source",
                     command_failure_message("Application source setup failed", &err),
                 )];
+                state.fail_step("app", err.to_string(), restored);
                 state.completed_steps = completed_steps.clone();
                 persist_progress(
                     &progress,
@@ -304,7 +380,12 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         source,
     })?;
     let site_user_password = options.site_user_password.clone();
-    let database_password = options.database_password.clone();
+    let database_password = Some(
+        options
+            .database_password
+            .clone()
+            .unwrap_or(random_hex_secret()?),
+    );
     let smtp_password = options.smtp_password.clone();
     let install_plan = plan::build_with_options(domain, options)?;
     let doctor_report = doctor::run_with_probe(probe);
@@ -317,6 +398,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     let owned_files_path = paths.resolve(OWNED_FILES_PATH);
     let mut reserved = vec![
         LIB_DIR.to_string(),
+        TRANSACTION_DIR.to_string(),
         ETC_DIR.to_string(),
         LOG_DIR.to_string(),
         BACKUP_DIR.to_string(),
@@ -347,6 +429,18 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     create_owned_dir(paths, ETC_DIR, &mut owned)?;
     create_owned_dir(paths, LOG_DIR, &mut owned)?;
     create_owned_dir(paths, BACKUP_DIR, &mut owned)?;
+    create_owned_dir(paths, TRANSACTION_DIR, &mut owned)?;
+
+    write_secret_file(
+        paths,
+        PENDING_SECRETS_PATH,
+        &pending_secrets_content(
+            database_password.as_deref().unwrap_or_default(),
+            site_user_password.as_deref(),
+            smtp_password.as_deref(),
+        ),
+        &mut owned,
+    )?;
 
     write_new_file(
         paths,
@@ -438,6 +532,12 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         source,
     })?;
 
+    state.begin_step("packages");
+    state.completed_steps = completed_steps.clone();
+    write_state_file(&state_path, &state).map_err(|source| Error::FileWriteFailed {
+        path: STATE_PATH.to_string(),
+        source,
+    })?;
     let mut apply_summary = match apply_package_phase(probe, &install_plan) {
         Ok(summary) => summary,
         Err(failure) => {
@@ -447,6 +547,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             failed_summary.safety_checks = safety_checks(&install_plan, "package-failed");
             completed_steps.extend(failure.completed_steps);
             state.set_phase(InstallerPhase::PackageFailed);
+            state.fail_step("packages", err.to_string(), false);
             state.completed_steps = completed_steps.clone();
             write_state_file(&state_path, &state).map_err(|source| Error::FileWriteFailed {
                 path: STATE_PATH.to_string(),
@@ -465,6 +566,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             return Err(err);
         }
     };
+    state.complete_step("packages");
     apply_summary.runtime_checks.extend(early_runtime_checks);
 
     completed_steps.push("apt-updated".to_string());
@@ -495,6 +597,23 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     )?;
     append_phase_log(paths, &state.phase, false)?;
 
+    let site_transaction = StepTransaction::begin(
+        paths,
+        &state.install_id,
+        "site",
+        &[ready_probe_path(&install_plan)],
+    )?;
+    state.begin_step("site");
+    state.completed_steps = completed_steps.clone();
+    persist_progress(
+        &progress,
+        &mut owned_files,
+        &owned_file_list,
+        &state,
+        &install_plan,
+        &apply_summary,
+        None,
+    )?;
     let site_checks = match apply_site_phase(
         probe,
         paths,
@@ -504,12 +623,14 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     ) {
         Ok(site_checks) => site_checks,
         Err(err) => {
+            let restored = site_transaction.restore().is_ok();
             apply_summary.safety_checks = safety_checks(&install_plan, "vhost-failed");
             apply_summary.vhost_checks = vec![InstallCheck::fail(
                 "site-provision",
                 format!("Site account and web root setup failed: {err}"),
             )];
             state.set_phase(InstallerPhase::VhostFailed);
+            state.fail_step("site", err.to_string(), restored);
             state.completed_steps = completed_steps.clone();
             owned_files.files = owned_file_list.clone();
             write_owned_files(&owned_files_path, &owned_files).map_err(|source| {
@@ -536,6 +657,8 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             return Err(err);
         }
     };
+    site_transaction.complete()?;
+    state.complete_step("site");
 
     apply_summary.vhost_checks = site_checks;
     completed_steps.push("site-user-verified".to_string());
@@ -562,6 +685,23 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         &report_content(&install_plan, &state.phase, &apply_summary, None)?,
     )?;
 
+    let vhost_transaction = StepTransaction::begin(
+        paths,
+        &state.install_id,
+        "vhost",
+        &vhost_transaction_files(&install_plan),
+    )?;
+    state.begin_step("vhost");
+    state.completed_steps = completed_steps.clone();
+    persist_progress(
+        &progress,
+        &mut owned_files,
+        &owned_file_list,
+        &state,
+        &install_plan,
+        &apply_summary,
+        None,
+    )?;
     match apply_vhost_phase(probe, paths, &install_plan, &mut owned_file_list) {
         Ok(vhost_checks) => {
             if !vhost_checks.is_empty() {
@@ -617,8 +757,14 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
                     &report_content(&install_plan, &state.phase, &apply_summary, None)?,
                 )?;
             }
+            vhost_transaction.complete()?;
+            state.complete_step("vhost");
         }
         Err(err) => {
+            let restored = vhost_transaction.restore().is_ok();
+            if restored {
+                let _ = reload_restored_web_service(probe, &install_plan);
+            }
             apply_summary.safety_checks = safety_checks(&install_plan, "vhost-failed");
             apply_summary.vhost_checks = vec![InstallCheck::fail(
                 "webserver-vhost",
@@ -639,6 +785,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
                 ));
             }
             state.set_phase(InstallerPhase::VhostFailed);
+            state.fail_step("vhost", err.to_string(), restored);
             state.completed_steps = completed_steps.clone();
             owned_files.files = owned_file_list.clone();
             write_owned_files(&owned_files_path, &owned_files).map_err(|source| {
@@ -666,10 +813,32 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         }
     }
 
+    let runtime_transaction = StepTransaction::begin(
+        paths,
+        &state.install_id,
+        "runtime",
+        &runtime_transaction_files(&install_plan),
+    )?;
+    state.begin_step("runtime");
+    state.completed_steps = completed_steps.clone();
+    persist_progress(
+        &progress,
+        &mut owned_files,
+        &owned_file_list,
+        &state,
+        &install_plan,
+        &apply_summary,
+        None,
+    )?;
     match apply_runtime_phase(probe, paths, &install_plan, &mut owned_file_list) {
         Ok(runtime_checks) => {
             apply_summary.runtime_checks.extend(runtime_checks);
             if let Some(message) = blocking_runtime_failure(&apply_summary.runtime_checks) {
+                let restored = runtime_transaction.restore().is_ok();
+                if restored {
+                    let _ = reload_restored_runtime(probe, &install_plan);
+                }
+                state.fail_step("runtime", &message, restored);
                 state.completed_steps = completed_steps.clone();
                 persist_progress(
                     &progress,
@@ -699,6 +868,8 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             ));
             apply_summary.safety_checks = safety_checks(&install_plan, "runtime-configured");
             state.set_phase(InstallerPhase::RuntimeConfigured);
+            runtime_transaction.complete()?;
+            state.complete_step("runtime");
             state.completed_steps = completed_steps.clone();
             persist_progress(
                 &progress,
@@ -711,10 +882,15 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             )?;
         }
         Err(err) => {
+            let restored = runtime_transaction.restore().is_ok();
+            if restored {
+                let _ = reload_restored_runtime(probe, &install_plan);
+            }
             apply_summary.runtime_checks = vec![InstallCheck::fail(
                 "runtime-config",
                 format!("Runtime configuration failed: {err}"),
             )];
+            state.fail_step("runtime", err.to_string(), restored);
             state.completed_steps = completed_steps.clone();
             persist_progress(
                 &progress,
@@ -729,6 +905,23 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         }
     }
 
+    let database_transaction = StepTransaction::begin(
+        paths,
+        &state.install_id,
+        "database",
+        &[database_config_path(&install_plan).to_string()],
+    )?;
+    state.begin_step("database");
+    state.completed_steps = completed_steps.clone();
+    persist_progress(
+        &progress,
+        &mut owned_files,
+        &owned_file_list,
+        &state,
+        &install_plan,
+        &apply_summary,
+        None,
+    )?;
     match apply_database_phase(
         probe,
         paths,
@@ -745,6 +938,9 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             completed_steps.push("database-user-created".to_string());
             apply_summary.safety_checks = safety_checks(&install_plan, "database-configured");
             state.set_phase(InstallerPhase::DatabaseConfigured);
+            database_transaction.complete()?;
+            state.complete_step("database");
+            remove_pending_secrets(paths, &mut owned_file_list)?;
             state.completed_steps = completed_steps.clone();
             persist_progress(
                 &progress,
@@ -757,10 +953,15 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             )?;
         }
         Err(err) => {
+            let restored = database_transaction.restore().is_ok();
+            if restored {
+                let _ = restart_restored_database(probe, &install_plan);
+            }
             apply_summary.database_checks = vec![InstallCheck::fail(
                 "database-config",
                 format!("Database configuration failed: {err}"),
             )];
+            state.fail_step("database", err.to_string(), restored);
             state.completed_steps = completed_steps.clone();
             persist_progress(
                 &progress,
@@ -782,6 +983,23 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     apply_summary.certbot_checks = certbot_checks;
     apply_summary.app_checks = app_checks;
 
+    let tls_transaction = StepTransaction::begin(
+        paths,
+        &state.install_id,
+        "tls",
+        &tls_transaction_files(&install_plan),
+    )?;
+    state.begin_step("tls");
+    state.completed_steps = completed_steps.clone();
+    persist_progress(
+        &progress,
+        &mut owned_files,
+        &owned_file_list,
+        &state,
+        &install_plan,
+        &apply_summary,
+        None,
+    )?;
     match apply_tls_phase(
         probe,
         paths,
@@ -807,6 +1025,12 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             } else {
                 completed_steps.push("tls-deferred".to_string());
             }
+            tls_transaction.complete()?;
+            if tls_passed || tls_skipped {
+                state.complete_step("tls");
+            } else {
+                state.fail_step("tls", "TLS 설정이 보류되었습니다.", false);
+            }
             state.completed_steps = completed_steps.clone();
             persist_progress(
                 &progress,
@@ -819,6 +1043,10 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             )?;
         }
         Err(err) => {
+            let restored = tls_transaction.restore().is_ok();
+            if restored {
+                let _ = reload_restored_web_service(probe, &install_plan);
+            }
             apply_summary.certbot_checks = if is_letsencrypt_rate_limited(&err) {
                 vec![InstallCheck::warn(
                     "tls-rate-limited",
@@ -834,6 +1062,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
                 )]
             };
             completed_steps.push("tls-deferred".to_string());
+            state.fail_step("tls", err.to_string(), restored);
             state.completed_steps = completed_steps.clone();
             persist_progress(
                 &progress,
@@ -847,6 +1076,23 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         }
     }
 
+    let app_transaction = StepTransaction::begin(
+        paths,
+        &state.install_id,
+        "app",
+        &app_transaction_files(&install_plan),
+    )?;
+    state.begin_step("app");
+    state.completed_steps = completed_steps.clone();
+    persist_progress(
+        &progress,
+        &mut owned_files,
+        &owned_file_list,
+        &state,
+        &install_plan,
+        &apply_summary,
+        None,
+    )?;
     match apply_app_phase(
         probe,
         paths,
@@ -868,6 +1114,12 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             if state.phase != InstallerPhase::TlsEnabled.as_str() {
                 state.set_phase(InstallerPhase::AppConfigured);
             }
+            if app_source_ready {
+                state.complete_step("app");
+            } else {
+                state.fail_step("app", "웹앱 소스 준비가 보류되었습니다.", false);
+            }
+            app_transaction.complete()?;
             state.completed_steps = completed_steps.clone();
             persist_progress(
                 &progress,
@@ -880,10 +1132,15 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             )?;
         }
         Err(err) => {
+            let restored = app_transaction.restore().is_ok();
+            if restored {
+                let _ = reload_restored_app_runtime(probe, &install_plan);
+            }
             apply_summary.app_checks = vec![InstallCheck::fail(
                 "app-source",
                 command_failure_message("Application source setup failed", &err),
             )];
+            state.fail_step("app", err.to_string(), restored);
             state.completed_steps = completed_steps.clone();
             persist_progress(
                 &progress,
@@ -1113,6 +1370,348 @@ fn checks_from_report(report: &serde_json::Value, key: &str) -> Vec<InstallCheck
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
+fn resume_pre_tls_steps<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+    state: &mut InstallerState,
+    summary: &mut ApplySummary,
+    owned_files: &mut OwnedFiles,
+    owned: &mut Vec<String>,
+    completed_steps: &mut Vec<String>,
+    progress: &ProgressContext<'_>,
+) -> Result<()> {
+    if !install_step_completed(state, completed_steps, "packages") {
+        state.begin_step("packages");
+        persist_resume_step(progress, owned_files, owned, state, plan, summary, None)?;
+        let package_baseline = summary.preinstall_package_checks.clone();
+        match apply_package_phase_with_baseline(probe, plan, Some(&package_baseline)) {
+            Ok(package_summary) => {
+                summary.preinstall_package_checks = package_summary.preinstall_package_checks;
+                summary.package_checks = package_summary.package_checks;
+                summary.service_checks = package_summary.service_checks;
+                summary.port_checks = package_summary.port_checks;
+                summary.network_checks = package_summary.network_checks;
+                summary.mail_checks = package_summary.mail_checks;
+                summary.certbot_checks = package_summary.certbot_checks;
+                for step in [
+                    "apt-updated",
+                    "package-candidates-checked",
+                    "packages-installed",
+                    "services-enabled",
+                    "package-verification-passed",
+                    "service-verification-passed",
+                    "port-verification-passed",
+                    "network-readiness-checked",
+                    "mail-readiness-checked",
+                    "certbot-readiness-checked",
+                ] {
+                    mark_step(completed_steps, step);
+                }
+                if plan.php_source == g7_system::php::PHP_SOURCE_ONDREJ {
+                    mark_step(completed_steps, "php-apt-source-added");
+                    mark_step(completed_steps, "apt-updated-after-php-source");
+                }
+                state.set_phase(InstallerPhase::PackagesInstalled);
+                state.complete_step("packages");
+                state.completed_steps = completed_steps.clone();
+            }
+            Err(failure) => {
+                let failure = *failure;
+                summary.preinstall_package_checks = failure.summary.preinstall_package_checks;
+                summary.package_checks = failure.summary.package_checks;
+                summary.service_checks = failure.summary.service_checks;
+                for step in failure.completed_steps {
+                    mark_step(completed_steps, &step);
+                }
+                state.set_phase(InstallerPhase::PackageFailed);
+                state.fail_step("packages", failure.error.to_string(), false);
+                state.completed_steps = completed_steps.clone();
+                persist_resume_step(
+                    progress,
+                    owned_files,
+                    owned,
+                    state,
+                    plan,
+                    summary,
+                    Some(&failure.error.to_string()),
+                )?;
+                return Err(failure.error);
+            }
+        }
+        persist_resume_step(progress, owned_files, owned, state, plan, summary, None)?;
+    }
+
+    if !install_step_completed(state, completed_steps, "site") {
+        let transaction =
+            StepTransaction::begin(paths, &state.install_id, "site", &[ready_probe_path(plan)])?;
+        state.begin_step("site");
+        persist_resume_step(progress, owned_files, owned, state, plan, summary, None)?;
+        let site_password = read_site_password(paths)?;
+        match apply_site_phase(probe, paths, plan, owned, site_password.as_deref()) {
+            Ok(checks) => {
+                summary.vhost_checks = checks;
+                mark_step(completed_steps, "site-user-verified");
+                mark_step(completed_steps, "web-root-created");
+                transaction.complete()?;
+                state.complete_step("site");
+                state.completed_steps = completed_steps.clone();
+            }
+            Err(error) => {
+                let restored = transaction.restore().is_ok();
+                summary.vhost_checks = vec![InstallCheck::fail(
+                    "site-provision",
+                    format!("Site account and web root setup failed: {error}"),
+                )];
+                state.set_phase(InstallerPhase::VhostFailed);
+                state.fail_step("site", error.to_string(), restored);
+                persist_resume_step(
+                    progress,
+                    owned_files,
+                    owned,
+                    state,
+                    plan,
+                    summary,
+                    Some(&error.to_string()),
+                )?;
+                return Err(error);
+            }
+        }
+        persist_resume_step(progress, owned_files, owned, state, plan, summary, None)?;
+    }
+
+    if !install_step_completed(state, completed_steps, "vhost") {
+        let transaction = StepTransaction::begin(
+            paths,
+            &state.install_id,
+            "vhost",
+            &vhost_transaction_files(plan),
+        )?;
+        state.begin_step("vhost");
+        persist_resume_step(progress, owned_files, owned, state, plan, summary, None)?;
+        match apply_vhost_phase(probe, paths, plan, owned) {
+            Ok(checks) => {
+                summary.vhost_checks.retain(|check| {
+                    matches!(
+                        check.name.as_str(),
+                        "site-user" | "web-root" | "php-ready-probe" | "web-root-permissions"
+                    )
+                });
+                summary.vhost_checks.extend(checks);
+                for step in ["vhost-written", "vhost-enabled", "http-smoke-passed"] {
+                    mark_step(completed_steps, step);
+                }
+                mark_step(
+                    completed_steps,
+                    &format!("{}-config-tested", web_service_name(plan)),
+                );
+                mark_step(
+                    completed_steps,
+                    &format!("{}-reloaded", web_service_name(plan)),
+                );
+                state.set_phase(InstallerPhase::VhostEnabled);
+                transaction.complete()?;
+                state.complete_step("vhost");
+                state.completed_steps = completed_steps.clone();
+            }
+            Err(error) => {
+                let restored = transaction.restore().is_ok();
+                if restored {
+                    let _ = reload_restored_web_service(probe, plan);
+                }
+                summary.vhost_checks = vec![InstallCheck::fail(
+                    "webserver-vhost",
+                    format!("Web server vhost setup failed: {error}"),
+                )];
+                state.set_phase(InstallerPhase::VhostFailed);
+                state.fail_step("vhost", error.to_string(), restored);
+                persist_resume_step(
+                    progress,
+                    owned_files,
+                    owned,
+                    state,
+                    plan,
+                    summary,
+                    Some(&error.to_string()),
+                )?;
+                return Err(error);
+            }
+        }
+        persist_resume_step(progress, owned_files, owned, state, plan, summary, None)?;
+    }
+
+    if !install_step_completed(state, completed_steps, "runtime") {
+        let transaction = StepTransaction::begin(
+            paths,
+            &state.install_id,
+            "runtime",
+            &runtime_transaction_files(plan),
+        )?;
+        state.begin_step("runtime");
+        persist_resume_step(progress, owned_files, owned, state, plan, summary, None)?;
+        match apply_runtime_phase(probe, paths, plan, owned) {
+            Ok(checks) => {
+                summary
+                    .runtime_checks
+                    .retain(|check| matches!(check.name.as_str(), "swapfile" | "swap-sysctl"));
+                summary.runtime_checks.extend(checks);
+                if let Some(message) = blocking_runtime_failure(&summary.runtime_checks) {
+                    let restored = transaction.restore().is_ok();
+                    if restored {
+                        let _ = reload_restored_runtime(probe, plan);
+                    }
+                    state.fail_step("runtime", &message, restored);
+                    persist_resume_step(
+                        progress,
+                        owned_files,
+                        owned,
+                        state,
+                        plan,
+                        summary,
+                        Some(&message),
+                    )?;
+                    return Err(Error::InstallVerificationFailed { checks: message });
+                }
+                for step in [
+                    "php-runtime-config-written",
+                    "php-runtime-diagnostics-passed",
+                ] {
+                    mark_step(completed_steps, step);
+                }
+                mark_step(
+                    completed_steps,
+                    if plan.web_server == "frankenphp" {
+                        "frankenphp-runtime-config-written"
+                    } else {
+                        "php-fpm-config-written"
+                    },
+                );
+                state.set_phase(InstallerPhase::RuntimeConfigured);
+                transaction.complete()?;
+                state.complete_step("runtime");
+                state.completed_steps = completed_steps.clone();
+            }
+            Err(error) => {
+                let restored = transaction.restore().is_ok();
+                if restored {
+                    let _ = reload_restored_runtime(probe, plan);
+                }
+                summary.runtime_checks = vec![InstallCheck::fail(
+                    "runtime-config",
+                    format!("Runtime configuration failed: {error}"),
+                )];
+                state.fail_step("runtime", error.to_string(), restored);
+                persist_resume_step(
+                    progress,
+                    owned_files,
+                    owned,
+                    state,
+                    plan,
+                    summary,
+                    Some(&error.to_string()),
+                )?;
+                return Err(error);
+            }
+        }
+        persist_resume_step(progress, owned_files, owned, state, plan, summary, None)?;
+    }
+
+    if !install_step_completed(state, completed_steps, "database") {
+        let transaction = StepTransaction::begin(
+            paths,
+            &state.install_id,
+            "database",
+            &[database_config_path(plan).to_string()],
+        )?;
+        state.begin_step("database");
+        persist_resume_step(progress, owned_files, owned, state, plan, summary, None)?;
+        let database_password = read_database_password(paths)?;
+        let smtp_password = read_smtp_password(paths)?;
+        match apply_database_phase(
+            probe,
+            paths,
+            plan,
+            owned,
+            database_password.as_deref(),
+            smtp_password.as_deref(),
+        ) {
+            Ok(checks) => {
+                summary.database_checks = checks;
+                for step in [
+                    "database-runtime-configured",
+                    "database-secret-written",
+                    "database-created",
+                    "database-user-created",
+                ] {
+                    mark_step(completed_steps, step);
+                }
+                state.set_phase(InstallerPhase::DatabaseConfigured);
+                transaction.complete()?;
+                state.complete_step("database");
+                remove_pending_secrets(paths, owned)?;
+                state.completed_steps = completed_steps.clone();
+            }
+            Err(error) => {
+                let restored = transaction.restore().is_ok();
+                if restored {
+                    let _ = restart_restored_database(probe, plan);
+                }
+                summary.database_checks = vec![InstallCheck::fail(
+                    "database-config",
+                    format!("Database configuration failed: {error}"),
+                )];
+                state.fail_step("database", error.to_string(), restored);
+                persist_resume_step(
+                    progress,
+                    owned_files,
+                    owned,
+                    state,
+                    plan,
+                    summary,
+                    Some(&error.to_string()),
+                )?;
+                return Err(error);
+            }
+        }
+        persist_resume_step(progress, owned_files, owned, state, plan, summary, None)?;
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn persist_resume_step(
+    progress: &ProgressContext<'_>,
+    owned_files: &mut OwnedFiles,
+    owned: &[String],
+    state: &mut InstallerState,
+    plan: &plan::InstallPlan,
+    summary: &ApplySummary,
+    problem: Option<&str>,
+) -> Result<()> {
+    state.completed_steps.sort();
+    state.completed_steps.dedup();
+    persist_progress(progress, owned_files, owned, state, plan, summary, problem)
+}
+
+fn install_step_completed(state: &InstallerState, completed_steps: &[String], step: &str) -> bool {
+    if state.step_is_completed(step) {
+        return true;
+    }
+    let marker = match step {
+        "packages" => "package-verification-passed",
+        "site" => "web-root-created",
+        "vhost" => "vhost-enabled",
+        "runtime" => "php-runtime-diagnostics-passed",
+        "database" => "database-user-created",
+        "tls" => "certbot-renew-dry-run",
+        "app" => "app-source-prepared",
+        _ => return false,
+    };
+    completed_steps.iter().any(|completed| completed == marker)
+}
+
 fn tls_is_ready(checks: &[InstallCheck]) -> bool {
     checks.iter().any(|check| {
         check.name == "tls-certificate" && check.status == "pass"
@@ -1133,6 +1732,199 @@ pub(super) fn app_is_ready(completed_steps: &[String], checks: &[InstallCheck]) 
 fn mark_step(completed_steps: &mut Vec<String>, step: &str) {
     if !completed_steps.iter().any(|existing| existing == step) {
         completed_steps.push(step.to_string());
+    }
+}
+
+fn vhost_transaction_files(plan: &plan::InstallPlan) -> Vec<String> {
+    let mut files = if plan.web_server == "apache" {
+        vec![
+            g7_system::apache::G7_SITE_AVAILABLE.to_string(),
+            g7_system::apache::G7_SITE_ENABLED.to_string(),
+        ]
+    } else {
+        vec![
+            g7_system::nginx::G7_SITE_AVAILABLE.to_string(),
+            g7_system::nginx::G7_SITE_ENABLED.to_string(),
+        ]
+    };
+    if plan.web_server == "frankenphp" {
+        files.push(FRANKENPHP_BIN_PATH.to_string());
+        files.push(FRANKENPHP_SERVICE_PATH.to_string());
+    }
+    files
+}
+
+fn runtime_transaction_files(plan: &plan::InstallPlan) -> Vec<String> {
+    let mut files = vec![php_ini_override_path(plan)];
+    if plan.web_server == "apache" {
+        files.extend([
+            "/etc/apache2/conf-available/g7-runtime.conf".to_string(),
+            "/etc/apache2/conf-enabled/g7-runtime.conf".to_string(),
+            g7_system::apache::G7_SITE_AVAILABLE.to_string(),
+        ]);
+    } else {
+        files.extend([
+            NGINX_MAIN_CONFIG_PATH.to_string(),
+            g7_system::nginx::G7_SITE_AVAILABLE.to_string(),
+        ]);
+    }
+    if plan.web_server != "frankenphp" {
+        files.push(php_pool_path(plan));
+    }
+    files
+}
+
+fn tls_transaction_files(plan: &plan::InstallPlan) -> Vec<String> {
+    vec![
+        if plan.web_server == "apache" {
+            g7_system::apache::G7_SITE_AVAILABLE.to_string()
+        } else {
+            g7_system::nginx::G7_SITE_AVAILABLE.to_string()
+        },
+        format!("/etc/letsencrypt/renewal/{}.conf", plan.domain),
+    ]
+}
+
+fn app_transaction_files(plan: &plan::InstallPlan) -> Vec<String> {
+    let mut files = Vec::new();
+    if matches!(
+        plan.app_profile.as_str(),
+        "gnuboard7" | "gnuboard7-octane" | "laravel" | "laravel-octane"
+    ) {
+        files.push(format!("{}/.env", plan.web_root));
+    }
+    for unit in app_runtime_unit_names(plan) {
+        files.push(systemd_unit_path(unit));
+        let target = if unit.ends_with(".timer") {
+            "timers.target.wants"
+        } else {
+            "multi-user.target.wants"
+        };
+        files.push(format!("/etc/systemd/system/{target}/{unit}"));
+    }
+    if plan.app_profile == "laravel-octane" {
+        files.push(FRANKENPHP_SERVICE_PATH.to_string());
+    }
+    files
+}
+
+fn reload_restored_app_runtime<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    plan: &plan::InstallPlan,
+) -> Result<()> {
+    let units = app_runtime_unit_names(plan);
+    if units.is_empty() && plan.app_profile != "laravel-octane" {
+        return Ok(());
+    }
+    for unit in units {
+        let _ = probe.disable_service_now(unit);
+    }
+    let output = probe.systemd_daemon_reload().map_err(|error| {
+        command_error(
+            "app-restore-daemon-reload",
+            "systemctl daemon-reload",
+            error,
+        )
+    })?;
+    require_success(
+        "app-restore-daemon-reload",
+        "systemctl daemon-reload",
+        output,
+    )?;
+    if plan.app_profile == "laravel-octane" {
+        let output = probe
+            .restart_service(FRANKENPHP_SERVICE_NAME)
+            .map_err(|error| {
+                command_error(
+                    "app-restore-frankenphp",
+                    format!("systemctl restart {FRANKENPHP_SERVICE_NAME}"),
+                    error,
+                )
+            })?;
+        require_success(
+            "app-restore-frankenphp",
+            format!("systemctl restart {FRANKENPHP_SERVICE_NAME}"),
+            output,
+        )?;
+    }
+    Ok(())
+}
+
+fn reload_restored_runtime<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    plan: &plan::InstallPlan,
+) -> Result<()> {
+    if plan.web_server != "frankenphp" {
+        let service = format!("php{}-fpm", plan.php_version);
+        let output = probe.reload_service(&service).map_err(|error| {
+            command_error(
+                "php-restore-reload",
+                format!("systemctl reload {service}"),
+                error,
+            )
+        })?;
+        require_success(
+            "php-restore-reload",
+            format!("systemctl reload {service}"),
+            output,
+        )?;
+    }
+    reload_restored_web_service(probe, plan)
+}
+
+fn restart_restored_database<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    plan: &plan::InstallPlan,
+) -> Result<()> {
+    let service = database_service_name(plan);
+    let command = format!("systemctl restart {service}");
+    let output = probe
+        .restart_service(service)
+        .map_err(|error| command_error("database-restore-restart", &command, error))?;
+    require_success("database-restore-restart", command, output)
+}
+
+fn remove_pending_secrets(paths: &InstallPaths, owned: &mut Vec<String>) -> Result<()> {
+    match fs::remove_file(paths.resolve(PENDING_SECRETS_PATH)) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(Error::FileWriteFailed {
+                path: PENDING_SECRETS_PATH.to_string(),
+                source,
+            });
+        }
+    }
+    owned.retain(|path| path != PENDING_SECRETS_PATH);
+    Ok(())
+}
+
+fn reload_restored_web_service<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    plan: &plan::InstallPlan,
+) -> Result<()> {
+    if plan.web_server == "apache" {
+        let output = probe.apache_config_test().map_err(|error| {
+            command_error("apache-restore-configtest", "apache2ctl configtest", error)
+        })?;
+        require_success("apache-restore-configtest", "apache2ctl configtest", output)?;
+        let output = probe
+            .reload_service(g7_system::apache::SERVICE_NAME)
+            .map_err(|error| {
+                command_error("apache-restore-reload", "systemctl reload apache2", error)
+            })?;
+        require_success("apache-restore-reload", "systemctl reload apache2", output)
+    } else {
+        let output = probe
+            .nginx_config_test()
+            .map_err(|error| command_error("nginx-restore-configtest", "nginx -t", error))?;
+        require_success("nginx-restore-configtest", "nginx -t", output)?;
+        let output = probe
+            .reload_service(g7_system::nginx::SERVICE_NAME)
+            .map_err(|error| {
+                command_error("nginx-restore-reload", "systemctl reload nginx", error)
+            })?;
+        require_success("nginx-restore-reload", "systemctl reload nginx", output)
     }
 }
 

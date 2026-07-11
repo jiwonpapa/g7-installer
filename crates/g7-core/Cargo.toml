@@ -1,6 +1,6 @@
 [package]
 name = "g7-core"
-version = "0.2.40"
+version = "0.2.41"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -9,9 +9,11 @@ rust-version.workspace = true
 
 [dependencies]
 base64.workspace = true
-g7-state = { path = "../g7-state", version = "=0.2.40" }
-g7-system = { path = "../g7-system", version = "=0.2.40" }
+g7-state = { path = "../g7-state", version = "=0.2.41" }
+g7-system = { path = "../g7-system", version = "=0.2.41" }
 getrandom.workspace = true
 miette.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+toml.workspace = true

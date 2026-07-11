@@ -379,9 +379,12 @@ pub(super) struct StatusApiReport {
 #[derive(Debug, Serialize)]
 pub(super) struct RecoveryApiStatus {
     pub(super) can_resume: bool,
+    pub(super) can_retry_step: bool,
     pub(super) can_reset: bool,
     pub(super) can_rollback: bool,
     pub(super) recommended_action: &'static str,
+    pub(super) failed_step: Option<String>,
+    pub(super) restore_status: Option<String>,
     pub(super) message: String,
     pub(super) metadata_paths: Vec<String>,
     pub(super) rollback_reason: Option<String>,

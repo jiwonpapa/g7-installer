@@ -139,14 +139,10 @@ pub(super) fn configure_laravel_runtime<R: CommandRunner>(
         "Built frontend assets with npm run build.",
     ));
 
-    run_artisan_step(
-        probe,
-        &cwd,
-        "artisan-key-generate",
-        ["key:generate", "--force"],
-        &mut checks,
-        "Generated Laravel APP_KEY.",
-    )?;
+    checks.push(InstallCheck::pass(
+        "app-key-preserved",
+        "Laravel APP_KEY는 최초 .env 생성 시 만들고 재시도에서는 보존합니다.",
+    ));
     run_artisan_step(
         probe,
         &cwd,
@@ -207,12 +203,33 @@ pub(super) fn configure_laravel_runtime<R: CommandRunner>(
         let units = app_systemd_units(plan, kind);
         for unit in &units {
             let unit_path = systemd_unit_path(unit.name);
-            write_new_file(paths, &unit_path, &unit.content, owned)?;
+            write_owned_file(paths, &unit_path, &unit.content, owned)?;
             checks.push(InstallCheck::pass(
                 format!("app-service-file:{}", unit.name),
                 format!("Wrote systemd unit `{unit_path}`."),
             ));
         }
+
+        let unit_paths = units
+            .iter()
+            .map(|unit| paths.resolve(&systemd_unit_path(unit.name)))
+            .collect::<Vec<_>>();
+        let verify_command = format!(
+            "systemd-analyze verify {}",
+            unit_paths
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        let output = probe
+            .systemd_verify_units(&unit_paths)
+            .map_err(|err| command_error("app-systemd-verify", &verify_command, err))?;
+        require_success("app-systemd-verify", &verify_command, output)?;
+        checks.push(InstallCheck::pass(
+            "app-systemd-verify",
+            "앱 systemd unit 문법과 참조를 daemon reload 전에 검증했습니다.",
+        ));
 
         let output = probe.systemd_daemon_reload().map_err(|err| {
             command_error("systemd-daemon-reload", "systemctl daemon-reload", err)
@@ -447,33 +464,62 @@ pub(in crate::commands::install) fn app_writable_paths(
 pub(in crate::commands::install) fn read_database_password(
     paths: &InstallPaths,
 ) -> Result<Option<String>> {
-    read_secret_value(paths, "database_password")
+    read_secret_value(paths, "database_password")?.map_or_else(
+        || read_pending_secret_value(paths, "database_password"),
+        |value| Ok(Some(value)),
+    )
 }
 
 pub(in crate::commands::install) fn read_smtp_password(
     paths: &InstallPaths,
 ) -> Result<Option<String>> {
-    read_secret_value(paths, "smtp_password")
+    read_secret_value(paths, "smtp_password")?.map_or_else(
+        || read_pending_secret_value(paths, "smtp_password"),
+        |value| Ok(Some(value)),
+    )
+}
+
+pub(in crate::commands::install) fn read_site_password(
+    paths: &InstallPaths,
+) -> Result<Option<String>> {
+    read_pending_secret_value(paths, "site_password")
 }
 
 pub(super) fn read_secret_value(paths: &InstallPaths, key: &str) -> Result<Option<String>> {
-    let target = paths.resolve(SECRETS_PATH);
+    read_secret_value_from(paths, SECRETS_PATH, key)
+}
+
+fn read_pending_secret_value(paths: &InstallPaths, key: &str) -> Result<Option<String>> {
+    read_secret_value_from(paths, PENDING_SECRETS_PATH, key)
+}
+
+fn read_secret_value_from(
+    paths: &InstallPaths,
+    logical_path: &str,
+    key: &str,
+) -> Result<Option<String>> {
+    let target = paths.resolve(logical_path);
     let content = match fs::read_to_string(&target) {
         Ok(content) => content,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(source) => {
             return Err(Error::FileReadFailed {
-                path: SECRETS_PATH.to_string(),
+                path: logical_path.to_string(),
                 source,
             });
         }
     };
 
-    let prefix = format!("{key} = ");
-    Ok(content.lines().find_map(|line| {
-        line.strip_prefix(&prefix)
-            .map(|value| value.trim().trim_matches('"').to_string())
-    }))
+    let document =
+        content
+            .parse::<toml::Table>()
+            .map_err(|error| Error::InstallVerificationFailed {
+                checks: format!("{logical_path} TOML parsing failed: {error}"),
+            })?;
+    Ok(document
+        .get(key)
+        .and_then(toml::Value::as_str)
+        .map(str::to_string))
 }
 
 pub(super) fn laravel_env_content(

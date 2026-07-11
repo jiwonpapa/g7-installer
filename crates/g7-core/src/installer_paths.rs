@@ -6,6 +6,8 @@
 pub const CONFIG_PATH: &str = "/etc/g7-installer/config.toml";
 pub const ETC_DIR: &str = "/etc/g7-installer";
 pub const LIB_DIR: &str = "/var/lib/g7-installer";
+pub const TRANSACTION_DIR: &str = "/var/lib/g7-installer/transactions";
+pub const CANDIDATE_DIR: &str = "/var/lib/g7-installer/candidates";
 pub const LOG_DIR: &str = "/var/log/g7-installer";
 pub const BACKUP_DIR: &str = "/var/backups/g7-installer";
 pub const LOG_PATH: &str = "/var/log/g7-installer/install.log";
@@ -15,6 +17,7 @@ pub const ROLLBACK_PATH: &str = "/var/lib/g7-installer/rollback.json";
 pub const BACKUP_MANIFEST_PATH: &str = "/var/backups/g7-installer/manifest.json";
 pub const LOCAL_HOSTS_PATH: &str = "/etc/g7-installer/local-hosts.txt";
 pub const SECRETS_PATH: &str = "/etc/g7-installer/secrets.toml";
+pub const PENDING_SECRETS_PATH: &str = "/var/lib/g7-installer/pending-secrets.toml";
 pub const SETUP_GUIDE_PATH: &str = "/var/log/g7-installer/setup-guide.md";
 pub const LETSENCRYPT_LIVE_DIR: &str = "/etc/letsencrypt/live";
 pub const NGINX_MAIN_CONFIG_PATH: &str = "/etc/nginx/nginx.conf";

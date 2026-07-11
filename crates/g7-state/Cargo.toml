@@ -1,6 +1,6 @@
 [package]
 name = "g7-state"
-version = "0.2.40"
+version = "0.2.41"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true

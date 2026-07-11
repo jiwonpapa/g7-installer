@@ -10,12 +10,36 @@ pub(super) fn apply_database_phase<R: CommandRunner>(
 ) -> Result<Vec<InstallCheck>> {
     let sizing = detected_memory_sizing(probe);
     let db_config_path = database_config_path(plan);
-    write_new_file(
-        paths,
-        db_config_path,
-        &database_runtime_content(&sizing),
-        owned,
-    )?;
+    let db_config_content = database_runtime_content(&sizing);
+    let engine = DatabaseEngine::from_id(&plan.database_engine);
+    let candidate_path = format!("{CANDIDATE_DIR}/database.cnf");
+    let candidate = write_validation_candidate(paths, &candidate_path, &db_config_content)?;
+    let candidate_command = format!(
+        "{} --defaults-file={} --validate-config",
+        if plan.database_engine == "mariadb" {
+            "mariadbd"
+        } else {
+            "mysqld"
+        },
+        candidate.display()
+    );
+    let candidate_validation = probe.database_candidate_config_test(engine, &candidate);
+    remove_validation_candidates(paths, &[&candidate_path])?;
+    let output = candidate_validation
+        .map_err(|err| command_error("database-candidate-test", &candidate_command, err))?;
+    require_success("database-candidate-test", &candidate_command, output)?;
+
+    write_owned_file(paths, db_config_path, &db_config_content, owned)?;
+
+    let config_command = if plan.database_engine == "mariadb" {
+        "mariadbd --validate-config"
+    } else {
+        "mysqld --validate-config"
+    };
+    let output = probe
+        .database_config_test(engine)
+        .map_err(|err| command_error("database-configtest", config_command, err))?;
+    require_success("database-configtest", config_command, output)?;
 
     let db_service = database_service_name(plan);
     let command = format!("systemctl restart {db_service}");
@@ -52,7 +76,6 @@ pub(super) fn apply_database_phase<R: CommandRunner>(
     )?;
 
     let sql = database_sql(plan, &password);
-    let engine = DatabaseEngine::from_id(&plan.database_engine);
     let output = probe.database_apply_sql(engine, &sql).map_err(|err| {
         command_error("database-provision", "mysql --protocol=socket -uroot", err)
     })?;
@@ -69,6 +92,14 @@ pub(super) fn apply_database_phase<R: CommandRunner>(
                 "Created {db_config_path}; innodb_buffer_pool_size={}, max_connections={}.",
                 sizing.db_buffer_pool, sizing.db_max_connections
             ),
+        ),
+        InstallCheck::pass(
+            "database-candidate-test",
+            "DB 설정 후보 파일을 활성 설정 교체 전에 검증했습니다.",
+        ),
+        InstallCheck::pass(
+            "database-configtest",
+            format!("{config_command}로 DB 설정 문법을 검증했습니다."),
         ),
         InstallCheck::pass(
             "database-restart",

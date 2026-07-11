@@ -10,7 +10,7 @@ pub(super) fn apply_vhost_phase<R: CommandRunner>(
 
     match plan.web_server.as_str() {
         "nginx" => {
-            write_new_file(
+            write_owned_file(
                 paths,
                 g7_system::nginx::G7_SITE_AVAILABLE,
                 &nginx_vhost_content(plan),
@@ -51,7 +51,7 @@ pub(super) fn apply_vhost_phase<R: CommandRunner>(
         }
         "apache" => {
             enable_apache_modules(probe, apache_http_modules())?;
-            write_new_file(
+            write_owned_file(
                 paths,
                 g7_system::apache::G7_SITE_AVAILABLE,
                 &apache_vhost_content(plan),
@@ -92,7 +92,7 @@ pub(super) fn apply_vhost_phase<R: CommandRunner>(
         }
         "frankenphp" => {
             checks.extend(install_frankenphp_app_server(probe, paths, plan, owned)?);
-            write_new_file(
+            write_owned_file(
                 paths,
                 g7_system::nginx::G7_SITE_AVAILABLE,
                 &nginx_frankenphp_vhost_content(plan),
@@ -453,17 +453,38 @@ pub(super) fn secrets_content(
     smtp_password: Option<&str>,
 ) -> String {
     let mut content = format!(
-        "database_name = \"{}\"\ndatabase_user = \"{}\"\ndatabase_password = \"{}\"\n",
-        plan.database_name, plan.database_user, db_password
+        "database_name = {}\ndatabase_user = {}\ndatabase_password = {}\n",
+        toml_string(&plan.database_name),
+        toml_string(&plan.database_user),
+        toml_string(db_password)
     );
     if let (Some(username), Some(password)) = (&plan.smtp_username, smtp_password) {
         content.push_str(&format!(
-            "smtp_username = \"{}\"\nsmtp_password = \"{}\"\n",
-            username.replace('"', "\\\""),
-            password.replace('"', "\\\"")
+            "smtp_username = {}\nsmtp_password = {}\n",
+            toml_string(username),
+            toml_string(password)
         ));
     }
     content
+}
+
+pub(super) fn pending_secrets_content(
+    database_password: &str,
+    site_password: Option<&str>,
+    smtp_password: Option<&str>,
+) -> String {
+    let mut content = format!("database_password = {}\n", toml_string(database_password));
+    if let Some(password) = site_password {
+        content.push_str(&format!("site_password = {}\n", toml_string(password)));
+    }
+    if let Some(password) = smtp_password {
+        content.push_str(&format!("smtp_password = {}\n", toml_string(password)));
+    }
+    content
+}
+
+fn toml_string(value: &str) -> String {
+    toml::Value::String(value.to_string()).to_string()
 }
 
 pub(super) fn database_sql(plan: &plan::InstallPlan, db_password: &str) -> String {

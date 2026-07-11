@@ -1,6 +1,6 @@
 # 운영 하네스 감사
 
-기준일: 2026-07-10
+기준일: 2026-07-11
 
 ## 자동 검증 계층
 
@@ -23,12 +23,15 @@
 1. Ubuntu 24.04와 설치 전 `doctor install_allowed: true`
 2. 선택한 앱/웹서버/PHP/DB 옵션의 plan과 install 완료
 3. `report.json` schema version, 필수 식별값, 모든 검사 섹션의 실패 없음
-4. 설정 안내서와 앱 URL 실제 응답
-5. 설치 후 fresh doctor 차단
-6. reset dry-run과 실제 reset
-7. 신규 설치 패키지, 사이트 계정, 웹루트, 관리 서비스 제거
-8. 기존 Let's Encrypt lineage 보존
-9. reset 뒤 fresh doctor 허용
+4. 상태 v2의 7개 단계 완료, 현재 실행 단계 없음
+5. 미완료 파일 트랜잭션, 후보 설정 파일, 임시 비밀값이 남지 않음
+6. 최종 비밀 파일 권한 `0600`
+7. 설정 안내서와 앱 URL 실제 응답
+8. 설치 후 fresh doctor 차단
+9. reset dry-run과 실제 reset
+10. 신규 설치 패키지, 사이트 계정, 웹루트, 관리 서비스 제거
+11. 기존 Let's Encrypt lineage 보존
+12. reset 뒤 fresh doctor 허용
 
 GitHub Actions 실행은 `disposable-vps` Environment 승인과 다음 secret이 필요합니다.
 
@@ -49,7 +52,7 @@ G7_OPS_APP=gnuboard7 \
 bash scripts/ops-harness.sh
 ```
 
-로컬 브라우저 E2E는 관리자 명령 API를 mock 처리합니다. root 권한 서버 변경의 최종 증거는
+Rust 장애 주입 테스트는 PHP/DB 후보 설정 실패 시 활성 파일이 생성되지 않는지, 트랜잭션이 기존 파일을 복원하는지, 패키지 재시도가 최초 기준선을 보존하는지 확인합니다. 로컬 브라우저 E2E는 관리자 명령 API를 mock 처리합니다. root 권한 서버 변경의 최종 증거는
 반드시 폐기 가능 VPS 하네스 artifact로 남깁니다.
 
 ## 남은 운영 조건
