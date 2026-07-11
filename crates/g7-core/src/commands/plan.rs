@@ -55,6 +55,7 @@ mod tests {
         assert_eq!(plan.php_version, "8.5");
         assert_eq!(plan.php_source, "ondrej");
         assert_eq!(plan.database_engine, "mysql");
+        assert_eq!(plan.database_version, "8.0");
         assert_eq!(plan.site_user, "g7");
         assert_eq!(plan.web_root_mode, "public-html");
         assert_eq!(plan.web_root, "/home/g7/public_html");
@@ -65,6 +66,14 @@ mod tests {
         assert_eq!(plan.mail_mode, "none");
         assert_eq!(plan.mode, "dry-run");
         assert!(!plan.changes_made);
+        let web = plan
+            .provisioning
+            .iter()
+            .find(|section| section.name == "web-server")
+            .expect("web server section");
+        assert!(web.settings.iter().any(|setting| {
+            setting.key == "php_endpoint" && setting.value == "/run/php/php8.5-fpm-g7.sock"
+        }));
         Ok(())
     }
 
@@ -281,6 +290,60 @@ mod tests {
         );
         assert!(plan.services.iter().any(|service| service.name == "mysql"));
         Ok(())
+    }
+
+    #[test]
+    fn plan_supports_mysql_84_official_repository()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let plan = build_with_options(
+            "example.com".to_string(),
+            PlanOptions {
+                database_version: "8.4".to_string(),
+                ..PlanOptions::default()
+            },
+        )?;
+
+        assert_eq!(plan.database_engine, "mysql");
+        assert_eq!(plan.database_version, "8.4");
+        assert!(
+            plan.packages
+                .iter()
+                .any(|package| package.name == "mysql-apt-config")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn plan_rejects_mariadb_and_unknown_mysql_versions() {
+        let mariadb = build_with_options(
+            "example.com".to_string(),
+            PlanOptions {
+                database_engine: "mariadb".to_string(),
+                ..PlanOptions::default()
+            },
+        );
+        assert!(matches!(
+            mariadb,
+            Err(Error::InvalidOption {
+                field: "database",
+                ..
+            })
+        ));
+
+        let unknown = build_with_options(
+            "example.com".to_string(),
+            PlanOptions {
+                database_version: "9.7".to_string(),
+                ..PlanOptions::default()
+            },
+        );
+        assert!(matches!(
+            unknown,
+            Err(Error::InvalidOption {
+                field: "database-version",
+                ..
+            })
+        ));
     }
 
     #[test]

@@ -4,6 +4,7 @@ pub const DEFAULT_PHP_VERSION: &str = DEFAULT_FPM_VERSION;
 pub const DEFAULT_PHP_SOURCE: &str = PHP_SOURCE_AUTO;
 pub const DEFAULT_WEB_SERVER: &str = "nginx";
 pub const DEFAULT_DATABASE_ENGINE: &str = "mysql";
+pub const DEFAULT_DATABASE_VERSION: &str = "8.0";
 pub const DEFAULT_SITE_USER: &str = "g7";
 pub const DEFAULT_WEB_ROOT_MODE: &str = "public-html";
 pub const DEFAULT_WWW_MODE: &str = "redirect-to-www";
@@ -15,7 +16,8 @@ pub const DEFAULT_SECURITY_PROFILE: &str = "standard";
 pub const DEFAULT_SSH_POLICY: &str = "audit-only";
 
 pub(super) const SUPPORTED_WEB_SERVERS: [&str; 3] = ["nginx", "apache", "frankenphp"];
-pub(super) const SUPPORTED_DATABASE_ENGINES: [&str; 2] = ["mysql", "mariadb"];
+pub(super) const SUPPORTED_DATABASE_ENGINES: [&str; 1] = ["mysql"];
+pub(super) const SUPPORTED_DATABASE_VERSIONS: [&str; 2] = ["8.0", "8.4"];
 pub(super) const SUPPORTED_WEB_ROOT_MODES: [&str; 4] = ["public-html", "www", "system", "custom"];
 pub(super) const SUPPORTED_WWW_MODES: [&str; 4] =
     ["redirect-to-root", "redirect-to-www", "include", "none"];

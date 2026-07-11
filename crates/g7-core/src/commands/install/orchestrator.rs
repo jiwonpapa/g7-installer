@@ -409,6 +409,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         STATE_PATH.to_string(),
         OWNED_FILES_PATH.to_string(),
         COMMAND_AUDIT_LOG_PATH.to_string(),
+        MYSQL_CONFIG_CANDIDATE_PATH.to_string(),
     ];
     if install_plan.deployment_mode == "local-test" {
         reserved.push(LOCAL_HOSTS_PATH.to_string());
@@ -538,7 +539,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         path: STATE_PATH.to_string(),
         source,
     })?;
-    let mut apply_summary = match apply_package_phase(probe, &install_plan) {
+    let mut apply_summary = match apply_package_phase(probe, paths, &install_plan) {
         Ok(summary) => summary,
         Err(failure) => {
             let failure = *failure;
@@ -573,6 +574,10 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     if install_plan.php_source == g7_system::php::PHP_SOURCE_ONDREJ {
         completed_steps.push("php-apt-source-added".to_string());
         completed_steps.push("apt-updated-after-php-source".to_string());
+    }
+    if install_plan.database_version == "8.4" {
+        completed_steps.push("mysql-apt-source-added".to_string());
+        completed_steps.push("apt-updated-after-mysql-source".to_string());
     }
     completed_steps.push("package-candidates-checked".to_string());
     completed_steps.push("packages-installed".to_string());
@@ -685,134 +690,6 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         &report_content(&install_plan, &state.phase, &apply_summary, None)?,
     )?;
 
-    let vhost_transaction = StepTransaction::begin(
-        paths,
-        &state.install_id,
-        "vhost",
-        &vhost_transaction_files(&install_plan),
-    )?;
-    state.begin_step("vhost");
-    state.completed_steps = completed_steps.clone();
-    persist_progress(
-        &progress,
-        &mut owned_files,
-        &owned_file_list,
-        &state,
-        &install_plan,
-        &apply_summary,
-        None,
-    )?;
-    match apply_vhost_phase(probe, paths, &install_plan, &mut owned_file_list) {
-        Ok(vhost_checks) => {
-            if !vhost_checks.is_empty() {
-                let frankenphp_service_active = install_plan.web_server == "frankenphp"
-                    && vhost_checks
-                        .iter()
-                        .any(|check| check.name == "frankenphp-service" && check.status == "pass");
-                apply_summary.vhost_checks.extend(vhost_checks);
-                if frankenphp_service_active
-                    && !apply_summary
-                        .service_checks
-                        .iter()
-                        .any(|check| check.name == FRANKENPHP_SERVICE_NAME)
-                {
-                    apply_summary.service_checks.push(InstallCheck::pass(
-                        FRANKENPHP_SERVICE_NAME,
-                        format!("FrankenPHP app server is active on {FRANKENPHP_LISTEN}."),
-                    ));
-                }
-                completed_steps.push("vhost-written".to_string());
-                completed_steps.push("vhost-enabled".to_string());
-                completed_steps.push(format!("{}-config-tested", web_service_name(&install_plan)));
-                completed_steps.push(format!("{}-reloaded", web_service_name(&install_plan)));
-                completed_steps.push("http-smoke-passed".to_string());
-                apply_summary.safety_checks = safety_checks(&install_plan, "vhost-enabled");
-                state.set_phase(InstallerPhase::VhostEnabled);
-                state.completed_steps = completed_steps.clone();
-                owned_files.files = owned_file_list.clone();
-                write_owned_files(&owned_files_path, &owned_files).map_err(|source| {
-                    Error::FileWriteFailed {
-                        path: OWNED_FILES_PATH.to_string(),
-                        source,
-                    }
-                })?;
-                write_existing_file(paths, ROLLBACK_PATH, &rollback_content(&owned_file_list))?;
-                write_state_file(&state_path, &state).map_err(|source| Error::FileWriteFailed {
-                    path: STATE_PATH.to_string(),
-                    source,
-                })?;
-                write_existing_file(
-                    paths,
-                    REPORT_PATH,
-                    &report_content(&install_plan, &state.phase, &apply_summary, None)?,
-                )?;
-            } else {
-                apply_summary.safety_checks = safety_checks(&install_plan, "packages-installed");
-                apply_summary
-                    .vhost_checks
-                    .extend(deferred_vhost_checks(&install_plan));
-                write_existing_file(
-                    paths,
-                    REPORT_PATH,
-                    &report_content(&install_plan, &state.phase, &apply_summary, None)?,
-                )?;
-            }
-            vhost_transaction.complete()?;
-            state.complete_step("vhost");
-        }
-        Err(err) => {
-            let restored = vhost_transaction.restore().is_ok();
-            if restored {
-                let _ = reload_restored_web_service(probe, &install_plan);
-            }
-            apply_summary.safety_checks = safety_checks(&install_plan, "vhost-failed");
-            apply_summary.vhost_checks = vec![InstallCheck::fail(
-                "webserver-vhost",
-                format!("Web server vhost setup failed: {err}"),
-            )];
-            if install_plan.web_server == "frankenphp"
-                && owned_file_list
-                    .iter()
-                    .any(|path| path == FRANKENPHP_SERVICE_PATH)
-                && !apply_summary
-                    .service_checks
-                    .iter()
-                    .any(|check| check.name == FRANKENPHP_SERVICE_NAME)
-            {
-                apply_summary.service_checks.push(InstallCheck::manual(
-                    FRANKENPHP_SERVICE_NAME,
-                    "FrankenPHP unit was created before vhost setup failed; rollback/reset may disable it.",
-                ));
-            }
-            state.set_phase(InstallerPhase::VhostFailed);
-            state.fail_step("vhost", err.to_string(), restored);
-            state.completed_steps = completed_steps.clone();
-            owned_files.files = owned_file_list.clone();
-            write_owned_files(&owned_files_path, &owned_files).map_err(|source| {
-                Error::FileWriteFailed {
-                    path: OWNED_FILES_PATH.to_string(),
-                    source,
-                }
-            })?;
-            write_existing_file(paths, ROLLBACK_PATH, &rollback_content(&owned_file_list))?;
-            write_state_file(&state_path, &state).map_err(|source| Error::FileWriteFailed {
-                path: STATE_PATH.to_string(),
-                source,
-            })?;
-            write_existing_file(
-                paths,
-                REPORT_PATH,
-                &report_content(
-                    &install_plan,
-                    &state.phase,
-                    &apply_summary,
-                    Some(&err.to_string()),
-                )?,
-            )?;
-            return Err(err);
-        }
-    }
-
     let runtime_transaction = StepTransaction::begin(
         paths,
         &state.install_id,
@@ -832,7 +709,22 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     )?;
     match apply_runtime_phase(probe, paths, &install_plan, &mut owned_file_list) {
         Ok(runtime_checks) => {
+            let frankenphp_service_active = install_plan.web_server == "frankenphp"
+                && runtime_checks
+                    .iter()
+                    .any(|check| check.name == "frankenphp-service" && check.status == "pass");
             apply_summary.runtime_checks.extend(runtime_checks);
+            if frankenphp_service_active
+                && !apply_summary
+                    .service_checks
+                    .iter()
+                    .any(|check| check.name == FRANKENPHP_SERVICE_NAME)
+            {
+                apply_summary.service_checks.push(InstallCheck::pass(
+                    FRANKENPHP_SERVICE_NAME,
+                    format!("FrankenPHP app server is active on {FRANKENPHP_LISTEN}."),
+                ));
+            }
             if let Some(message) = blocking_runtime_failure(&apply_summary.runtime_checks) {
                 let restored = runtime_transaction.restore().is_ok();
                 if restored {
@@ -888,7 +780,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             }
             apply_summary.runtime_checks = vec![InstallCheck::fail(
                 "runtime-config",
-                format!("Runtime configuration failed: {err}"),
+                command_failure_message("Runtime configuration failed", &err),
             )];
             state.fail_step("runtime", err.to_string(), restored);
             state.completed_steps = completed_steps.clone();
@@ -900,6 +792,105 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
                 &install_plan,
                 &apply_summary,
                 Some(&err.to_string()),
+            )?;
+            return Err(err);
+        }
+    }
+
+    let vhost_transaction = StepTransaction::begin(
+        paths,
+        &state.install_id,
+        "vhost",
+        &vhost_transaction_files(&install_plan),
+    )?;
+    state.begin_step("vhost");
+    state.completed_steps = completed_steps.clone();
+    persist_progress(
+        &progress,
+        &mut owned_files,
+        &owned_file_list,
+        &state,
+        &install_plan,
+        &apply_summary,
+        None,
+    )?;
+    match apply_vhost_phase(probe, paths, &install_plan, &mut owned_file_list) {
+        Ok(vhost_checks) => {
+            if !vhost_checks.is_empty() {
+                apply_summary.vhost_checks.extend(vhost_checks);
+                completed_steps.push("vhost-written".to_string());
+                completed_steps.push("vhost-enabled".to_string());
+                completed_steps.push(format!("{}-config-tested", web_service_name(&install_plan)));
+                completed_steps.push(format!("{}-reloaded", web_service_name(&install_plan)));
+                completed_steps.push("http-smoke-passed".to_string());
+                apply_summary.safety_checks = safety_checks(&install_plan, "vhost-enabled");
+                state.set_phase(InstallerPhase::VhostEnabled);
+                state.completed_steps = completed_steps.clone();
+                owned_files.files = owned_file_list.clone();
+                write_owned_files(&owned_files_path, &owned_files).map_err(|source| {
+                    Error::FileWriteFailed {
+                        path: OWNED_FILES_PATH.to_string(),
+                        source,
+                    }
+                })?;
+                write_existing_file(paths, ROLLBACK_PATH, &rollback_content(&owned_file_list))?;
+                write_state_file(&state_path, &state).map_err(|source| Error::FileWriteFailed {
+                    path: STATE_PATH.to_string(),
+                    source,
+                })?;
+                write_existing_file(
+                    paths,
+                    REPORT_PATH,
+                    &report_content(&install_plan, &state.phase, &apply_summary, None)?,
+                )?;
+            } else {
+                apply_summary.safety_checks = safety_checks(&install_plan, "packages-installed");
+                apply_summary
+                    .vhost_checks
+                    .extend(deferred_vhost_checks(&install_plan));
+                write_existing_file(
+                    paths,
+                    REPORT_PATH,
+                    &report_content(&install_plan, &state.phase, &apply_summary, None)?,
+                )?;
+            }
+            vhost_transaction.complete()?;
+            state.complete_step("vhost");
+        }
+        Err(err) => {
+            let restored = vhost_transaction.restore().is_ok();
+            if restored {
+                let _ = reload_restored_web_service(probe, &install_plan);
+            }
+            apply_summary.safety_checks = safety_checks(&install_plan, "vhost-failed");
+            apply_summary.vhost_checks = vec![InstallCheck::fail(
+                "webserver-vhost",
+                command_failure_message("Web server vhost setup failed", &err),
+            )];
+            state.set_phase(InstallerPhase::VhostFailed);
+            state.fail_step("vhost", err.to_string(), restored);
+            state.completed_steps = completed_steps.clone();
+            owned_files.files = owned_file_list.clone();
+            write_owned_files(&owned_files_path, &owned_files).map_err(|source| {
+                Error::FileWriteFailed {
+                    path: OWNED_FILES_PATH.to_string(),
+                    source,
+                }
+            })?;
+            write_existing_file(paths, ROLLBACK_PATH, &rollback_content(&owned_file_list))?;
+            write_state_file(&state_path, &state).map_err(|source| Error::FileWriteFailed {
+                path: STATE_PATH.to_string(),
+                source,
+            })?;
+            write_existing_file(
+                paths,
+                REPORT_PATH,
+                &report_content(
+                    &install_plan,
+                    &state.phase,
+                    &apply_summary,
+                    Some(&err.to_string()),
+                )?,
             )?;
             return Err(err);
         }
@@ -959,7 +950,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             }
             apply_summary.database_checks = vec![InstallCheck::fail(
                 "database-config",
-                format!("Database configuration failed: {err}"),
+                command_failure_message("Database configuration failed", &err),
             )];
             state.fail_step("database", err.to_string(), restored);
             state.completed_steps = completed_steps.clone();
@@ -1230,6 +1221,7 @@ fn build_install_report(
         php_version: install_plan.php_version,
         php_source: install_plan.php_source,
         database_engine: install_plan.database_engine,
+        database_version: install_plan.database_version,
         database_name: install_plan.database_name,
         database_user: install_plan.database_user,
         database_password_policy: install_plan.database_password_policy,
@@ -1292,6 +1284,8 @@ pub(super) fn plan_options_from_report(report: &serde_json::Value) -> Result<pla
         php_version: required_report_string(report, "php_version")?,
         php_source: required_report_string(report, "php_source")?,
         database_engine: required_report_string(report, "database")?,
+        database_version: optional_report_string(report, "database_version")
+            .unwrap_or_else(|| "8.0".to_string()),
         database_name: Some(required_report_string(report, "database_name")?),
         database_user: Some(required_report_string(report, "database_user")?),
         site_user: required_report_string(report, "site_user")?,
@@ -1386,7 +1380,7 @@ fn resume_pre_tls_steps<R: CommandRunner>(
         state.begin_step("packages");
         persist_resume_step(progress, owned_files, owned, state, plan, summary, None)?;
         let package_baseline = summary.preinstall_package_checks.clone();
-        match apply_package_phase_with_baseline(probe, plan, Some(&package_baseline)) {
+        match apply_package_phase_with_baseline(probe, paths, plan, Some(&package_baseline)) {
             Ok(package_summary) => {
                 summary.preinstall_package_checks = package_summary.preinstall_package_checks;
                 summary.package_checks = package_summary.package_checks;
@@ -1412,6 +1406,10 @@ fn resume_pre_tls_steps<R: CommandRunner>(
                 if plan.php_source == g7_system::php::PHP_SOURCE_ONDREJ {
                     mark_step(completed_steps, "php-apt-source-added");
                     mark_step(completed_steps, "apt-updated-after-php-source");
+                }
+                if plan.database_version == "8.4" {
+                    mark_step(completed_steps, "mysql-apt-source-added");
+                    mark_step(completed_steps, "apt-updated-after-mysql-source");
                 }
                 state.set_phase(InstallerPhase::PackagesInstalled);
                 state.complete_step("packages");
@@ -1481,66 +1479,6 @@ fn resume_pre_tls_steps<R: CommandRunner>(
         persist_resume_step(progress, owned_files, owned, state, plan, summary, None)?;
     }
 
-    if !install_step_completed(state, completed_steps, "vhost") {
-        let transaction = StepTransaction::begin(
-            paths,
-            &state.install_id,
-            "vhost",
-            &vhost_transaction_files(plan),
-        )?;
-        state.begin_step("vhost");
-        persist_resume_step(progress, owned_files, owned, state, plan, summary, None)?;
-        match apply_vhost_phase(probe, paths, plan, owned) {
-            Ok(checks) => {
-                summary.vhost_checks.retain(|check| {
-                    matches!(
-                        check.name.as_str(),
-                        "site-user" | "web-root" | "php-ready-probe" | "web-root-permissions"
-                    )
-                });
-                summary.vhost_checks.extend(checks);
-                for step in ["vhost-written", "vhost-enabled", "http-smoke-passed"] {
-                    mark_step(completed_steps, step);
-                }
-                mark_step(
-                    completed_steps,
-                    &format!("{}-config-tested", web_service_name(plan)),
-                );
-                mark_step(
-                    completed_steps,
-                    &format!("{}-reloaded", web_service_name(plan)),
-                );
-                state.set_phase(InstallerPhase::VhostEnabled);
-                transaction.complete()?;
-                state.complete_step("vhost");
-                state.completed_steps = completed_steps.clone();
-            }
-            Err(error) => {
-                let restored = transaction.restore().is_ok();
-                if restored {
-                    let _ = reload_restored_web_service(probe, plan);
-                }
-                summary.vhost_checks = vec![InstallCheck::fail(
-                    "webserver-vhost",
-                    format!("Web server vhost setup failed: {error}"),
-                )];
-                state.set_phase(InstallerPhase::VhostFailed);
-                state.fail_step("vhost", error.to_string(), restored);
-                persist_resume_step(
-                    progress,
-                    owned_files,
-                    owned,
-                    state,
-                    plan,
-                    summary,
-                    Some(&error.to_string()),
-                )?;
-                return Err(error);
-            }
-        }
-        persist_resume_step(progress, owned_files, owned, state, plan, summary, None)?;
-    }
-
     if !install_step_completed(state, completed_steps, "runtime") {
         let transaction = StepTransaction::begin(
             paths,
@@ -1552,10 +1490,25 @@ fn resume_pre_tls_steps<R: CommandRunner>(
         persist_resume_step(progress, owned_files, owned, state, plan, summary, None)?;
         match apply_runtime_phase(probe, paths, plan, owned) {
             Ok(checks) => {
+                let frankenphp_service_active = plan.web_server == "frankenphp"
+                    && checks
+                        .iter()
+                        .any(|check| check.name == "frankenphp-service" && check.status == "pass");
                 summary
                     .runtime_checks
                     .retain(|check| matches!(check.name.as_str(), "swapfile" | "swap-sysctl"));
                 summary.runtime_checks.extend(checks);
+                if frankenphp_service_active
+                    && !summary
+                        .service_checks
+                        .iter()
+                        .any(|check| check.name == FRANKENPHP_SERVICE_NAME)
+                {
+                    summary.service_checks.push(InstallCheck::pass(
+                        FRANKENPHP_SERVICE_NAME,
+                        format!("FrankenPHP app server is active on {FRANKENPHP_LISTEN}."),
+                    ));
+                }
                 if let Some(message) = blocking_runtime_failure(&summary.runtime_checks) {
                     let restored = transaction.restore().is_ok();
                     if restored {
@@ -1599,9 +1552,69 @@ fn resume_pre_tls_steps<R: CommandRunner>(
                 }
                 summary.runtime_checks = vec![InstallCheck::fail(
                     "runtime-config",
-                    format!("Runtime configuration failed: {error}"),
+                    command_failure_message("Runtime configuration failed", &error),
                 )];
                 state.fail_step("runtime", error.to_string(), restored);
+                persist_resume_step(
+                    progress,
+                    owned_files,
+                    owned,
+                    state,
+                    plan,
+                    summary,
+                    Some(&error.to_string()),
+                )?;
+                return Err(error);
+            }
+        }
+        persist_resume_step(progress, owned_files, owned, state, plan, summary, None)?;
+    }
+
+    if !install_step_completed(state, completed_steps, "vhost") {
+        let transaction = StepTransaction::begin(
+            paths,
+            &state.install_id,
+            "vhost",
+            &vhost_transaction_files(plan),
+        )?;
+        state.begin_step("vhost");
+        persist_resume_step(progress, owned_files, owned, state, plan, summary, None)?;
+        match apply_vhost_phase(probe, paths, plan, owned) {
+            Ok(checks) => {
+                summary.vhost_checks.retain(|check| {
+                    matches!(
+                        check.name.as_str(),
+                        "site-user" | "web-root" | "php-ready-probe" | "web-root-permissions"
+                    )
+                });
+                summary.vhost_checks.extend(checks);
+                for step in ["vhost-written", "vhost-enabled", "http-smoke-passed"] {
+                    mark_step(completed_steps, step);
+                }
+                mark_step(
+                    completed_steps,
+                    &format!("{}-config-tested", web_service_name(plan)),
+                );
+                mark_step(
+                    completed_steps,
+                    &format!("{}-reloaded", web_service_name(plan)),
+                );
+                state.set_phase(InstallerPhase::VhostEnabled);
+                transaction.complete()?;
+                state.complete_step("vhost");
+                state.completed_steps = completed_steps.clone();
+            }
+            Err(error) => {
+                let restored = transaction.restore().is_ok();
+                if restored {
+                    let _ = reload_restored_web_service(probe, plan);
+                }
+                summary.vhost_checks = vec![InstallCheck::fail(
+                    "webserver-vhost",
+                    command_failure_message("Web server vhost setup failed", &error),
+                )];
+                state.set_phase(InstallerPhase::VhostFailed);
+                state.fail_step("vhost", error.to_string(), restored);
                 persist_resume_step(
                     progress,
                     owned_files,
@@ -1659,7 +1672,7 @@ fn resume_pre_tls_steps<R: CommandRunner>(
                 }
                 summary.database_checks = vec![InstallCheck::fail(
                     "database-config",
-                    format!("Database configuration failed: {error}"),
+                    command_failure_message("Database configuration failed", &error),
                 )];
                 state.fail_step("database", error.to_string(), restored);
                 persist_resume_step(
@@ -1747,10 +1760,7 @@ fn vhost_transaction_files(plan: &plan::InstallPlan) -> Vec<String> {
             g7_system::nginx::G7_SITE_ENABLED.to_string(),
         ]
     };
-    if plan.web_server == "frankenphp" {
-        files.push(FRANKENPHP_BIN_PATH.to_string());
-        files.push(FRANKENPHP_SERVICE_PATH.to_string());
-    }
+    files.push(ready_probe_path(plan));
     files
 }
 
@@ -1765,10 +1775,17 @@ fn runtime_transaction_files(plan: &plan::InstallPlan) -> Vec<String> {
     } else {
         files.extend([
             NGINX_MAIN_CONFIG_PATH.to_string(),
+            "/etc/nginx/conf.d/g7-runtime-tuning.conf".to_string(),
             g7_system::nginx::G7_SITE_AVAILABLE.to_string(),
         ]);
     }
-    if plan.web_server != "frankenphp" {
+    if plan.web_server == "frankenphp" {
+        files.extend([
+            FRANKENPHP_BIN_PATH.to_string(),
+            FRANKENPHP_SERVICE_PATH.to_string(),
+            format!("/etc/systemd/system/multi-user.target.wants/{FRANKENPHP_SERVICE_NAME}"),
+        ]);
+    } else {
         files.push(php_pool_path(plan));
     }
     files
@@ -1854,7 +1871,21 @@ fn reload_restored_runtime<R: CommandRunner>(
     probe: &SystemProbe<R>,
     plan: &plan::InstallPlan,
 ) -> Result<()> {
-    if plan.web_server != "frankenphp" {
+    if plan.web_server == "frankenphp" {
+        let _ = probe.disable_service_now(FRANKENPHP_SERVICE_NAME);
+        let output = probe.systemd_daemon_reload().map_err(|error| {
+            command_error(
+                "frankenphp-restore-daemon-reload",
+                "systemctl daemon-reload",
+                error,
+            )
+        })?;
+        require_success(
+            "frankenphp-restore-daemon-reload",
+            "systemctl daemon-reload",
+            output,
+        )?;
+    } else {
         let service = format!("php{}-fpm", plan.php_version);
         let output = probe.reload_service(&service).map_err(|error| {
             command_error(

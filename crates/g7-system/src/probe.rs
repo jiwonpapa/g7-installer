@@ -8,20 +8,23 @@ use crate::account::{
 };
 use crate::apache::{config_test as apache_config_test, enable_module as apache_enable_module};
 use crate::app::{artisan, composer_install, composer_require, npm_install, npm_run_build};
-use crate::apt::{apt_add_repository, apt_candidate_available, apt_install, apt_purge, apt_update};
+use crate::apt::{
+    apt_add_repository, apt_candidate_available, apt_install, apt_install_mysql_repo_config,
+    apt_purge, apt_update,
+};
 use crate::archive::{
     copy_dir_contents, copy_file, download_file, fetch_text, git_clone, git_fsck_full,
-    git_ls_files_error_unmatch, git_rev_parse_head, git_tracked_files_status, test_dir, test_file,
-    unzip_archive, unzip_test,
+    git_ls_files_error_unmatch, git_rev_parse_head, git_tracked_files_status, sha256_file,
+    test_dir, test_file, unzip_archive, unzip_test,
 };
 use crate::certbot::{certonly_webroot, delete_cert, reconfigure_webroot, renew_dry_run};
 use crate::command::CommandSpec;
 use crate::command::{CommandError, CommandOutput, CommandRunner, RealCommandRunner};
 use crate::database::{
     DatabaseEngine, apply_sql, candidate_config_test as database_candidate_config_test,
-    config_test as database_config_test,
+    config_test as database_config_test, server_version as database_server_version,
 };
-use crate::mail::{postconf_set, postfix_preseed};
+use crate::mail::{postconf_set, postfix_check, postfix_preseed};
 use crate::network::{
     dns_ipv4_records, dns_ipv6_records, http_host_path_smoke, http_host_smoke, public_ipv4,
     public_ipv6, tcp_connect,
@@ -116,6 +119,15 @@ impl<R: CommandRunner> SystemProbe<R> {
         apt_install(&self.runner, packages).map_err(SystemProbeError::Command)
     }
 
+    pub fn apt_install_mysql_repo_config(
+        &self,
+        package_path: &str,
+        server_component: &str,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        apt_install_mysql_repo_config(&self.runner, package_path, server_component)
+            .map_err(SystemProbeError::Command)
+    }
+
     pub fn apt_add_repository(&self, repository: &str) -> Result<CommandOutput, SystemProbeError> {
         apt_add_repository(&self.runner, repository).map_err(SystemProbeError::Command)
     }
@@ -134,6 +146,10 @@ impl<R: CommandRunner> SystemProbe<R> {
 
     pub fn postconf_set(&self, key: &str, value: &str) -> Result<CommandOutput, SystemProbeError> {
         postconf_set(&self.runner, key, value).map_err(SystemProbeError::Command)
+    }
+
+    pub fn postfix_check(&self) -> Result<CommandOutput, SystemProbeError> {
+        postfix_check(&self.runner).map_err(SystemProbeError::Command)
     }
 
     pub fn tcp_port_status(&self, port: u16) -> Result<PortStatus, SystemProbeError> {
@@ -222,6 +238,13 @@ impl<R: CommandRunner> SystemProbe<R> {
             .map_err(SystemProbeError::Command)
     }
 
+    pub fn database_server_version(
+        &self,
+        engine: DatabaseEngine,
+    ) -> Result<CommandOutput, SystemProbeError> {
+        database_server_version(&self.runner, engine).map_err(SystemProbeError::Command)
+    }
+
     pub fn redis_config_set(
         &self,
         key: &str,
@@ -305,6 +328,10 @@ impl<R: CommandRunner> SystemProbe<R> {
         output_path: &str,
     ) -> Result<CommandOutput, SystemProbeError> {
         download_file(&self.runner, url, output_path).map_err(SystemProbeError::Command)
+    }
+
+    pub fn sha256_file(&self, path: &str) -> Result<CommandOutput, SystemProbeError> {
+        sha256_file(&self.runner, path).map_err(SystemProbeError::Command)
     }
 
     pub fn fetch_text(&self, url: &str) -> Result<CommandOutput, SystemProbeError> {

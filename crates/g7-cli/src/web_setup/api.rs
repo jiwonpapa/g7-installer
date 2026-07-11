@@ -485,7 +485,6 @@ pub(super) async fn api_install_prepare(
     emit_progress(&state, "install", 5, "install progress: starting preflight");
     emit_stage(&state, "preflight", "진행", "preflight started");
     let domain = request.domain.clone();
-    let database_version = normalize_database_version(&request.database_version);
     let options = options_from_request(request);
     emit_progress(
         &state,
@@ -541,20 +540,20 @@ pub(super) async fn api_install_prepare(
                 42,
                 "install progress: site account and web root configured",
             );
+            emit_stage(&state, "runtime", "성공", "PHP runtime configured");
+            emit_progress(
+                &state,
+                "install",
+                54,
+                "install progress: runtime configured",
+            );
             emit_stage(
                 &state,
                 "vhost",
                 "성공",
                 "web server vhost and HTTP smoke verified",
             );
-            emit_progress(&state, "install", 54, "install progress: vhost verified");
-            emit_stage(&state, "runtime", "성공", "PHP runtime configured");
-            emit_progress(
-                &state,
-                "install",
-                66,
-                "install progress: runtime configured",
-            );
+            emit_progress(&state, "install", 66, "install progress: vhost verified");
             emit_stage(&state, "database", "성공", "database configured");
             emit_progress(
                 &state,
@@ -573,7 +572,7 @@ pub(super) async fn api_install_prepare(
             emit_stage(&state, "report", "성공", "setup guide and report prepared");
             emit_progress(&state, "install", 100, "install progress: report ready");
             emit_log(&state, "서버 설치 완료");
-            Ok(Json(install_to_api(report, database_version)))
+            Ok(Json(install_to_api(report)))
         }
         Err(error) => {
             let details = failed_report_details();
@@ -630,7 +629,7 @@ pub(super) async fn api_resume(
         Ok(report) => {
             emit_progress(&state, "resume", 100, "resume progress: completed");
             emit_log(&state, "설치 이어서 진행 완료");
-            Ok(Json(install_to_api(report, "apt-default".to_string())))
+            Ok(Json(install_to_api(report)))
         }
         Err(error) => {
             emit_progress(&state, "resume", 100, "resume progress: failed");
@@ -894,6 +893,7 @@ pub(super) fn options_from_request(request: SetupRequest) -> plan::PlanOptions {
         request.php_version,
         request.php_source,
         request.database,
+        request.database_version,
         request
             .database_name
             .filter(|value| !value.trim().is_empty()),
@@ -952,6 +952,16 @@ pub(super) fn validate_template_app_request(
             ApiError::bad_request("공개 설치기는 Nginx 또는 Apache 웹서버만 지원합니다.")
                 .with_hint("웹서버를 Nginx 또는 Apache로 바꾸세요."),
         );
+    }
+
+    if request.database != "mysql" {
+        return Err(ApiError::bad_request("공개 설치기는 MySQL만 지원합니다.")
+            .with_hint("데이터베이스를 MySQL로 선택하세요."));
+    }
+
+    if !matches!(request.database_version.as_str(), "8.0" | "8.4") {
+        return Err(ApiError::bad_request("지원하지 않는 MySQL 버전입니다.")
+            .with_hint("MySQL 8.0 또는 MySQL 8.4 LTS를 선택하세요."));
     }
 
     if app_package != "gnuboard7" {

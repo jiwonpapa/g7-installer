@@ -10,8 +10,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::installer_paths::{
-    BACKUP_DIR, CONFIG_PATH, LETSENCRYPT_LIVE_DIR, NGINX_MAIN_BACKUP_PATH, NGINX_MAIN_CONFIG_PATH,
-    REPORT_PATH,
+    BACKUP_DIR, CONFIG_PATH, LETSENCRYPT_LIVE_DIR, MYSQL_CONFIG_CANDIDATE_PATH,
+    NGINX_MAIN_BACKUP_PATH, NGINX_MAIN_CONFIG_PATH, REPORT_PATH,
 };
 use crate::resource_policy::{preserve_package_on_reset, preserve_service_on_reset};
 use crate::{Error, Result};
@@ -1006,6 +1006,7 @@ fn is_safe_site_root(path: &str) -> bool {
 fn is_safe_runtime_config(path: &str) -> bool {
     if path == "/etc/nginx/conf.d/g7-runtime-tuning.conf"
         || path == "/etc/mysql/conf.d/g7-installer.cnf"
+        || path == MYSQL_CONFIG_CANDIDATE_PATH
         || path == "/etc/mysql/mariadb.conf.d/z-g7-installer.cnf"
         || path == "/etc/apache2/conf-available/g7-runtime.conf"
         || path == "/etc/apache2/conf-enabled/g7-runtime.conf"
@@ -1119,6 +1120,7 @@ mod tests {
         ResetPaths, delete_site_user_account, reset_database, run_with_probe_and_paths,
         validate_reset_path,
     };
+    use crate::installer_paths::MYSQL_CONFIG_CANDIDATE_PATH;
     use g7_state::owned_files::{OWNED_FILES_PATH, OwnedFiles, write_owned_files};
     use g7_system::SystemProbe;
     use g7_system::command::{CommandError, CommandOutput, FakeCommandRunner};
@@ -1222,6 +1224,15 @@ mod tests {
             .expect_err("operator PHP config must stay outside reset allowlist");
         validate_reset_path("/etc/php/8.5/apache2/conf.d/99-g7-installer.ini")
             .expect_err("unsupported PHP SAPI must stay outside reset allowlist");
+    }
+
+    #[test]
+    fn reset_allows_only_the_installer_mysql_candidate() {
+        validate_reset_path(MYSQL_CONFIG_CANDIDATE_PATH)
+            .expect("installer MySQL validation candidate should be resettable");
+
+        validate_reset_path("/etc/mysql/operator.cnf")
+            .expect_err("operator MySQL config must stay outside reset allowlist");
     }
 
     #[test]

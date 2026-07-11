@@ -25,6 +25,10 @@ pub(super) fn apply_runtime_phase<R: CommandRunner>(
         ),
     ));
 
+    if plan.web_server == "frankenphp" {
+        checks.extend(install_frankenphp_app_server(probe, paths, plan, owned)?);
+    }
+
     if plan.web_server != "frankenphp" {
         checks.push(validate_php_runtime_candidates(
             probe,
@@ -76,10 +80,11 @@ pub(super) fn apply_runtime_phase<R: CommandRunner>(
     }
 
     if plan.web_server == "frankenphp" {
-        write_existing_file(
+        write_owned_file(
             paths,
             g7_system::nginx::G7_SITE_AVAILABLE,
             &nginx_frankenphp_vhost_content(plan),
+            owned,
         )?;
         checks.push(InstallCheck::pass(
             "frankenphp-runtime",
@@ -117,7 +122,7 @@ pub(super) fn apply_runtime_phase<R: CommandRunner>(
     }
 
     if plan.web_server == "nginx" {
-        write_existing_file(
+        write_owned_file(
             paths,
             g7_system::nginx::G7_SITE_AVAILABLE,
             &nginx_vhost_content_with_socket_and_sizing(
@@ -125,6 +130,7 @@ pub(super) fn apply_runtime_phase<R: CommandRunner>(
                 &php_fpm_site_socket(plan),
                 Some(&sizing),
             ),
+            owned,
         )?;
         checks.push(InstallCheck::pass(
             "nginx-fastcgi-runtime",
@@ -145,10 +151,11 @@ pub(super) fn apply_runtime_phase<R: CommandRunner>(
             ),
         });
     } else if plan.web_server == "apache" {
-        write_existing_file(
+        write_owned_file(
             paths,
             g7_system::apache::G7_SITE_AVAILABLE,
             &apache_vhost_content_with_socket(plan, &php_fpm_site_socket(plan)),
+            owned,
         )?;
         checks.push(InstallCheck::pass(
             "apache-proxy-fcgi-runtime",
@@ -993,6 +1000,17 @@ pub(super) fn apply_swap_configuration<R: CommandRunner>(
         ));
         return Ok(checks);
     }
+
+    let swap_unit = paths.resolve(SWAP_UNIT_PATH);
+    let verify_command = format!("systemd-analyze verify {}", swap_unit.display());
+    let output = probe
+        .systemd_verify_units(&[swap_unit])
+        .map_err(|error| command_error("swap-unit-verify", &verify_command, error))?;
+    require_success("swap-unit-verify", &verify_command, output)?;
+    checks.push(InstallCheck::pass(
+        "swap-unit-verify",
+        format!("{SWAP_UNIT_PATH} 문법을 활성화 전에 검증했습니다."),
+    ));
 
     let output = probe
         .runner()

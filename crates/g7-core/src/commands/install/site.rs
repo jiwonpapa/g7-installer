@@ -540,3 +540,22 @@ pub(super) fn remove_validation_candidates(
     }
     Ok(())
 }
+
+pub(super) fn remove_owned_file(
+    paths: &InstallPaths,
+    path: &str,
+    owned: &mut Vec<String>,
+) -> Result<()> {
+    match fs::remove_file(paths.resolve(path)) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(Error::FileRemoveFailed {
+                path: path.to_string(),
+                source,
+            });
+        }
+    }
+    owned.retain(|owned_path| owned_path != path);
+    Ok(())
+}

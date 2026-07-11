@@ -12,6 +12,7 @@ pub struct InstallPlan {
     pub php_version: String,
     pub php_source: String,
     pub database_engine: String,
+    pub database_version: String,
     pub site_user: String,
     pub web_root_mode: String,
     pub web_root: String,

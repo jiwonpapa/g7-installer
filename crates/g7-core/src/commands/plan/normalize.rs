@@ -16,11 +16,11 @@ pub(super) fn web_runtime_model(web_server: &str) -> &'static str {
     }
 }
 
-pub(super) fn php_endpoint(web_server: &str, php_version: &str) -> String {
+pub(super) fn php_endpoint(web_server: &str, php_version: &str, site_user: &str) -> String {
     if web_server == "frankenphp" {
         "FrankenPHP localhost app server 127.0.0.1:7080".to_string()
     } else {
-        format!("/run/php/php{php_version}-fpm.sock")
+        format!("/run/php/php{php_version}-fpm-{site_user}.sock")
     }
 }
 

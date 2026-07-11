@@ -8,6 +8,7 @@ pub const ETC_DIR: &str = "/etc/g7-installer";
 pub const LIB_DIR: &str = "/var/lib/g7-installer";
 pub const TRANSACTION_DIR: &str = "/var/lib/g7-installer/transactions";
 pub const CANDIDATE_DIR: &str = "/var/lib/g7-installer/candidates";
+pub const MYSQL_CONFIG_CANDIDATE_PATH: &str = "/etc/mysql/g7-installer-candidate.cnf";
 pub const LOG_DIR: &str = "/var/log/g7-installer";
 pub const BACKUP_DIR: &str = "/var/backups/g7-installer";
 pub const LOG_PATH: &str = "/var/log/g7-installer/install.log";

@@ -63,9 +63,12 @@ enum Command {
         /// PHP apt source: auto, ubuntu, or ondrej.
         #[arg(long, default_value_t = plan::DEFAULT_PHP_SOURCE.to_string())]
         php_source: String,
-        /// Database engine: mysql or mariadb.
+        /// Database engine. Public installs support mysql only.
         #[arg(long, default_value_t = plan::DEFAULT_DATABASE_ENGINE.to_string())]
         database: String,
+        /// MySQL release series: 8.0 or 8.4.
+        #[arg(long, default_value_t = plan::DEFAULT_DATABASE_VERSION.to_string())]
+        database_version: String,
         /// Linux account that owns the G7 site files.
         #[arg(long, default_value_t = plan::DEFAULT_SITE_USER.to_string())]
         site_user: String,
@@ -138,9 +141,12 @@ enum Command {
         /// PHP apt source: auto, ubuntu, or ondrej.
         #[arg(long, default_value_t = plan::DEFAULT_PHP_SOURCE.to_string())]
         php_source: String,
-        /// Database engine: mysql or mariadb.
+        /// Database engine. Public installs support mysql only.
         #[arg(long, default_value_t = plan::DEFAULT_DATABASE_ENGINE.to_string())]
         database: String,
+        /// MySQL release series: 8.0 or 8.4.
+        #[arg(long, default_value_t = plan::DEFAULT_DATABASE_VERSION.to_string())]
+        database_version: String,
         /// Linux account that owns the G7 site files.
         #[arg(long, default_value_t = plan::DEFAULT_SITE_USER.to_string())]
         site_user: String,
@@ -251,6 +257,7 @@ async fn main() -> Result<()> {
             php_version,
             php_source,
             database,
+            database_version,
             site_user,
             web_root_mode,
             web_root,
@@ -278,6 +285,7 @@ async fn main() -> Result<()> {
                     php_version,
                     php_source,
                     database,
+                    database_version,
                     None,
                     None,
                     None,
@@ -311,6 +319,7 @@ async fn main() -> Result<()> {
             php_version,
             php_source,
             database,
+            database_version,
             site_user,
             web_root_mode,
             web_root,
@@ -339,6 +348,7 @@ async fn main() -> Result<()> {
                         php_version,
                         php_source,
                         database,
+                        database_version,
                         None,
                         None,
                         None,
@@ -395,6 +405,7 @@ pub(crate) fn plan_options(
     php_version: String,
     php_source: String,
     database: String,
+    database_version: String,
     database_name: Option<String>,
     database_user: Option<String>,
     database_password: Option<String>,
@@ -424,6 +435,7 @@ pub(crate) fn plan_options(
         php_version,
         php_source,
         database_engine: database,
+        database_version,
         database_name,
         database_user,
         database_password,
@@ -479,7 +491,10 @@ pub(crate) fn format_plan(plan: &plan::InstallPlan) -> String {
     output.push_str(&format!("web_server: {}\n", plan.web_server));
     output.push_str(&format!("php_version: {}\n", plan.php_version));
     output.push_str(&format!("php_source: {}\n", plan.php_source));
-    output.push_str(&format!("database: {}\n", plan.database_engine));
+    output.push_str(&format!(
+        "database: {} {}\n",
+        plan.database_engine, plan.database_version
+    ));
     output.push_str(&format!("site_user: {}\n", plan.site_user));
     output.push_str(&format!("web_root_mode: {}\n", plan.web_root_mode));
     output.push_str(&format!("web_root: {}\n", plan.web_root));
@@ -618,7 +633,10 @@ fn print_install(report: install::InstallReport) {
     println!("web_server: {}", report.web_server);
     println!("php_version: {}", report.php_version);
     println!("php_source: {}", report.php_source);
-    println!("database: {}", report.database_engine);
+    println!(
+        "database: {} {}",
+        report.database_engine, report.database_version
+    );
     println!("site_user: {}", report.site_user);
     println!("web_root_mode: {}", report.web_root_mode);
     println!("web_root: {}", report.web_root);

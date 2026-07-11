@@ -7,13 +7,18 @@ pub(super) fn apply_vhost_phase<R: CommandRunner>(
     owned: &mut Vec<String>,
 ) -> Result<Vec<InstallCheck>> {
     let mut checks = Vec::new();
+    let sizing = detected_memory_sizing(probe);
 
     match plan.web_server.as_str() {
         "nginx" => {
             write_owned_file(
                 paths,
                 g7_system::nginx::G7_SITE_AVAILABLE,
-                &nginx_vhost_content(plan),
+                &nginx_vhost_content_with_socket_and_sizing(
+                    plan,
+                    &php_fpm_site_socket(plan),
+                    Some(&sizing),
+                ),
                 owned,
             )?;
             create_owned_symlink(
@@ -54,7 +59,7 @@ pub(super) fn apply_vhost_phase<R: CommandRunner>(
             write_owned_file(
                 paths,
                 g7_system::apache::G7_SITE_AVAILABLE,
-                &apache_vhost_content(plan),
+                &apache_vhost_content_with_socket(plan, &php_fpm_site_socket(plan)),
                 owned,
             )?;
             create_owned_symlink(
@@ -91,7 +96,6 @@ pub(super) fn apply_vhost_phase<R: CommandRunner>(
             ));
         }
         "frankenphp" => {
-            checks.extend(install_frankenphp_app_server(probe, paths, plan, owned)?);
             write_owned_file(
                 paths,
                 g7_system::nginx::G7_SITE_AVAILABLE,
@@ -154,6 +158,13 @@ pub(super) fn apply_vhost_phase<R: CommandRunner>(
             ));
         }
     }
+
+    let ready_path = ready_probe_path(plan);
+    remove_owned_file(paths, &ready_path, owned)?;
+    checks.push(InstallCheck::pass(
+        "http-smoke-cleanup",
+        format!("HTTP smoke 완료 후 임시 확인 파일 `{ready_path}`을 삭제했습니다."),
+    ));
 
     Ok(checks)
 }
@@ -358,11 +369,6 @@ pub(super) fn enable_apache_modules<R: CommandRunner>(
     Ok(())
 }
 
-pub(super) fn apache_vhost_content(plan: &plan::InstallPlan) -> String {
-    let php_socket = format!("/run/php/php{}-fpm.sock", plan.php_version);
-    apache_vhost_content_with_socket(plan, &php_socket)
-}
-
 pub(super) fn apache_vhost_content_with_socket(
     plan: &plan::InstallPlan,
     php_socket: &str,
@@ -376,11 +382,6 @@ pub(super) fn apache_vhost_content_with_socket(
     )
 }
 
-pub(super) fn nginx_vhost_content(plan: &plan::InstallPlan) -> String {
-    let php_socket = format!("/run/php/php{}-fpm.sock", plan.php_version);
-    nginx_vhost_content_with_socket(plan, &php_socket)
-}
-
 pub(super) fn nginx_frankenphp_vhost_content(plan: &plan::InstallPlan) -> String {
     let app_hosts = nginx_app_hosts(plan);
     let redirect_blocks = nginx_redirect_blocks(plan);
@@ -391,13 +392,6 @@ pub(super) fn nginx_frankenphp_vhost_content(plan: &plan::InstallPlan) -> String
         "{redirect_blocks}server {{\n    listen 80;\n    listen [::]:80;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n{certbot_http01_location}{proxy}\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
         root = plan.app_document_root,
     )
-}
-
-pub(super) fn nginx_vhost_content_with_socket(
-    plan: &plan::InstallPlan,
-    php_socket: &str,
-) -> String {
-    nginx_vhost_content_with_socket_and_sizing(plan, php_socket, None)
 }
 
 pub(super) fn nginx_vhost_content_with_socket_and_sizing(

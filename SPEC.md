@@ -43,7 +43,7 @@ OS: Ubuntu 24.04 LTS
 권한: root 또는 sudo
 웹서버: Nginx 기본, Apache 선택 옵션
 PHP: PHP-FPM 8.5 기본, 8.3 선택 옵션
-DB: MySQL 기본, MariaDB 선택 옵션
+DB: MySQL 전용, 8.0(Ubuntu 기본 APT) 또는 8.4 LTS(Oracle 공식 APT)
 공개 앱 프로파일: gnuboard7 단일 지원
 HTTPS: Certbot Let's Encrypt
 Cache/Queue: Redis 기본 지원
@@ -105,7 +105,8 @@ sudo g7inst reset --yes
 --web-server nginx|apache
 --app gnuboard7
 --php-version 8.3|8.5
---database mariadb|mysql
+--database mysql
+--database-version 8.0|8.4
 --site-user g7
 --web-root-mode public-html|www|system|custom
 --web-root /absolute/path
@@ -155,26 +156,24 @@ sudo g7inst reset --yes
 9. 설치 계획 출력
 10. rollback/report/설정보존 준비
 11. 사용자 확인
-12. apt repository 업데이트
-13. 선택 웹서버 설치
-14. PHP-FPM 및 필수 PHP 확장 설치
-15. Redis 설치 및 localhost-only hardening
-16. 선택 DB 설치
-17. DB 및 DB 사용자 생성, 앱 DB 비밀번호 적용
-18. 선택 앱 소스 다운로드
-19. 그누보드7 최신 안정 Release 검증 및 공식 `/install` 인계
-20. 선택한 웹루트(`/home/<site-user>/public_html`, `/home/<site-user>/www`, `/var/www/<domain>`, custom)에 배치
-21. `.env` 생성 및 앱 런타임 설정
-22. 메일 발송 설정 반영
-23. 파일 권한 설정
-24. 선택 웹서버 vhost 생성
-25. DNS/IP 조건이 맞으면 Certbot HTTPS 발급 또는 기존 인증서 재사용
-26. Certbot 자동갱신 timer 확인
-27. queue worker, scheduler, reverb systemd unit 파일 준비
-28. 서비스 재시작
-29. HTTP/HTTPS/mail/Redis/DB localhost bind smoke test
-30. 설치 결과와 설정 안내서 출력
-31. 웹 UI 7단계 세부 설정 액션 패널에서 후속 설정 확인
+12. Ubuntu/PHP/MySQL apt repository 업데이트 및 모든 패키지 후보 선검사
+13. 웹서버, PHP-FPM/확장, Redis, MySQL, Certbot 등 선택 패키지 비대화형 설치
+14. 패키지·서비스·포트·DNS·메일 연결 준비 상태 검증
+15. 사이트 Linux 계정과 선택 웹루트(`/home/<site-user>/public_html`, `/home/<site-user>/www`, `/var/www/<domain>`, custom) 생성
+16. PHP ini/FPM pool 후보 문법 검사
+17. 사이트 전용 PHP-FPM pool/socket, Nginx worker 또는 Apache event MPM, Redis localhost 설정 적용·재시작·실효값 검증
+18. 최종 vhost를 `sites-available`에 작성하고 `sites-enabled`로 활성화
+19. 웹서버 문법 검사·reload 후 사이트 전용 PHP socket을 통한 HTTP smoke test
+20. MySQL 후보 설정 문법 검사 후 `/etc/mysql/conf.d/g7-installer.cnf` 적용
+21. MySQL 재시작·실효값·선택 버전 검증 후 DB와 앱 DB 사용자 생성
+22. DNS/IP와 HTTP-01 경로가 맞으면 Certbot HTTPS 발급 또는 기존 인증서 재사용
+23. HTTPS vhost 문법 검사·reload와 Certbot 자동갱신 timer/dry-run 확인
+24. 그누보드7 최신 안정 Release clone, Git 무결성·필수 파일 검증
+25. `.env` 생성, 파일 권한 설정 및 공식 브라우저 `/install` 인계
+26. 내부 실험 프로필에서만 queue worker, scheduler, reverb systemd unit 준비
+27. HTTP/HTTPS/Redis/DB/app smoke 결과 수집
+28. 설치 결과 JSON과 표준 설정 경로·검증 명령을 포함한 Markdown 안내서 출력
+29. 웹 UI 7단계 세부 설정 액션 패널에서 후속 설정 확인
 
 ## 6. fresh server 검사
 
@@ -185,9 +184,9 @@ sudo g7inst reset --yes
 - 80 또는 443 포트가 기존 프로세스에 의해 점유됨
 - 선택한 웹루트가 비어 있지 않거나 선택 계정 소유가 아님
 - legacy `/var/www/g7` 테스트 경로가 installer 소유권 없이 존재
-- `/etc/g7-installer/owned-files.json` 없이 G7 관련 파일이 존재
+- `/var/lib/g7-installer/owned-files.json` 없이 G7 관련 파일이 존재
 - 기존 Certbot 인증서가 동일 도메인으로 존재하지만 installer 소유가 아님
-- `/etc/g7-installer/state.json` 기준으로 다른 설치가 진행 중
+- `/var/lib/g7-installer/state.json` 기준으로 다른 설치가 진행 중
 - 도메인 A/AAAA 레코드가 VPS 공인 IP와 불일치
 - 요청한 www host가 VPS 공인 IP와 불일치
 - SMTP outbound 포트가 차단됨

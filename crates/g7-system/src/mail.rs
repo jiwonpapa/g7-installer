@@ -29,9 +29,13 @@ pub fn postconf_set<R: CommandRunner>(
     )
 }
 
+pub fn postfix_check<R: CommandRunner>(runner: &R) -> Result<CommandOutput, CommandError> {
+    runner.run(&CommandSpec::new("postfix").arg("check"))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{postconf_set, postfix_preseed};
+    use super::{postconf_set, postfix_check, postfix_preseed};
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
 
@@ -69,6 +73,19 @@ mod tests {
             recorded[0].args[1],
             OsString::from("inet_interfaces = loopback-only")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn postfix_check_is_shell_free() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success(""));
+
+        postfix_check(&runner)?;
+        let recorded = runner.recorded();
+
+        assert_eq!(recorded[0].program, OsString::from("postfix"));
+        assert_eq!(recorded[0].args, vec![OsString::from("check")]);
         Ok(())
     }
 }

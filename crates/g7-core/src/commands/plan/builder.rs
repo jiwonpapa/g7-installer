@@ -8,6 +8,7 @@ pub struct PlanOptions {
     pub php_version: String,
     pub php_source: String,
     pub database_engine: String,
+    pub database_version: String,
     pub database_name: Option<String>,
     pub database_user: Option<String>,
     pub database_password: Option<String>,
@@ -40,6 +41,7 @@ impl Default for PlanOptions {
             php_version: DEFAULT_PHP_VERSION.to_string(),
             php_source: DEFAULT_PHP_SOURCE.to_string(),
             database_engine: DEFAULT_DATABASE_ENGINE.to_string(),
+            database_version: DEFAULT_DATABASE_VERSION.to_string(),
             database_name: None,
             database_user: None,
             database_password: None,
@@ -89,6 +91,11 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         "database",
         options.database_engine,
         &SUPPORTED_DATABASE_ENGINES,
+    )?;
+    let database_version = normalize_supported_option(
+        "database-version",
+        options.database_version,
+        &SUPPORTED_DATABASE_VERSIONS,
     )?;
     let php_source = normalize_php_source(&php_version, options.php_source)?;
     let site_user = normalize_site_user(options.site_user)?;
@@ -163,6 +170,7 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         php_version: &php_version,
         php_source: &php_source,
         database_engine: &database_engine,
+        database_version: &database_version,
         redis_mode: &redis_mode,
         mail_mode: &mail_mode,
         local_test: options.local_test,
@@ -209,6 +217,7 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         php_version: &php_version,
         php_source: &php_source,
         database_engine: &database_engine,
+        database_version: &database_version,
         database_name: &database_name,
         database_user: &database_user,
         database_password_policy,
@@ -235,6 +244,7 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         php_version: php_version.clone(),
         php_source,
         database_engine,
+        database_version,
         site_user,
         web_root_mode,
         web_root,

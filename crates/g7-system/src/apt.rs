@@ -33,6 +33,26 @@ pub fn apt_install<R: CommandRunner>(
     )
 }
 
+/// Installs Oracle's MySQL APT configuration package without interactive prompts.
+pub fn apt_install_mysql_repo_config<R: CommandRunner>(
+    runner: &R,
+    package_path: &str,
+    server_component: &str,
+) -> Result<CommandOutput, CommandError> {
+    runner.run(
+        &apt_env()
+            .arg(format!("MYSQL_SERVER_VERSION={server_component}"))
+            .arg("MYSQL_CONNECTORS=Disabled")
+            .arg(APT_GET)
+            .arg("install")
+            .arg("-y")
+            .arg("--no-install-recommends")
+            .arg("-o")
+            .arg("Dpkg::Use-Pty=0")
+            .arg(package_path),
+    )
+}
+
 pub fn apt_purge<R: CommandRunner>(
     runner: &R,
     packages: &[String],
@@ -86,7 +106,10 @@ fn apt_env() -> CommandSpec {
 
 #[cfg(test)]
 mod tests {
-    use super::{apt_add_repository, apt_candidate_available, apt_install, apt_purge, apt_update};
+    use super::{
+        apt_add_repository, apt_candidate_available, apt_install, apt_install_mysql_repo_config,
+        apt_purge, apt_update,
+    };
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
 
@@ -110,6 +133,34 @@ mod tests {
         assert!(recorded[0].args.contains(&OsString::from("install")));
         assert!(recorded[0].args.contains(&OsString::from("nginx")));
         assert!(recorded[0].args.contains(&OsString::from("php8.3-fpm")));
+        Ok(())
+    }
+
+    #[test]
+    fn mysql_repo_config_install_selects_lts_noninteractively()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success(""));
+
+        apt_install_mysql_repo_config(&runner, "/tmp/mysql-apt-config.deb", "mysql-8.4-lts")?;
+        let recorded = runner.recorded();
+
+        assert_eq!(recorded[0].program, OsString::from("env"));
+        assert!(
+            recorded[0]
+                .args
+                .contains(&OsString::from("MYSQL_SERVER_VERSION=mysql-8.4-lts"))
+        );
+        assert!(
+            recorded[0]
+                .args
+                .contains(&OsString::from("MYSQL_CONNECTORS=Disabled"))
+        );
+        assert!(
+            recorded[0]
+                .args
+                .contains(&OsString::from("/tmp/mysql-apt-config.deb"))
+        );
         Ok(())
     }
 

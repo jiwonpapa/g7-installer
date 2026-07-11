@@ -4,6 +4,31 @@
 
 ## Unreleased
 
+## 0.2.45 - 2026-07-11
+
+### Fixed
+
+- MySQL AppArmor가 `/var/lib/g7-installer/candidates/database.cnf` 읽기를 차단해 DB 후보 검증이 항상 실패하던 문제 수정
+- DB 단계 실패 리포트에 명령 stderr가 빠져 실제 원인을 확인할 수 없던 문제 수정
+- PHP-FPM 사이트 socket 생성 전에 vhost HTTP smoke를 실행해 Nginx/Apache 설치가 실패할 수 있던 단계 순서 수정
+- 세부 설정 화면의 PHP-FPM pool/socket 안내 경로가 실제 생성 경로와 다르던 문제 수정
+- 설치 완료 뒤 공개 문서 루트에 임시 `g7inst-ready.php` 확인 파일이 남던 문제 수정
+- 이전 브라우저 세션의 폐기된 MariaDB/`apt-default` 값이 새 설치 옵션에 복원되던 문제 수정
+
+### Added
+
+- MySQL 8.0(Ubuntu 기본 APT)과 MySQL 8.4 LTS(Oracle 공식 APT) 선택 및 실제 설치 계열 검증
+- MySQL APT 설정 패키지 고정 SHA-256 검증과 비대화형 8.4 LTS 저장소 선택
+- 공개 문서와 브라우저 E2E에 MySQL 전용 범위 및 계정 입력 자동완성 차단 회귀 검사
+- Postfix 재시작 전 `postfix check`, 실제 서버의 swap unit 활성화 전 `systemd-analyze verify` 검사
+
+### Changed
+
+- MariaDB 선택 제거
+- 자동 문제 해결로 오해되던 문구를 실패 내용 확인, 파일 변경 복원, 원인 수정 후 단계 재실행으로 교정
+- 설치 순서를 사이트 계정, PHP 런타임, vhost/HTTP, DB 순으로 교정하고 최종 안내서에 표준 설정·로그·검증 명령 경로를 보강
+- 활성 서비스 설정은 Ubuntu 표준 `/etc` 경로에 두고 설치기 상태·로그·백업 경로와 구분해 README와 최종 안내서에 명시
+
 ## 0.2.44 - 2026-07-11
 
 ### Fixed

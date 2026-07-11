@@ -34,7 +34,7 @@ function mockReport() {
     php_version: "8.5",
     php_source: "ondrej",
     database: "mysql",
-    database_version: "apt-default",
+    database_version: "8.4",
     database_name: "g7devops",
     database_user: "g7devops",
     database_password_policy: "user-provided-store-root-only",
@@ -53,7 +53,7 @@ function mockReport() {
     owned_files_path: "/var/lib/g7-installer/owned-files.json",
     backup_manifest_path: "/var/backups/g7-installer/manifest.json",
     owned_files: ["/etc/g7-installer/config.toml", "/var/log/g7-installer/report.json"],
-    completed_steps: ["packages-installed", "vhost-enabled", "runtime-configured", "database-configured", "certbot-issued", "app-source-prepared", "setup-guide-written", "backup-manifest-written"],
+    completed_steps: ["packages-installed", "runtime-configured", "vhost-enabled", "database-configured", "certbot-issued", "app-source-prepared", "setup-guide-written", "backup-manifest-written"],
     safety_checks: [{ name: "fresh-server", status: "pass", message: "신규 VPS 조건을 통과했습니다." }],
     preinstall_package_checks: [],
     package_checks: [{ name: "nginx", status: "pass", message: "패키지 설치 확인 완료" }],
@@ -98,7 +98,7 @@ function mockPlan() {
     php_version: "8.5",
     php_source: "ondrej",
     database: "mysql",
-    database_version: "apt-default",
+    database_version: "8.4",
     database_name: "g7devops",
     database_user: "g7devops",
     database_password_policy: "user-provided-store-root-only",
@@ -292,6 +292,57 @@ test("wizard routes render report, downloads, and provision cards", async ({ pag
     await expect(page.getByText("보안 경계 안내")).toBeVisible();
     await page.getByRole("button", { name: "설정 파일/값 확인" }).first().click();
     await expect(page.getByRole("heading", { name: "웹서버/vhost" })).toBeVisible();
+    await expect(page.getByText("/etc/nginx/nginx.conf", { exact: true })).toBeVisible();
+    await expect(page.locator("#provision-action-details")).toContainText("php_socket /run/php/php8.5-fpm-g7devops.sock");
+    await page.locator("#provision-action-dialog").getByRole("button", { name: "닫기" }).click();
+
+    await page.getByRole("button", { name: "설정 파일/값 확인" }).nth(1).click();
+    await expect(page.locator("#provision-action-details code").filter({ hasText: "/etc/php/8.5/fpm/pool.d/g7-g7devops.conf" })).toBeVisible();
+    await page.locator("#provision-action-dialog").getByRole("button", { name: "닫기" }).click();
+
+    await page.getByRole("button", { name: "설정 파일/값 확인" }).nth(2).click();
+    await expect(page.locator("#provision-action-details code").filter({ hasText: "/etc/mysql/conf.d/g7-installer.cnf" })).toBeVisible();
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("options expose MySQL 8.0 and 8.4 only with account autocomplete disabled", async ({ page }) => {
+  const { server, baseUrl } = await startServer();
+  try {
+    await page.goto(`${baseUrl}/setup/options?token=e2e`);
+    await expect(page.locator('input[name="database"]')).toHaveValue("mysql");
+    await expect(page.locator('select[name="database_version"] option')).toHaveText([
+      "MySQL 8.0 (Ubuntu 기본 APT)",
+      "MySQL 8.4 LTS (공식 MySQL APT)",
+    ]);
+    await expect(page.locator('select[name="database_version"]')).toHaveValue("8.0");
+    await expect(page.getByText("MariaDB", { exact: true })).toHaveCount(0);
+    await expect(page.locator('input[name="site_user"]')).toHaveAttribute("autocomplete", "off");
+    await expect(page.locator('#site-password')).toHaveAttribute("autocomplete", "off");
+    await expect(page.locator('#database-password')).toHaveAttribute("autocomplete", "off");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("legacy saved database options migrate to MySQL 8.0", async ({ page }) => {
+  const { server, baseUrl } = await startServer();
+  try {
+    await page.goto(`${baseUrl}/setup/options?token=e2e`);
+    await page.evaluate(() => {
+      sessionStorage.setItem("g7inst-wizard-state-v2", JSON.stringify({
+        activeStep: "options",
+        form: {
+          database: "mariadb",
+          database_version: "apt-default",
+        },
+      }));
+    });
+    await page.reload();
+
+    await expect(page.locator('input[name="database"]')).toHaveValue("mysql");
+    await expect(page.locator('select[name="database_version"]')).toHaveValue("8.0");
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -337,7 +388,7 @@ test("restored failed step is offered as an in-place retry", async ({ page }) =>
     const message = page.locator("[data-recovery-summary]:visible [data-recovery-summary-message]");
     await expect(message).toContainText("실패 단계: runtime");
     await expect(message).toContainText("자동 복원되었습니다");
-    await expect(page.locator('[data-view="report"] [data-recovery-action="resume"]')).toHaveText(/현재 단계 다시 실행/);
+    await expect(page.locator('[data-view="report"] [data-recovery-action="resume"]')).toHaveText(/수정 후 현재 단계 재실행/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -454,13 +505,13 @@ test("failed install unlocks the modal and exposes the restored step retry", asy
     await page.getByRole("button", { name: "시작", exact: true }).click();
 
     const closeButton = page.locator("#install-progress-close");
-    await expect(closeButton).toHaveText(/닫고 문제 해결/);
+    await expect(closeButton).toHaveText(/닫고 실패 내용 확인/);
     await expect(closeButton).toBeEnabled();
     await closeButton.click();
     await expect(page.locator("#install-progress-dialog[open]")).toHaveCount(0);
     await expect(page.locator('[data-view="report"] [data-recovery-action="resume"]')).toBeVisible();
     await expect(page.locator('[data-view="report"] [data-recovery-action="resume"]')).toBeEnabled();
-    await expect(page.locator('[data-view="report"] [data-recovery-action="resume"]')).toHaveText(/현재 단계 다시 실행/);
+    await expect(page.locator('[data-view="report"] [data-recovery-action="resume"]')).toHaveText(/수정 후 현재 단계 재실행/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

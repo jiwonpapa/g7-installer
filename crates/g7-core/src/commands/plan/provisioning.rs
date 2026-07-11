@@ -308,6 +308,7 @@ pub(super) struct ProvisioningInput<'a> {
     pub(super) php_version: &'a str,
     pub(super) php_source: &'a str,
     pub(super) database_engine: &'a str,
+    pub(super) database_version: &'a str,
     pub(super) database_name: &'a str,
     pub(super) database_user: &'a str,
     pub(super) database_password_policy: &'a str,
@@ -366,7 +367,7 @@ pub(super) fn provisioning_sections(input: ProvisioningInput<'_>) -> Vec<Provisi
                 ProvisioningSetting::new("site_root", input.web_root),
                 ProvisioningSetting::new(
                     "php_endpoint",
-                    php_endpoint(input.web_server, input.php_version),
+                    php_endpoint(input.web_server, input.php_version, input.site_user),
                 ),
                 ProvisioningSetting::new("rewrite_policy", rewrite_policy(input.app_profile)),
                 ProvisioningSetting::new("selected_runtime", web_runtime_model(input.web_server)),
@@ -482,6 +483,7 @@ pub(super) fn provisioning_sections(input: ProvisioningInput<'_>) -> Vec<Provisi
                 database_label(input.database_engine)
             ),
             settings: vec![
+                ProvisioningSetting::new("version", input.database_version),
                 ProvisioningSetting::new("database", input.database_name),
                 ProvisioningSetting::new("user", input.database_user),
                 ProvisioningSetting::new(

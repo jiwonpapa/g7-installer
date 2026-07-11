@@ -10,6 +10,7 @@ pub struct InstallReport {
     pub php_version: String,
     pub php_source: String,
     pub database_engine: String,
+    pub database_version: String,
     pub database_name: String,
     pub database_user: String,
     pub database_password_policy: &'static str,
@@ -301,6 +302,10 @@ pub(super) fn config_content(plan: &plan::InstallPlan) -> String {
     content.push_str(&format!("php_version = \"{}\"\n", plan.php_version));
     content.push_str(&format!("php_source = \"{}\"\n", plan.php_source));
     content.push_str(&format!("database = \"{}\"\n", plan.database_engine));
+    content.push_str(&format!(
+        "database_version = \"{}\"\n",
+        plan.database_version
+    ));
     content.push_str(&format!("database_name = \"{}\"\n", plan.database_name));
     content.push_str(&format!("database_user = \"{}\"\n", plan.database_user));
     content.push_str(&format!(
@@ -451,6 +456,10 @@ pub(super) fn report_content(
     value.insert(
         "database".to_string(),
         serde_json::json!(&plan.database_engine),
+    );
+    value.insert(
+        "database_version".to_string(),
+        serde_json::json!(&plan.database_version),
     );
     value.insert(
         "database_name".to_string(),
@@ -667,7 +676,10 @@ pub(super) fn setup_guide_content(
         "- 웹서버 / PHP: `{}` / `PHP {}` ({})\n",
         plan.web_server, plan.php_version, plan.php_source
     ));
-    content.push_str(&format!("- DB: `{}`\n", plan.database_engine));
+    content.push_str(&format!(
+        "- DB: `{}` `{}`\n",
+        plan.database_engine, plan.database_version
+    ));
     content.push_str(&format!("- 사이트 계정: `{}`\n", plan.site_user));
     content.push_str("\n## 주요 경로\n\n");
     content.push_str(&format!("- 웹 루트: `{}`\n", plan.web_root));
@@ -682,6 +694,7 @@ pub(super) fn setup_guide_content(
     content.push_str(&format!("- 기본 설정: `{CONFIG_PATH}`\n"));
     content.push_str(&format!("- 비밀 설정: `{SECRETS_PATH}`\n"));
     content.push_str("\n## 설정 파일\n\n");
+    content.push_str("아래 활성 설정은 Ubuntu/Debian 패키지의 표준 `/etc` 디렉터리에 있습니다. `/var/lib/g7-installer`는 설치기 상태와 검증 후보용이며 서비스가 활성 설정으로 읽지 않습니다.\n\n");
     if plan.web_server == "nginx" {
         content.push_str(&format!(
             "- Nginx vhost: `{}`\n",
@@ -691,9 +704,15 @@ pub(super) fn setup_guide_content(
             "- Nginx enabled: `{}`\n",
             g7_system::nginx::G7_SITE_ENABLED
         ));
+        content.push_str(&format!(
+            "- Nginx worker 설정: `{NGINX_MAIN_CONFIG_PATH}` (원본 백업: `{NGINX_MAIN_BACKUP_PATH}`)\n"
+        ));
     } else if plan.web_server == "apache" {
         content.push_str("- Apache vhost: `/etc/apache2/sites-available/g7.conf`\n");
         content.push_str("- Apache enabled: `/etc/apache2/sites-enabled/g7.conf`\n");
+        content
+            .push_str("- Apache event MPM 튜닝: `/etc/apache2/conf-available/g7-runtime.conf`\n");
+        content.push_str("- Apache runtime enabled: `/etc/apache2/conf-enabled/g7-runtime.conf`\n");
     } else {
         content.push_str("- Nginx edge vhost: `/etc/nginx/sites-available/g7.conf`\n");
         content.push_str("- Nginx edge enabled: `/etc/nginx/sites-enabled/g7.conf`\n");
@@ -706,14 +725,39 @@ pub(super) fn setup_guide_content(
     }
     if plan.web_server != "frankenphp" {
         content.push_str(&format!("- PHP-FPM pool: `{}`\n", php_pool_path(plan)));
+        content.push_str(&format!(
+            "- PHP-FPM socket: `{}`\n",
+            php_fpm_site_socket(plan)
+        ));
+        content.push_str(&format!(
+            "- PHP session directory: `{}`\n",
+            php_session_path(plan)
+        ));
     }
     content.push_str(&format!(
         "- PHP override: `{}`\n",
         php_ini_override_path(plan)
     ));
     content.push_str(&format!("- DB tuning: `{}`\n", database_config_path(plan)));
+    content.push_str(&format!(
+        "- PHP-FPM slow log: `/var/log/php{}-fpm-{}-slow.log`\n",
+        plan.php_version, plan.site_user
+    ));
+    content.push_str(&format!("- Swap file: `{SWAP_FILE_PATH}`\n"));
+    content.push_str(&format!("- Swap systemd unit: `{SWAP_UNIT_PATH}`\n"));
+    content.push_str(&format!("- Swap sysctl: `{SWAP_SYSCTL_PATH}`\n"));
+    content.push_str(&format!(
+        "- Certbot renewal: `/etc/letsencrypt/renewal/{}.conf`\n",
+        plan.domain
+    ));
+    content.push_str(&format!("- 앱 환경설정: `{}/.env`\n", plan.web_root));
+    content.push_str(&format!("- 설치 로그: `{LOG_PATH}`\n"));
+    content.push_str(&format!("- 명령 감사 로그: `{COMMAND_AUDIT_LOG_PATH}`\n"));
     if plan.redis_mode == "enable" {
         content.push_str("- Redis config: `/etc/redis/redis.conf`\n");
+    }
+    if plan.mail_mode == "local-postfix" {
+        content.push_str("- Postfix config: `/etc/postfix/main.cf`\n");
     }
     for unit in app_runtime_unit_names(plan) {
         content.push_str(&format!(
@@ -742,6 +786,29 @@ pub(super) fn setup_guide_content(
         );
     }
     content.push_str("\n## 서비스 명령\n\n");
+    content.push_str(&format!(
+        "- 설정 파일 편집 예: `sudoedit {}`\n",
+        if plan.web_server == "apache" {
+            g7_system::apache::G7_SITE_AVAILABLE
+        } else {
+            g7_system::nginx::G7_SITE_AVAILABLE
+        }
+    ));
+    content.push_str(&format!(
+        "- 웹서버 문법 검사: `{}`\n",
+        if plan.web_server == "apache" {
+            "sudo apache2ctl configtest"
+        } else {
+            "sudo nginx -t"
+        }
+    ));
+    if plan.web_server != "frankenphp" {
+        content.push_str(&format!(
+            "- PHP-FPM 문법 검사: `sudo php-fpm{} -t`\n",
+            plan.php_version
+        ));
+    }
+    content.push_str("- MySQL 문법 검사: `sudo mysqld --validate-config`\n");
     content.push_str(&format!(
         "- 웹서버 상태: `sudo systemctl status {web_service}`\n"
     ));

@@ -42,11 +42,13 @@ Ubuntu VPS에 `g7inst`를 설치하고 웹 마법사로 그누보드7용 서버 
 
 ## 메모리 기준 튜닝
 
-설치 계획에는 1GB, 2GB, 4GB, 8GB, 16GB, 32GB 메모리 프리셋과 32GB 초과 공식 기반 프리셋이 포함됩니다. PHP-FPM `max_children`, opcache, DB buffer pool, DB connection, Redis maxmemory, swap, Nginx worker process/connection/buffer, Apache `mpm_event` worker 값을 메모리와 vCPU 등급별로 계산합니다. 현재 실행 단계는 감지된 RAM/vCPU에 맞춰 PHP 런타임, PHP ini, Nginx/Apache vhost, MySQL/MariaDB 튜닝 파일을 적용하고 리포트에 기록합니다.
+설치 계획에는 1GB, 2GB, 4GB, 8GB, 16GB, 32GB 메모리 프리셋과 32GB 초과 공식 기반 프리셋이 포함됩니다. PHP-FPM `max_children`, opcache, DB buffer pool, DB connection, Redis maxmemory, swap, Nginx worker process/connection/buffer, Apache `mpm_event` worker 값을 메모리와 vCPU 등급별로 계산합니다. 현재 실행 단계는 감지된 RAM/vCPU에 맞춰 PHP 런타임, PHP ini, Nginx/Apache vhost, MySQL 튜닝 파일을 적용하고 리포트에 기록합니다.
 
 서버 점검은 총 RAM, 가용 RAM, swap, 루트 디스크 여유 공간, inode 여유를 확인합니다. 최소 기준을 못 채우면 설치를 차단합니다. 1GB급 서버는 Redis와 로컬 Postfix를 기본 해제하고, apt 설치보다 먼저 관리형 swap을 구성합니다.
 
-설치·초기화·되돌리기 명령의 stdout/stderr는 웹 화면에 실시간 표시됩니다. 브라우저 연결이 끊기거나 새로고침되어도 같은 컨트롤러의 최근 로그를 순번 기준으로 다시 받습니다. 어느 단계에서 중단돼도 복구 패널의 `현재 단계 다시 실행`으로 마지막 정상 단계 다음부터 재개할 수 있습니다.
+설치·초기화·되돌리기 명령의 stdout/stderr는 웹 화면에 실시간 표시됩니다. 브라우저 연결이 끊기거나 새로고침되어도 같은 컨트롤러의 최근 로그를 순번 기준으로 다시 받습니다. 설치기는 실패 원인을 자동 수정하지 않습니다. 실패 단계의 파일 변경을 복원하고, 설치기 업데이트나 입력·환경 수정 후 `수정 후 현재 단계 재실행`으로 마지막 정상 단계 다음부터 재개합니다.
+
+공개 DB는 MySQL만 지원합니다. MySQL 8.0은 Ubuntu 24.04 기본 APT를 사용하고, MySQL 8.4 LTS는 Oracle 공식 `mysql-apt-config` 패키지의 고정 SHA-256을 검증한 뒤 공식 APT 저장소를 추가합니다. 실제 설치 계열은 DB 단계에서 `VERSION()` 결과로 다시 검증합니다.
 
 설치 완료 리포트에는 PHP 버전, SAPI, 로드된 `php.ini`, 추가 ini 경로, 시간대, 메모리/업로드/POST 한도, 실행시간, 입력 변수, OPcache, PHP-FPM pool과 필수 확장을 `PHP 환경 요약`으로 표시합니다. 전체 `phpinfo()` 페이지는 외부에 공개하지 않습니다.
 
@@ -145,9 +147,25 @@ sudo -n /usr/local/bin/g7inst --version
 
 웹 UI에서 `사이트 계정`과 `사이트 계정 비밀번호`를 입력하면 설치기가 `/home/계정/public_html` 웹루트를 만들고 `계정:www-data` 소유권으로 맞춥니다. Nginx/Apache는 PHP-FPM pool을 이 사이트 계정 기준으로 연결합니다.
 
-웹 UI는 `패키지 설치/검증 -> 사이트 계정/웹루트 -> 웹서버 vhost/HTTP 검증 -> PHP/런타임 튜닝 -> DB 튜닝/계정 생성 -> SSL 인증서/HTTPS 검증 -> 웹앱 파일 배치 -> 리포트 생성 -> 세부 설정 액션 패널` 순서로 진행합니다. 차단 오류가 나면 다음 단계로 넘어가지 않고 실패 단계와 자동복원 결과를 저장합니다. Let's Encrypt 발급 제한처럼 서버 앱 배치와 무관한 항목만 보류 상태로 계속 진행합니다.
+웹 UI는 `패키지 설치/검증 -> 사이트 계정/웹루트 -> PHP/런타임 튜닝 -> 웹서버 vhost/HTTP 검증 -> DB 튜닝/계정 생성 -> SSL 인증서/HTTPS 검증 -> 웹앱 파일 배치 -> 리포트 생성 -> 세부 설정 액션 패널` 순서로 진행합니다. 사이트 전용 PHP-FPM pool과 socket을 먼저 활성화한 뒤 vhost를 연결하고 HTTP smoke를 실행합니다. 차단 오류가 나면 다음 단계로 넘어가지 않고 실패 단계와 자동복원 결과를 저장합니다. Let's Encrypt 발급 제한처럼 서버 앱 배치와 무관한 항목만 보류 상태로 계속 진행합니다.
 
 PHP-FPM과 DB 설정은 `/var/lib/g7-installer/candidates`의 임시 후보 파일을 네이티브 검사기로 먼저 검증합니다. 활성 파일은 원자적으로 교체하고 Nginx/Apache/PHP-FPM/DB 검사를 통과한 뒤에만 서비스를 reload/restart합니다. 실패하거나 프로세스가 중단되면 `/var/lib/g7-installer/transactions`의 단계별 스냅샷으로 installer가 바꾼 파일을 복원합니다. 기존 Let's Encrypt 인증서와 발급 파일은 삭제하지 않습니다.
+
+활성 서버 설정은 Ubuntu/Debian 패키지의 표준 디렉터리에 둡니다. 설치기 내부 상태와 후보 파일을 서비스 설정 디렉터리 대신 읽도록 만들지 않습니다.
+
+| 구성 | 활성 설정 경로 |
+| --- | --- |
+| Nginx vhost | `/etc/nginx/sites-available/g7.conf`, `/etc/nginx/sites-enabled/g7.conf` |
+| Apache vhost | `/etc/apache2/sites-available/g7.conf`, `/etc/apache2/sites-enabled/g7.conf` |
+| Apache event MPM | `/etc/apache2/conf-available/g7-runtime.conf`, `/etc/apache2/conf-enabled/g7-runtime.conf` |
+| PHP-FPM pool | `/etc/php/<버전>/fpm/pool.d/g7-<사이트계정>.conf` |
+| PHP 런타임 override | `/etc/php/<버전>/fpm/conf.d/99-g7-installer.ini` |
+| MySQL | `/etc/mysql/conf.d/g7-installer.cnf` |
+| Redis | `/etc/redis/redis.conf` |
+| 앱 systemd unit | `/etc/systemd/system/g7-*.service` |
+| Let's Encrypt | `/etc/letsencrypt` |
+
+`g7.conf`와 `g7-installer.cnf`는 파일명만 설치기 전용이며, 위치와 include 방식은 Ubuntu 표준입니다. 사용자가 직접 수정할 때는 결과 리포트의 실제 경로를 `sudoedit`로 열고 `nginx -t`, `apache2ctl configtest`, `php-fpm<버전> -t`, `mysqld --validate-config`를 통과시킨 뒤 해당 서비스를 reload/restart합니다. `/etc/g7-installer`, `/var/lib/g7-installer`, `/var/log/g7-installer`, `/var/backups/g7-installer`는 서비스의 활성 설정이 아니라 설치기 자체의 설정·상태·로그·복구 기록입니다.
 
 그누보드7은 GitHub 공식 최신 안정 Release를 매번 새로 조회·clone하고 Git 무결성과 필수 빌드 파일을 검증합니다. 이어서 `.env.example`을 `.env`로 복사하고 사이트 계정 전용 `0600` 권한을 적용한 뒤 공식 브라우저 `/install`로 인계합니다. Composer/Vendor, 관리자 계정, 확장과 마이그레이션은 G7 공식 설치기가 처리하며 `g7inst`는 사전 NPM 빌드나 Artisan 설치 명령을 실행하지 않습니다.
 
@@ -192,9 +210,9 @@ sudo g7inst reset --yes
 
 `rollback`은 앱/DB/인증서 생성 전의 초기 실패를 되돌리는 용도입니다. 운영 중인 사이트 백업 복구 기능이 아닙니다.
 
-`resume`은 패키지, 사이트 계정, vhost, 런타임, DB, TLS, 앱 중 실패한 현재 단계부터 다시 실행합니다. 최초 패키지 기준선과 임시 비밀값을 보존하며, 완료된 단계는 건너뜁니다. 웹 결과 화면에서는 실패 단계와 파일 자동복원 여부를 확인한 뒤 `현재 단계 다시 실행`을 누릅니다.
+`resume`은 패키지, 사이트 계정, vhost, 런타임, DB, TLS, 앱 중 실패한 현재 단계부터 다시 실행합니다. 최초 패키지 기준선과 임시 비밀값을 보존하며, 완료된 단계는 건너뜁니다. 원인을 해결하는 기능은 아니므로 stderr와 실패 항목을 확인하고 설치기 업데이트나 입력·환경 수정 후 `수정 후 현재 단계 재실행`을 누릅니다.
 
-복구 순서는 `현재 단계 다시 실행 -> 초기 설치 구간의 패키지 되돌리기 -> 전체 초기화`입니다. `reset --yes`는 현재 단계 재시도로 복구할 수 없고 설치를 완전히 포기할 때만 사용합니다.
+실패 처리 순서는 `원인 확인 및 수정 -> 현재 단계 재실행 -> 초기 설치 구간의 패키지 되돌리기 -> 전체 초기화`입니다. `reset --yes`는 현재 단계 재실행으로 진행할 수 없고 설치를 완전히 포기할 때만 사용합니다.
 
 `reset --yes`는 이 설치기가 만든 사이트 계정, 웹루트/설정 파일, 앱 systemd unit, DB/DB 계정, 새로 설치한 apt 패키지, installer 메타데이터를 제거해 같은 신규 VPS에서 다시 설치를 시도할 수 있게 합니다. `/etc/letsencrypt/live/*`에 이미 발급된 Let's Encrypt 인증서가 있으면 중복 발급 제한을 피하기 위해 certbot 계열 패키지와 인증서 파일을 보존하고, 재설치 때 기존 인증서를 우선 재사용합니다. 기존 운영 서버 보존 기능이 아니라 신규 VPS 전용 재설치 초기화입니다. 운영 데이터가 있으면 실행 전 VPS 백업/스냅샷 비용과 복구 시간을 확인하세요.
 

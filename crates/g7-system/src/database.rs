@@ -31,6 +31,14 @@ impl DatabaseEngine {
     }
 }
 
+/// Reads the installed database server version without starting a new process instance.
+pub fn server_version<R: CommandRunner>(
+    runner: &R,
+    engine: DatabaseEngine,
+) -> Result<CommandOutput, CommandError> {
+    runner.run(&CommandSpec::new(engine.server()).arg("--version"))
+}
+
 /// Validates every active server option file without starting the database.
 pub fn config_test<R: CommandRunner>(
     runner: &R,
@@ -67,7 +75,7 @@ pub fn apply_sql<R: CommandRunner>(
 
 #[cfg(test)]
 mod tests {
-    use super::{DatabaseEngine, apply_sql, candidate_config_test, config_test};
+    use super::{DatabaseEngine, apply_sql, candidate_config_test, config_test, server_version};
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
     use std::path::Path;
@@ -111,6 +119,20 @@ mod tests {
                 .iter()
                 .all(|spec| spec.args == vec![OsString::from("--validate-config")])
         );
+        Ok(())
+    }
+
+    #[test]
+    fn database_server_version_is_shell_free() -> std::result::Result<(), Box<dyn std::error::Error>>
+    {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success("mysqld Ver 8.4.9"));
+
+        server_version(&runner, DatabaseEngine::MySql)?;
+        let recorded = runner.recorded();
+
+        assert_eq!(recorded[0].program, OsString::from("mysqld"));
+        assert_eq!(recorded[0].args, vec![OsString::from("--version")]);
         Ok(())
     }
 

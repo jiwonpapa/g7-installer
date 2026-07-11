@@ -12,7 +12,7 @@ pub(super) fn apply_database_phase<R: CommandRunner>(
     let db_config_path = database_config_path(plan);
     let db_config_content = database_runtime_content(&sizing);
     let engine = DatabaseEngine::from_id(&plan.database_engine);
-    let candidate_path = format!("{CANDIDATE_DIR}/database.cnf");
+    let candidate_path = MYSQL_CONFIG_CANDIDATE_PATH.to_string();
     let candidate = write_validation_candidate(paths, &candidate_path, &db_config_content)?;
     let candidate_command = format!(
         "{} --defaults-file={} --validate-config",
@@ -63,6 +63,7 @@ pub(super) fn apply_database_phase<R: CommandRunner>(
     )?;
     verify_database_effective_values(&effective_output.stdout, &sizing)?;
     let database_version = fact(&parse_key_value_lines(&effective_output.stdout), "version");
+    verify_selected_database_version(&database_version, &plan.database_version)?;
 
     let password = match database_password {
         Some(value) => value.to_string(),
@@ -146,6 +147,33 @@ pub(super) fn apply_database_phase<R: CommandRunner>(
             ),
         ),
     ])
+}
+
+pub(super) fn verify_selected_database_version(actual: &str, selected: &str) -> Result<()> {
+    let actual_series = actual
+        .split_whitespace()
+        .find_map(|token| {
+            let token = token.trim_start_matches(|ch: char| !ch.is_ascii_digit());
+            let mut parts = token.split('.');
+            let major = parts.next()?;
+            let minor = parts.next()?;
+            if major.chars().all(|ch| ch.is_ascii_digit())
+                && minor.chars().all(|ch| ch.is_ascii_digit())
+            {
+                Some(format!("{major}.{minor}"))
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+
+    if actual_series == selected {
+        Ok(())
+    } else {
+        Err(Error::InstallVerificationFailed {
+            checks: format!("selected MySQL {selected}, but installed server reports `{actual}`"),
+        })
+    }
 }
 
 pub(super) fn database_effective_sql() -> &'static str {

@@ -72,9 +72,14 @@ fn install_writes_prepared_state_and_owned_files()
     assert!(fs_root.join("home/g7/public_html").exists());
     assert!(fs_root.join("home/g7/public_html/public").exists());
     assert!(
-        fs_root
+        !fs_root
             .join("home/g7/public_html/public/g7inst-ready.php")
             .exists()
+    );
+    assert!(
+        !report
+            .owned_files
+            .contains(&"/home/g7/public_html/public/g7inst-ready.php".to_string())
     );
     assert!(fs_root.join("etc/nginx/sites-available/g7.conf").exists());
     assert!(fs_root.join("etc/nginx/sites-enabled/g7.conf").exists());
@@ -84,6 +89,8 @@ fn install_writes_prepared_state_and_owned_files()
     assert!(nginx_vhost.contains("client_max_body_size"));
     assert!(nginx_vhost.contains("fastcgi_buffers"));
     assert!(nginx_vhost.contains("try_files $uri $uri/ /index.php?$query_string;"));
+    assert!(nginx_vhost.contains("fastcgi_pass unix:/run/php/php8.5-fpm-g7.sock;"));
+    assert!(!nginx_vhost.contains("fastcgi_pass unix:/run/php/php8.5-fpm.sock;"));
     assert!(!nginx_vhost.contains("location ~*"));
     assert!(!nginx_vhost.contains("location /app"));
     assert!(!nginx_vhost.contains("location /apps"));
@@ -144,6 +151,27 @@ fn install_writes_prepared_state_and_owned_files()
         assert_eq!(mode, 0o600);
     }
     assert!(fs_root.join("var/log/g7-installer/setup-guide.md").exists());
+    let setup_guide = fs::read_to_string(fs_root.join("var/log/g7-installer/setup-guide.md"))?;
+    for expected in [
+        "/etc/nginx/sites-available/g7.conf",
+        "/etc/nginx/nginx.conf",
+        "/etc/php/8.5/fpm/pool.d/g7-g7.conf",
+        "/run/php/php8.5-fpm-g7.sock",
+        "/etc/php/8.5/fpm/conf.d/99-g7-installer.ini",
+        "/etc/mysql/conf.d/g7-installer.cnf",
+        "/swapfile",
+        "/etc/systemd/system/swapfile.swap",
+        "/etc/sysctl.d/99-g7-installer-swap.conf",
+        "/etc/letsencrypt/renewal/example.com.conf",
+        "/var/log/php8.5-fpm-g7-slow.log",
+        "/home/g7/public_html/.env",
+        "/var/log/g7-installer/commands.jsonl",
+    ] {
+        assert!(
+            setup_guide.contains(expected),
+            "setup guide omitted standard path: {expected}"
+        );
+    }
     assert!(
         report
             .app_checks
@@ -162,6 +190,23 @@ fn install_writes_prepared_state_and_owned_files()
             .exists()
     );
     let recorded = probe.runner().recorded();
+    let fpm_reload_index = recorded
+        .iter()
+        .position(|spec| spec.display() == "systemctl reload php8.5-fpm")
+        .ok_or_else(|| std::io::Error::other("missing PHP-FPM reload"))?;
+    let http_smoke_index = recorded
+        .iter()
+        .position(|spec| {
+            spec.program == "curl"
+                && spec
+                    .args
+                    .contains(&OsString::from("http://127.0.0.1/g7inst-ready.php"))
+        })
+        .ok_or_else(|| std::io::Error::other("missing HTTP smoke"))?;
+    assert!(
+        fpm_reload_index < http_smoke_index,
+        "PHP-FPM must be configured before the vhost HTTP smoke"
+    );
     assert!(!recorded.iter().any(|spec| {
         spec.program == std::ffi::OsStr::new("debconf-set-selections")
             && spec.stdin.as_ref().is_some_and(|stdin| {
@@ -660,7 +705,7 @@ fn install_configures_frankenphp_edge_runtime()
     );
     assert!(
         report
-            .vhost_checks
+            .runtime_checks
             .iter()
             .any(|check| check.name == "frankenphp-service" && check.status == "pass")
     );
@@ -843,7 +888,28 @@ fn install_applies_apache_vhost_runtime_tls_and_app_link()
                 .args
                 .contains(&OsString::from("http://127.0.0.1/g7inst-ready.php"))
     }));
+    let fpm_reload_index = commands
+        .iter()
+        .position(|command| command.display() == "systemctl reload php8.5-fpm")
+        .ok_or_else(|| std::io::Error::other("missing Apache PHP-FPM reload"))?;
+    let http_smoke_index = commands
+        .iter()
+        .position(|command| {
+            command.program == "curl"
+                && command
+                    .args
+                    .contains(&OsString::from("http://127.0.0.1/g7inst-ready.php"))
+        })
+        .ok_or_else(|| std::io::Error::other("missing Apache HTTP smoke"))?;
+    assert!(
+        fpm_reload_index < http_smoke_index,
+        "Apache HTTP smoke must run after the site PHP-FPM pool is active"
+    );
     let apache_vhost = fs::read_to_string(fs_root.join("etc/apache2/sites-available/g7.conf"))?;
+    assert!(
+        apache_vhost
+            .contains("SetHandler \"proxy:unix:/run/php/php8.5-fpm-g7.sock|fcgi://localhost/\"")
+    );
     assert!(!apache_vhost.contains("ProxyPass /app"));
     assert!(!apache_vhost.contains("ProxyPass /apps"));
     assert!(
@@ -964,11 +1030,95 @@ fn database_candidate_failure_never_writes_active_config()
     ));
     assert!(!paths.resolve(super::database_config_path(&plan)).exists());
     assert!(
-        fs::read_dir(paths.resolve(crate::installer_paths::CANDIDATE_DIR))?
-            .next()
-            .is_none()
+        !paths
+            .resolve(crate::installer_paths::MYSQL_CONFIG_CANDIDATE_PATH)
+            .exists()
     );
     assert_eq!(probe.runner().recorded().len(), 1);
+
+    fs::remove_dir_all(fs_root)?;
+    Ok(())
+}
+
+#[test]
+fn database_candidate_uses_mysql_apparmor_readable_path()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let fs_root = create_temp_fs_root()?;
+    let paths = InstallPaths::with_root(&fs_root);
+    let plan = super::plan::build_with_options(
+        "example.com".to_string(),
+        super::plan::PlanOptions {
+            database_version: "8.0".to_string(),
+            ..super::plan::PlanOptions::default()
+        },
+    )?;
+    let runner = FakeCommandRunner::default();
+    runner.push_output(CommandOutput::failure(1, "candidate rejected"));
+    let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
+    let mut owned = Vec::new();
+
+    let _ = super::apply_database_phase(
+        &probe,
+        &paths,
+        &plan,
+        &mut owned,
+        Some("database-secret"),
+        None,
+    );
+    let command = &probe.runner().recorded()[0];
+    let expected = paths
+        .resolve(crate::installer_paths::MYSQL_CONFIG_CANDIDATE_PATH)
+        .display()
+        .to_string();
+
+    assert!(
+        command
+            .args
+            .contains(&OsString::from(format!("--defaults-file={expected}")))
+    );
+    assert!(!expected.contains("/var/lib/g7-installer/candidates/database.cnf"));
+
+    fs::remove_dir_all(fs_root)?;
+    Ok(())
+}
+
+#[test]
+fn selected_database_version_must_match_installed_server() {
+    assert!(super::verify_selected_database_version("mysqld Ver 8.4.9", "8.4").is_ok());
+    assert!(super::verify_selected_database_version("8.0.46-0ubuntu0.24.04.3", "8.0").is_ok());
+    assert!(super::verify_selected_database_version("mysqld Ver 8.0.46", "8.4").is_err());
+}
+
+#[test]
+fn mysql_84_source_is_downloaded_verified_and_selected_noninteractively()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let fs_root = create_temp_fs_root()?;
+    let paths = InstallPaths::with_root(&fs_root);
+    let runner = FakeCommandRunner::default();
+    runner.push_output(CommandOutput::success(""));
+    runner.push_output(CommandOutput::success(format!(
+        "{}  package.deb\n",
+        crate::defaults::MYSQL_APT_CONFIG_SHA256
+    )));
+    runner.push_output(CommandOutput::success(""));
+    let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
+
+    super::configure_mysql_apt_source(&probe, &paths)?;
+    let commands = probe.runner().recorded();
+
+    assert_eq!(commands[0].program, OsString::from("curl"));
+    assert_eq!(commands[1].program, OsString::from("sha256sum"));
+    assert_eq!(commands[2].program, OsString::from("env"));
+    assert!(
+        commands[2]
+            .args
+            .contains(&OsString::from("MYSQL_SERVER_VERSION=mysql-8.4-lts"))
+    );
+    assert!(
+        !paths
+            .resolve(crate::defaults::MYSQL_APT_CONFIG_ARCHIVE_PATH)
+            .exists()
+    );
 
     fs::remove_dir_all(fs_root)?;
     Ok(())
@@ -1011,6 +1161,8 @@ fn pending_secret_reader_round_trips_special_characters()
 #[test]
 fn package_retry_keeps_original_preinstall_baseline()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let fs_root = create_temp_fs_root()?;
+    let paths = InstallPaths::with_root(&fs_root);
     let plan = super::plan::build_with_options(
         "example.com".to_string(),
         super::plan::PlanOptions::default(),
@@ -1027,11 +1179,12 @@ fn package_retry_keeps_original_preinstall_baseline()
     runner.push_output(CommandOutput::failure(100, "apt update failed"));
     let probe = SystemProbe::new(runner);
 
-    let failure = super::apply_package_phase_with_baseline(&probe, &plan, Some(&baseline))
+    let failure = super::apply_package_phase_with_baseline(&probe, &paths, &plan, Some(&baseline))
         .expect_err("package phase must fail");
 
     assert_eq!(failure.summary.preinstall_package_checks, baseline);
     assert_eq!(probe.runner().recorded().len(), 1);
+    fs::remove_dir_all(fs_root)?;
     Ok(())
 }
 
@@ -1092,7 +1245,9 @@ fn runtime_failure_restores_then_resume_completes_from_failed_step()
     resume_runner.push_output(CommandOutput::success("inactive\n"));
     resume_runner.push_output(CommandOutput::success(""));
     resume_runner.push_output(CommandOutput::success(""));
-    push_runtime_database_tls_outputs(
+    push_runtime_outputs(&resume_runner, &plan);
+    push_successful_vhost_outputs(&resume_runner, &plan);
+    push_database_tls_outputs(
         &resume_runner,
         &plan,
         CommandOutput::success("cert issued\n"),
@@ -1799,16 +1954,27 @@ fn push_successful_site_and_vhost_outputs(
     runner.push_output(CommandOutput::success(""));
     runner.push_output(CommandOutput::success(""));
     runner.push_output(CommandOutput::success(""));
+
+    push_runtime_outputs(runner, install_plan);
+    push_successful_vhost_outputs(runner, install_plan);
+    push_database_tls_outputs(runner, install_plan, certbot_output);
+}
+
+fn push_successful_vhost_outputs(
+    runner: &FakeCommandRunner,
+    install_plan: &super::plan::InstallPlan,
+) {
     if install_plan.web_server == "apache" {
         for _module in super::apache_http_modules() {
             runner.push_output(CommandOutput::success(""));
         }
-        runner.push_output(CommandOutput::success(""));
-        runner.push_output(CommandOutput::success(""));
-        runner.push_output(CommandOutput::success(""));
-        push_runtime_database_tls_outputs(runner, install_plan, certbot_output);
-        return;
     }
+    runner.push_output(CommandOutput::success(""));
+    runner.push_output(CommandOutput::success(""));
+    runner.push_output(CommandOutput::success(""));
+}
+
+fn push_runtime_outputs(runner: &FakeCommandRunner, install_plan: &super::plan::InstallPlan) {
     if install_plan.web_server == "frankenphp" {
         runner.push_output(CommandOutput::success("x86_64\n"));
         runner.push_output(CommandOutput::success("downloaded\n"));
@@ -1816,24 +1982,7 @@ fn push_successful_site_and_vhost_outputs(
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success("active\n"));
-        runner.push_output(CommandOutput::success(""));
-        runner.push_output(CommandOutput::success(""));
-        runner.push_output(CommandOutput::success(""));
-        push_runtime_database_tls_outputs(runner, install_plan, certbot_output);
-        return;
     }
-
-    runner.push_output(CommandOutput::success(""));
-    runner.push_output(CommandOutput::success(""));
-    runner.push_output(CommandOutput::success(""));
-    push_runtime_database_tls_outputs(runner, install_plan, certbot_output);
-}
-
-fn push_runtime_database_tls_outputs(
-    runner: &FakeCommandRunner,
-    install_plan: &super::plan::InstallPlan,
-    certbot_output: CommandOutput,
-) {
     if install_plan.web_server == "frankenphp" {
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
@@ -1880,6 +2029,13 @@ fn push_runtime_database_tls_outputs(
     runner.push_output(CommandOutput::success(successful_php_runtime_probe_output(
         install_plan,
     )));
+}
+
+fn push_database_tls_outputs(
+    runner: &FakeCommandRunner,
+    install_plan: &super::plan::InstallPlan,
+    certbot_output: CommandOutput,
+) {
     runner.push_output(CommandOutput::success(""));
     runner.push_output(CommandOutput::success(""));
     runner.push_output(CommandOutput::success(""));

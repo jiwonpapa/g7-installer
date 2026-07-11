@@ -136,8 +136,8 @@ const installStageOrder = [
   "preflight",
   "packages",
   "site",
-  "vhost",
   "runtime",
+  "vhost",
   "database",
   "ssl",
   "app",
@@ -158,10 +158,10 @@ const phaseCompletedStages = {
   prepared: ["preflight"],
   "package-failed": ["preflight"],
   "packages-installed": ["preflight", "packages"],
-  "vhost-enabled": ["preflight", "packages", "site", "vhost"],
-  "runtime-configured": ["preflight", "packages", "site", "vhost", "runtime"],
-  "database-configured": ["preflight", "packages", "site", "vhost", "runtime", "database"],
-  "tls-enabled": ["preflight", "packages", "site", "vhost", "runtime", "database", "ssl"],
+  "runtime-configured": ["preflight", "packages", "site", "runtime"],
+  "vhost-enabled": ["preflight", "packages", "site", "runtime", "vhost"],
+  "database-configured": ["preflight", "packages", "site", "runtime", "vhost", "database"],
+  "tls-enabled": ["preflight", "packages", "site", "runtime", "vhost", "database", "ssl"],
   completed: installStageOrder,
 };
 
@@ -235,7 +235,7 @@ const templates = {
     web_server: "nginx",
     php_version: "8.5",
     database: "mysql",
-    database_version: "apt-default",
+  database_version: "8.0",
     redis: "enable",
     mail_mode: "none",
     app_package: "gnuboard7",
@@ -250,7 +250,7 @@ const templates = {
     web_server: "apache",
     php_version: "8.5",
     database: "mysql",
-    database_version: "apt-default",
+    database_version: "8.0",
     redis: "enable",
     mail_mode: "none",
     app_package: "gnuboard7",
@@ -447,7 +447,7 @@ async function finishInstallProgressDialog(success) {
   setInstallSummaryStatus(success ? "complete" : "failed", success ? "완료" : "실패");
   if (!success) {
     nodes.installProgressClose.disabled = false;
-    setButtonLabel(nodes.installProgressClose, "닫고 문제 해결");
+    setButtonLabel(nodes.installProgressClose, "닫고 실패 내용 확인");
     return;
   }
 
@@ -861,6 +861,19 @@ function applyFormValues(values) {
   Object.entries(values).forEach(([name, value]) => {
     setFormValue(name, value);
   });
+}
+
+function normalizeSavedFormValues(values) {
+  if (!values || typeof values !== "object") {
+    return values;
+  }
+
+  const normalized = { ...values };
+  normalized.database = "mysql";
+  if (!new Set(["8.0", "8.4"]).has(normalized.database_version)) {
+    normalized.database_version = "8.0";
+  }
+  return normalized;
 }
 
 function readWizardState() {
@@ -1458,7 +1471,9 @@ function refreshFormState(options = {}) {
     node.disabled = !smtpEnabled;
   });
 
-  nodes.databaseVersion.value = "apt-default";
+  if (!new Set(["8.0", "8.4"]).has(nodes.databaseVersion.value)) {
+    nodes.databaseVersion.value = "8.4";
+  }
 
   syncDatabaseDefaults();
   refreshSecurityGuidance();
@@ -1538,14 +1553,15 @@ function phpRuntimeLabel(version, source = phpSourceForVersion(version)) {
 }
 
 function databaseLabel(value) {
-  return value === "mariadb" ? "MariaDB" : "MySQL";
+  return value === "mysql" ? "MySQL" : value || "MySQL";
 }
 
 function databaseVersionLabel(value) {
   const labels = {
-    "apt-default": "Ubuntu 24.04 apt 실제 설치 버전",
+    "8.0": "MySQL 8.0 (Ubuntu 기본 APT)",
+    "8.4": "MySQL 8.4 LTS (공식 MySQL APT)",
   };
-  return labels[value] || "Ubuntu 24.04 apt 실제 설치 버전";
+  return labels[value] || labels["8.4"];
 }
 
 function appPackageLabel(value) {
@@ -1642,10 +1658,10 @@ function renderRecoveryStatus(status) {
   recoveryActionButtons("resume").forEach((button) => {
     button.hidden = !status?.can_resume;
     button.disabled = !status?.can_resume;
-    setButtonLabel(button, status?.can_retry_step ? "현재 단계 다시 실행" : "이어서 진행");
+    setButtonLabel(button, status?.can_retry_step ? "수정 후 현재 단계 재실행" : "이어서 진행");
     button.title = status?.can_resume
       ? (status?.can_retry_step
-        ? "복원된 실패 단계를 다시 적용하고 검증한 뒤 다음 단계로 진행합니다."
+        ? "원인을 자동 수정하지 않습니다. 설치기 업데이트나 입력·환경을 수정한 뒤 실패 단계를 다시 적용하고 검증합니다."
         : "저장된 마지막 정상 단계부터 설치를 이어서 진행합니다.")
       : (status?.resume_reason || "현재 단계에서는 이어서 진행할 수 없습니다.");
   });
@@ -1897,7 +1913,6 @@ function packagePurpose(name) {
     apache2: "Apache 웹서버가 도메인 요청을 앱으로 전달합니다.",
     "g7-frankenphp": "FrankenPHP가 로컬 앱서버로 PHP 요청을 처리합니다.",
     "mysql-server": "MySQL이 사이트 데이터를 저장합니다.",
-    "mariadb-server": "MariaDB가 사이트 데이터를 저장합니다.",
     curl: "원격 파일 다운로드에 사용합니다.",
     unzip: "다운로드한 압축 파일을 해제합니다.",
     "ca-certificates": "HTTPS 인증서 검증에 필요합니다.",
@@ -1925,7 +1940,7 @@ function packagePurpose(name) {
     return "Composer와 Artisan 실행에 필요한 PHP CLI입니다.";
   }
   if (/^php\d+\.\d+-mysql$/.test(packageName)) {
-    return "PHP에서 MySQL/MariaDB에 접속합니다.";
+    return "PHP에서 MySQL에 접속합니다.";
   }
   if (/^php\d+\.\d+-mbstring$/.test(packageName)) {
     return "한글과 다국어 문자열 처리를 지원합니다.";
@@ -2028,7 +2043,7 @@ function packageGroupDefinition(name) {
   if (/^(nginx|apache2|frankenphp)/.test(packageName)) {
     return { key: "web", title: "웹서버" };
   }
-  if (/^(mysql|mariadb)/.test(packageName)) {
+  if (/^mysql/.test(packageName)) {
     return { key: "database", title: "데이터베이스" };
   }
   if (/^redis/.test(packageName)) {
@@ -2281,9 +2296,9 @@ async function runResumeAction(button, statusNode) {
     setAlert(
       statusNode,
       "info",
-      state.recoveryStatus?.can_retry_step ? "실패 단계 다시 실행" : "설치 이어서 진행",
+      state.recoveryStatus?.can_retry_step ? "수정 후 실패 단계 재실행" : "설치 이어서 진행",
       state.recoveryStatus?.can_retry_step
-        ? "자동 복원된 실패 단계를 다시 적용하고 검증합니다. 성공하면 다음 단계로 계속 진행합니다."
+        ? "설치기는 원인을 자동 수정하지 않습니다. 변경 파일이 복원된 단계에서 현재 코드와 환경으로 다시 검증합니다."
         : "저장된 마지막 정상 단계부터 서버 설정을 계속합니다. 실시간 로그에서 실행 내용을 확인할 수 있습니다.",
     );
     const report = await apiFetch("/api/install/resume", {
@@ -2541,7 +2556,7 @@ function restoreInstallStateFromReport(report) {
     state.installCompleted ? "완료" : (failedStageFromReport(report) ? "실패" : "진행 중"),
   );
   setReportReady(true);
-  refreshInstallButtonState(state.installCompleted ? null : "복구 후 다시 시도");
+  refreshInstallButtonState(state.installCompleted ? null : "원인 수정 후 다시 시도");
 }
 
 function renderInstallReport(report) {
@@ -2596,7 +2611,7 @@ function renderInstallReport(report) {
   applyInstallStagesFromReport(report);
   state.installCompleted = completed;
   setReportReady(true);
-  refreshInstallButtonState(completed ? null : "복구 후 다시 시도");
+  refreshInstallButtonState(completed ? null : "원인 수정 후 다시 시도");
   state.savedReportPayload = {
     exists: true,
     path: "방금 생성됨",
@@ -2896,7 +2911,7 @@ function setupGuideMarkdown(report = {}) {
     "## 서비스 명령",
     `- 웹서버: sudo systemctl reload ${webService}`,
     ...runtimeRows,
-    `- DB: sudo systemctl restart ${report.database === "mariadb" ? "mariadb" : "mysql"}`,
+    "- DB: sudo systemctl restart mysql",
     "- SSL 갱신 확인: sudo certbot renew --dry-run --no-random-sleep-on-renew",
     "",
   ].join("\n");
@@ -2939,7 +2954,7 @@ function downloadReport(format) {
 function operationsGuideCard(report = {}, link = null) {
   const webService = webServiceName(report.web_server);
   const fpmService = report.php_version ? `php${report.php_version}-fpm` : "php-fpm";
-  const dbService = report.database === "mariadb" ? "mariadb" : "mysql";
+  const dbService = "mysql";
   const appLink = link?.html || accessLink(report.domain || "example.com", report.phase).html;
   const runtimeRow = report.web_server === "frankenphp"
     ? ["FrankenPHP 재시작", "sudo systemctl restart g7-frankenphp"]
@@ -3093,7 +3108,7 @@ function provisioningActions(report = {}) {
   const webService = webServiceName(report.web_server);
   const webCheck = report.web_server === "apache" ? "sudo apache2ctl configtest" : "sudo nginx -t";
   const fpmService = report.php_version ? `php${report.php_version}-fpm` : "php-fpm";
-  const dbService = report.database === "mariadb" ? "mariadb" : "mysql";
+  const dbService = "mysql";
   const appRoot = report.web_root || "/home/사이트계정/public_html";
   const appUrl = report.app_url || accessLink(report.domain || "example.com", report.phase).html.replace(/<[^>]+>/g, "");
   const selectedApp = report.app_profile || report.app_package;
@@ -3101,7 +3116,11 @@ function provisioningActions(report = {}) {
   const certName = report.domain || "example.com";
   const phpVersion = report.php_version || "8.5";
   const webConfigPath = report.web_server === "apache" ? "/etc/apache2/sites-available/g7.conf" : "/etc/nginx/sites-available/g7.conf";
-  const phpPoolPath = `/etc/php/${phpVersion}/fpm/pool.d/g7.conf`;
+  const webRuntimePath = report.web_server === "apache" ? "/etc/apache2/conf-available/g7-runtime.conf" : "/etc/nginx/nginx.conf";
+  const siteUser = report.site_user || "site";
+  const phpPoolPath = `/etc/php/${phpVersion}/fpm/pool.d/g7-${siteUser}.conf`;
+  const phpSocketPath = `/run/php/php${phpVersion}-fpm-${siteUser}.sock`;
+  const phpSessionPath = `/var/lib/php/sessions/g7-${siteUser}`;
   const phpSapi = isFranken ? "cli" : "fpm";
   const phpIniPath = `/etc/php/${phpVersion}/${phpSapi}/php.ini`;
   const secretsPath = "/etc/g7-installer/secrets.toml";
@@ -3122,12 +3141,13 @@ function provisioningActions(report = {}) {
       files: [
         configFile(webConfigPath, isFranken ? "도메인 vhost, 문서 루트, FrankenPHP proxy 연결" : "도메인 vhost, 문서 루트, PHP-FPM 연결"),
         configFile(report.web_server === "apache" ? "/etc/apache2/sites-enabled/g7.conf" : "/etc/nginx/sites-enabled/g7.conf", "활성화된 vhost 링크/엔트리"),
+        configFile(webRuntimePath, report.web_server === "apache" ? "Apache event MPM 런타임 튜닝" : "Nginx worker_processes/worker_connections 튜닝"),
         ...(isFranken ? [configFile("/etc/systemd/system/g7-frankenphp.service", "FrankenPHP 로컬 앱서버 systemd unit")] : []),
       ],
       preview: [
         `server_name ${serverNamesPreview(report.domain, report.www_mode)};`,
         `root ${report.app_document_root || "-"};`,
-        isFranken ? "proxy_pass http://127.0.0.1:7080" : `php_socket /run/php/php${phpVersion}-fpm.sock`,
+        isFranken ? "proxy_pass http://127.0.0.1:7080" : `php_socket ${phpSocketPath}`,
         "security_headers nosniff / frame policy / referrer policy",
       ],
     }),
@@ -3150,6 +3170,7 @@ function provisioningActions(report = {}) {
         ...(isFranken ? [configFile("/etc/systemd/system/g7-frankenphp.service", "FrankenPHP 로컬 앱서버 unit")] : [configFile(phpPoolPath, "사이트 계정 전용 PHP-FPM pool")]),
         configFile(`/etc/php/${phpVersion}/${phpSapi}/conf.d/99-g7-installer.ini`, "업로드/메모리/opcache 주요 런타임 값"),
         configFile(phpIniPath, isFranken ? "PHP CLI 기준 php.ini" : "PHP-FPM 기준 php.ini"),
+        ...(!isFranken ? [configFile(phpSessionPath, "사이트 계정 전용 PHP 세션 디렉터리")] : []),
       ],
       preview: [
         isFranken ? "ExecStart=/opt/g7-frankenphp/frankenphp php-server --listen 127.0.0.1:7080" : `[g7-${report.site_user || "site"}]`,
@@ -3166,6 +3187,7 @@ function provisioningActions(report = {}) {
       command: `sudo systemctl restart ${dbService}`,
       settings: [
         ["DB 엔진", databaseLabel(report.database)],
+        ["DB 버전", databaseVersionLabel(report.database_version)],
         ["DB 이름", report.database_name || "-"],
         ["DB 계정", report.database_user || "-"],
         ["비밀번호 정책", report.database_password_policy === "user-provided-store-root-only" ? "사용자 입력값 root-only 저장" : "무작위 생성 후 root-only 저장"],
@@ -3173,6 +3195,7 @@ function provisioningActions(report = {}) {
         ["서비스", dbService],
       ],
       files: [
+        configFile("/etc/mysql/conf.d/g7-installer.cnf", "MySQL 메모리/연결/slow query 튜닝"),
         configFile(secretsPath, "DB 비밀번호 root-only 보관", true),
         configFile(`${appRoot}/.env`, "앱 DB 접속 환경값", true),
       ],
@@ -3956,7 +3979,7 @@ function restoreWizardState() {
     return;
   }
 
-  applyFormValues(saved.form);
+  applyFormValues(normalizeSavedFormValues(saved.form));
   refreshFormState({ preservePlan: true });
 
   if (saved.doctorReport) {
@@ -4409,7 +4432,7 @@ function bindEvents() {
 
     try {
       markStage("preflight", "진행");
-      setAlert(nodes.installStatus, "info", "서버 세팅 진행 중", "패키지, 사이트 계정/웹루트, vhost, PHP 런타임, DB, SSL, 앱 파일 배치 순서로 검증합니다.");
+      setAlert(nodes.installStatus, "info", "서버 세팅 진행 중", "패키지, 사이트 계정/웹루트, PHP 런타임, vhost/HTTP, DB, SSL, 앱 파일 배치 순서로 검증합니다.");
       setActivityStatus("서버 세팅 시작", "패키지 설치 전 사전 점검을 실행합니다.", 5);
       log("서버 세팅 시작");
       const report = await apiFetch("/api/install/prepare", {

@@ -2,13 +2,15 @@ use super::*;
 
 pub(super) fn apply_package_phase<R: CommandRunner>(
     probe: &SystemProbe<R>,
+    paths: &InstallPaths,
     plan: &plan::InstallPlan,
 ) -> std::result::Result<ApplySummary, Box<PackagePhaseFailure>> {
-    apply_package_phase_with_baseline(probe, plan, None)
+    apply_package_phase_with_baseline(probe, paths, plan, None)
 }
 
 pub(super) fn apply_package_phase_with_baseline<R: CommandRunner>(
     probe: &SystemProbe<R>,
+    paths: &InstallPaths,
     plan: &plan::InstallPlan,
     preserved_baseline: Option<&[InstallCheck]>,
 ) -> std::result::Result<ApplySummary, Box<PackagePhaseFailure>> {
@@ -103,6 +105,30 @@ pub(super) fn apply_package_phase_with_baseline<R: CommandRunner>(
             return Err(package_phase_failure(error, &summary, &completed_steps));
         }
         completed_steps.push("apt-updated-after-php-source".to_string());
+    }
+
+    if plan.database_version == "8.4" {
+        if let Err(error) = configure_mysql_apt_source(probe, paths) {
+            return Err(package_phase_failure(error, &summary, &completed_steps));
+        }
+        completed_steps.push("mysql-apt-source-added".to_string());
+
+        let output = match probe.apt_update() {
+            Ok(output) => output,
+            Err(err) => {
+                return Err(package_phase_failure(
+                    command_error("apt-update-after-mysql-source", "apt-get update", err),
+                    &summary,
+                    &completed_steps,
+                ));
+            }
+        };
+        if let Err(error) =
+            require_success("apt-update-after-mysql-source", "apt-get update", output)
+        {
+            return Err(package_phase_failure(error, &summary, &completed_steps));
+        }
+        completed_steps.push("apt-updated-after-mysql-source".to_string());
     }
 
     let mut candidate_checks = Vec::new();
@@ -225,6 +251,80 @@ pub(super) fn apply_package_phase_with_baseline<R: CommandRunner>(
     Ok(summary)
 }
 
+struct TemporaryDownload(PathBuf);
+
+impl Drop for TemporaryDownload {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+pub(super) fn configure_mysql_apt_source<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    paths: &InstallPaths,
+) -> Result<()> {
+    let archive = paths.resolve(MYSQL_APT_CONFIG_ARCHIVE_PATH);
+    if let Some(parent) = archive.parent() {
+        fs::create_dir_all(parent).map_err(|source| Error::FileWriteFailed {
+            path: parent.display().to_string(),
+            source,
+        })?;
+    }
+    let archive_path = archive.display().to_string();
+    let _cleanup = TemporaryDownload(archive);
+
+    let output = probe
+        .download_file(MYSQL_APT_CONFIG_URL, &archive_path)
+        .map_err(|err| {
+            command_error(
+                "mysql-apt-config-download",
+                format!("curl -fsSL -o {archive_path} {MYSQL_APT_CONFIG_URL}"),
+                err,
+            )
+        })?;
+    require_success(
+        "mysql-apt-config-download",
+        format!("curl -fsSL -o {archive_path} {MYSQL_APT_CONFIG_URL}"),
+        output,
+    )?;
+
+    let output = probe.sha256_file(&archive_path).map_err(|err| {
+        command_error(
+            "mysql-apt-config-checksum",
+            format!("sha256sum -- {archive_path}"),
+            err,
+        )
+    })?;
+    require_success(
+        "mysql-apt-config-checksum",
+        format!("sha256sum -- {archive_path}"),
+        output.clone(),
+    )?;
+    let actual = output.stdout.split_whitespace().next().unwrap_or_default();
+    if actual != MYSQL_APT_CONFIG_SHA256 {
+        return Err(Error::InstallVerificationFailed {
+            checks: format!(
+                "MySQL APT configuration checksum mismatch: expected {MYSQL_APT_CONFIG_SHA256}, got {actual}"
+            ),
+        });
+    }
+
+    let output = probe
+        .apt_install_mysql_repo_config(&archive_path, "mysql-8.4-lts")
+        .map_err(|err| {
+            command_error(
+                "mysql-apt-source-add",
+                format!("apt-get install -y {archive_path}"),
+                err,
+            )
+        })?;
+    require_success(
+        "mysql-apt-source-add",
+        format!("apt-get install -y {archive_path}"),
+        output,
+    )
+}
+
 pub(super) fn package_phase_failure(
     error: Error,
     summary: &ApplySummary,
@@ -248,6 +348,11 @@ pub(super) fn apply_local_postfix_runtime<R: CommandRunner>(
             .map_err(|err| command_error("postfix-config", &command, err))?;
         require_success("postfix-config", command, output)?;
     }
+
+    let output = probe
+        .postfix_check()
+        .map_err(|err| command_error("postfix-configtest", "postfix check", err))?;
+    require_success("postfix-configtest", "postfix check", output)?;
 
     let output = probe
         .restart_service("postfix")

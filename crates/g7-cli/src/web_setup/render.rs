@@ -219,10 +219,7 @@ pub(super) fn plan_to_api(
     }
 }
 
-pub(super) fn install_to_api(
-    report: install::InstallReport,
-    database_version: String,
-) -> InstallApiReport {
+pub(super) fn install_to_api(report: install::InstallReport) -> InstallApiReport {
     InstallApiReport {
         domain: report.domain,
         deployment_mode: report.deployment_mode,
@@ -233,7 +230,7 @@ pub(super) fn install_to_api(
         php_version: report.php_version,
         php_source: report.php_source,
         database: report.database_engine,
-        database_version,
+        database_version: report.database_version,
         database_name: report.database_name,
         database_user: report.database_user,
         database_password_policy: report.database_password_policy,
@@ -279,8 +276,10 @@ pub(super) fn install_to_api(
 }
 
 pub(super) fn normalize_database_version(value: &str) -> String {
-    let _ = value;
-    "apt-default".to_string()
+    match value {
+        "8.0" => "8.0".to_string(),
+        _ => "8.4".to_string(),
+    }
 }
 
 pub(super) fn install_checks_to_api(checks: Vec<install::InstallCheck>) -> Vec<InstallApiCheck> {

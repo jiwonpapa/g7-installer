@@ -3,6 +3,12 @@
 //! Keep version, port, path, and upstream URL defaults here so release bumps do not drift.
 
 pub(crate) const PHP_READY_FILENAME: &str = "g7inst-ready.php";
+pub(crate) const MYSQL_APT_CONFIG_URL: &str =
+    "https://repo.mysql.com/mysql-apt-config_0.8.39-1_all.deb";
+pub(crate) const MYSQL_APT_CONFIG_SHA256: &str =
+    "45bcfcd426dd548980c391e2c3c8e399899fea661035d4d0a059e0494721f7e0";
+pub(crate) const MYSQL_APT_CONFIG_ARCHIVE_PATH: &str =
+    "/var/lib/g7-installer/candidates/mysql-apt-config.deb";
 pub(crate) const GNUBOARD7_REPO_URL: &str = "https://github.com/gnuboard/g7.git";
 pub(crate) const GNUBOARD7_LATEST_RELEASE_API_URL: &str =
     "https://api.github.com/repos/gnuboard/g7/releases/latest";
