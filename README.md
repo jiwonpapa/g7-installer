@@ -98,6 +98,32 @@ http://127.0.0.1:7717/?token=...
 
 `sudo` 권한이 없으면 설치를 진행할 수 없습니다. root SSH, `su -`, 또는 VPS 콘솔에서 관리자 권한을 먼저 확보합니다. SSH alias와 `g7inst` 전용 sudoers 설정은 [Lightsail 상세 안내](docs/lightsail-ubuntu24-setup-guide.md)에서 선택 기능으로 설명합니다.
 
+### sudo 비밀번호 확인
+
+VPS 업체와 관계없이 SSH 접속 계정에서 아래 명령이 성공하면 비밀번호 없이 설치할 수 있습니다.
+
+```bash
+sudo -n true && echo "sudo OK" || echo "sudo 비밀번호 필요"
+```
+
+`sudo OK`가 나오면 위의 한 줄 설치 명령을 그대로 실행합니다. `sudo 비밀번호 필요`가 나오면 설치 명령이 요청할 때 터미널에 비밀번호를 입력해도 됩니다. sudo 권한 자체가 없다면 VPS 콘솔이나 root 계정으로 먼저 권한을 부여해야 하며, 설치기가 스스로 sudo 권한을 만들 수는 없습니다.
+
+설치 후 `g7inst`만 비밀번호 없이 재실행하려면 `sudo visudo -f /etc/sudoers.d/g7inst`를 열고 `SSH_USER`를 실제 접속 계정으로 바꿔 아래 한 줄을 넣습니다.
+
+```text
+SSH_USER ALL=(root) NOPASSWD: SETENV: /usr/local/bin/g7inst
+```
+
+저장 후 검사합니다.
+
+```bash
+sudo chmod 0440 /etc/sudoers.d/g7inst
+sudo visudo -cf /etc/sudoers.d/g7inst
+sudo -n /usr/local/bin/g7inst --version
+```
+
+이 설정은 `g7inst`가 설치된 뒤에만 적용됩니다. 최초 bootstrap부터 비밀번호 입력을 없애려면 VPS가 처음부터 비밀번호 없는 sudo 계정을 제공해야 합니다. `NOPASSWD: ALL`로 모든 명령을 허용하는 설정은 권장하지 않습니다.
+
 웹 UI의 `사이트 계정 비밀번호`는 별도입니다. 설치기가 만들 Linux 사이트 계정의 SFTP/파일관리 비밀번호이며 sudo 권한은 주지 않습니다.
 
 웹 UI 기본 조합은 `Nginx / PHP 8.5 / Ubuntu 24.04 apt의 MySQL / www로 통일 / Redis 사용 / 메일 발송 안 함 / 그누보드7`입니다. 외부 SMTP를 선택하면 계정과 비밀번호를 필수로 받고, 비밀번호는 루트 전용 비밀 파일에만 저장합니다. 로컬 Postfix는 발신 IP 평판·PTR·25번 포트 정책을 직접 관리할 사용자만 선택합니다.
