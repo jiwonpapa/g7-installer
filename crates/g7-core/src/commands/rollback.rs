@@ -26,6 +26,8 @@ const SAFE_ROLLBACK_PHASES: [&str; 4] = [
     InstallerPhase::VhostFailed.as_str(),
 ];
 const SAFE_BASELINE_STATUS: &str = "not-installed";
+const MYSQL_SERVER_PACKAGE: &str = "mysql-server";
+const MYSQL_DATA_DIR: &str = "/var/lib/mysql";
 const APP_MUTATION_STEPS: [&str; 9] = [
     "web-root-populated",
     "php-fpm-config-written",
@@ -143,10 +145,14 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         reset::run_metadata_only_with_probe_and_paths(true, true, probe, &paths.reset_paths())?;
 
     if dry_run {
+        let mut package_actions = planned_package_actions(&baseline);
+        if let Some(action) = rollback_mysql_data(paths, &baseline, true)? {
+            package_actions.push(action);
+        }
         return Ok(RollbackReport {
             dry_run,
             phase: state.phase,
-            package_actions: planned_package_actions(&baseline),
+            package_actions,
             service_actions: service_plan,
             metadata_reset,
         });
@@ -200,6 +206,9 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         return Err(Error::RollbackVerificationFailed {
             checks: failed_packages.join(", "),
         });
+    }
+    if let Some(action) = rollback_mysql_data(paths, &baseline, false)? {
+        package_actions.push(action);
     }
 
     let metadata_reset =
@@ -345,6 +354,45 @@ fn planned_package_actions(baseline: &[ReportCheck]) -> Vec<RollbackAction> {
             }
         })
         .collect()
+}
+
+fn rollback_mysql_data(
+    paths: &RollbackPaths,
+    baseline: &[ReportCheck],
+    dry_run: bool,
+) -> Result<Option<RollbackAction>> {
+    let installer_owned = baseline
+        .iter()
+        .any(|check| check.name == MYSQL_SERVER_PACKAGE && check.status == SAFE_BASELINE_STATUS);
+    if !installer_owned {
+        return Ok(None);
+    }
+
+    let data_dir = paths.resolve(MYSQL_DATA_DIR);
+    if !data_dir.exists() {
+        return Ok(Some(RollbackAction::new(
+            "mysql-data",
+            "missing",
+            "MySQL 데이터 디렉터리가 이미 없습니다.",
+        )));
+    }
+    if dry_run {
+        return Ok(Some(RollbackAction::new(
+            "mysql-data",
+            "would-delete",
+            format!("설치기가 생성한 {MYSQL_DATA_DIR}을 삭제할 예정입니다."),
+        )));
+    }
+
+    fs::remove_dir_all(&data_dir).map_err(|source| Error::FileRemoveFailed {
+        path: MYSQL_DATA_DIR.to_string(),
+        source,
+    })?;
+    Ok(Some(RollbackAction::new(
+        "mysql-data",
+        "deleted",
+        format!("설치기가 생성한 {MYSQL_DATA_DIR}을 삭제했습니다."),
+    )))
 }
 
 fn planned_service_actions(
@@ -672,7 +720,7 @@ fn report_string(report: &serde_json::Value, key: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RollbackPaths, run_with_probe_and_paths};
+    use super::{ReportCheck, RollbackPaths, rollback_mysql_data, run_with_probe_and_paths};
     use crate::Error;
     use g7_state::owned_files::{OWNED_FILES_PATH, OwnedFiles, write_owned_files};
     use g7_state::state::{InstallerState, STATE_PATH, read_state_file, write_state_file};
@@ -749,6 +797,28 @@ mod tests {
         assert!(!fs_root.join("etc/g7-installer/config.toml").exists());
         assert!(!fs_root.join(strip_root(STATE_PATH)).exists());
 
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn rollback_removes_mysql_data_only_when_server_was_installer_owned()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let fs_root = create_temp_fs_root()?;
+        let mysql_data = fs_root.join("var/lib/mysql");
+        fs::create_dir_all(&mysql_data)?;
+        fs::write(mysql_data.join("mysql.ibd"), "installer data")?;
+        let paths = RollbackPaths::with_root(&fs_root);
+        let baseline = vec![ReportCheck {
+            name: "mysql-server".to_string(),
+            status: "not-installed".to_string(),
+        }];
+
+        let action = rollback_mysql_data(&paths, &baseline, false)?
+            .ok_or_else(|| std::io::Error::other("missing mysql data action"))?;
+
+        assert_eq!(action.status, "deleted");
+        assert!(!mysql_data.exists());
         fs::remove_dir_all(fs_root)?;
         Ok(())
     }

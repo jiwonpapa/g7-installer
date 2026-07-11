@@ -326,6 +326,33 @@ test("options expose MySQL 8.0 and 8.4 only with account autocomplete disabled",
   }
 });
 
+test("manually cleared database identifiers stay empty and block the next step", async ({ page }) => {
+  const { server, baseUrl } = await startServer({ reportExists: false });
+  try {
+    await page.goto(`${baseUrl}/setup/doctor?token=e2e`);
+    await page.getByRole("button", { name: "점검 실행" }).click();
+    await page.getByRole("button", { name: "다음: 설치 방식" }).click();
+    await expect(page).toHaveURL(/\/setup\/options/);
+    const databaseName = page.locator('#database-name-input');
+    const databaseUser = page.locator('#database-user-input');
+
+    await expect(databaseName).not.toHaveValue("");
+    await expect(databaseUser).not.toHaveValue("");
+    await databaseName.fill("");
+    await databaseUser.fill("");
+
+    await expect(databaseName).toHaveValue("");
+    await expect(databaseUser).toHaveValue("");
+    await expect(page.getByRole("button", { name: "다음: 사양 확정" }).last()).toBeDisabled();
+
+    await page.reload();
+    await expect(databaseName).toHaveValue("");
+    await expect(databaseUser).toHaveValue("");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("legacy saved database options migrate to MySQL 8.0", async ({ page }) => {
   const { server, baseUrl } = await startServer();
   try {

@@ -198,7 +198,11 @@ pub(super) fn apply_package_phase_with_baseline<R: CommandRunner>(
         }
     };
     if let Err(error) = require_success("apt-install", install_command.clone(), output) {
-        return Err(package_phase_failure(error, &summary, &completed_steps));
+        return Err(package_phase_failure(
+            attach_package_failure_diagnostics(paths, error),
+            &summary,
+            &completed_steps,
+        ));
     }
 
     for service in &services {
@@ -249,6 +253,22 @@ pub(super) fn apply_package_phase_with_baseline<R: CommandRunner>(
     summary.mail_checks = mail_checks;
     summary.certbot_checks = certbot_checks;
     Ok(summary)
+}
+
+pub(super) fn attach_package_failure_diagnostics(paths: &InstallPaths, mut error: Error) -> Error {
+    let Error::InstallCommandFailed { stderr, .. } = &mut error else {
+        return error;
+    };
+    let mysql_error_log = paths.resolve("/var/log/mysql/error.log");
+    let Ok(contents) = fs::read_to_string(mysql_error_log) else {
+        return error;
+    };
+    let excerpt = tail_text(&contents, 600);
+    if !excerpt.is_empty() {
+        stderr.push_str("\nMySQL error log: ");
+        stderr.push_str(&excerpt);
+    }
+    error
 }
 
 struct TemporaryDownload(PathBuf);

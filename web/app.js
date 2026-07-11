@@ -890,6 +890,7 @@ function saveWizardState() {
     sessionStorage.setItem(wizardStorageKey, JSON.stringify({
       activeStep: state.activeStep,
       form: formValues(),
+      databaseDefaults: databaseDefaultState(),
       doctorReport: state.doctorReport,
       planReport: state.planReport,
       savedReportPayload: state.savedReportPayload,
@@ -1401,6 +1402,48 @@ function derivedDatabaseUser(siteUser, appPackage) {
   return value.slice(0, 32);
 }
 
+function databaseDefaultState() {
+  return {
+    name: {
+      userEdited: nodes.databaseName?.dataset.userEdited === "true",
+      autoValue: nodes.databaseName?.dataset.autoValue || null,
+    },
+    user: {
+      userEdited: nodes.databaseUser?.dataset.userEdited === "true",
+      autoValue: nodes.databaseUser?.dataset.autoValue || null,
+    },
+  };
+}
+
+function restoreDatabaseDefaultState(saved) {
+  for (const [node, field] of [
+    [nodes.databaseName, saved?.name],
+    [nodes.databaseUser, saved?.user],
+  ]) {
+    if (!node || !field) {
+      continue;
+    }
+    if (field.userEdited) {
+      node.dataset.userEdited = "true";
+    } else {
+      delete node.dataset.userEdited;
+    }
+    if (field.autoValue) {
+      node.dataset.autoValue = field.autoValue;
+    }
+  }
+}
+
+function syncDatabaseDefaultField(node, nextValue) {
+  if (!node || node.dataset.userEdited === "true") {
+    return;
+  }
+  if (!node.value || node.dataset.autoValue === node.value) {
+    node.value = nextValue;
+    node.dataset.autoValue = nextValue;
+  }
+}
+
 function syncDatabaseDefaults() {
   const form = nodes.optionsForm;
   const domain = form.elements.domain?.value;
@@ -1409,14 +1452,8 @@ function syncDatabaseDefaults() {
   const nextName = derivedDatabaseName(domain, appPackage);
   const nextUser = derivedDatabaseUser(siteUser, appPackage);
 
-  if (nodes.databaseName && (!nodes.databaseName.value || nodes.databaseName.dataset.autoValue === nodes.databaseName.value)) {
-    nodes.databaseName.value = nextName;
-    nodes.databaseName.dataset.autoValue = nextName;
-  }
-  if (nodes.databaseUser && (!nodes.databaseUser.value || nodes.databaseUser.dataset.autoValue === nodes.databaseUser.value)) {
-    nodes.databaseUser.value = nextUser;
-    nodes.databaseUser.dataset.autoValue = nextUser;
-  }
+  syncDatabaseDefaultField(nodes.databaseName, nextName);
+  syncDatabaseDefaultField(nodes.databaseUser, nextUser);
 }
 
 function applyTemplate(templateName) {
@@ -3980,6 +4017,7 @@ function restoreWizardState() {
   }
 
   applyFormValues(normalizeSavedFormValues(saved.form));
+  restoreDatabaseDefaultState(saved.databaseDefaults);
   refreshFormState({ preservePlan: true });
 
   if (saved.doctorReport) {
@@ -4531,7 +4569,12 @@ function bindEvents() {
 
   document.querySelector("#start-over-button").addEventListener("click", resetWizardForRetry);
 
-  nodes.optionsForm.addEventListener("input", refreshFormState);
+  nodes.optionsForm.addEventListener("input", (event) => {
+    if (event.target === nodes.databaseName || event.target === nodes.databaseUser) {
+      event.target.dataset.userEdited = "true";
+    }
+    refreshFormState();
+  });
   nodes.optionsForm.addEventListener("change", refreshFormState);
 }
 

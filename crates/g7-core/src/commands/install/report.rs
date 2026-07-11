@@ -161,11 +161,11 @@ pub(super) fn command_output_excerpt(err: &Error) -> Option<String> {
     match err {
         Error::InstallCommandFailed { stdout, stderr, .. } => {
             let mut parts = Vec::new();
-            let stdout = short_text(stdout);
+            let stdout = short_tail_text(stdout);
             if !stdout.is_empty() {
                 parts.push(format!("stdout: {stdout}"));
             }
-            let stderr = short_text(stderr);
+            let stderr = short_tail_text(stderr);
             if !stderr.is_empty() {
                 parts.push(format!("stderr: {stderr}"));
             }

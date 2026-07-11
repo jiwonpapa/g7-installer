@@ -97,6 +97,7 @@ pub fn run_with_probe<R: CommandRunner>(probe: &SystemProbe<R>) -> DoctorReport 
         nginx_config_check(probe),
         apache_config_check(probe),
         g7_web_root_check(probe),
+        mysql_data_check(probe),
         installer_state_check(probe),
         g7_owned_files_check(probe),
         certbot_check(probe),
@@ -459,6 +460,29 @@ fn g7_web_root_check<R: CommandRunner>(probe: &SystemProbe<R>) -> DoctorCheck {
     }
 }
 
+fn mysql_data_check<R: CommandRunner>(probe: &SystemProbe<R>) -> DoctorCheck {
+    match probe.directory_entries(Path::new("/var/lib/mysql")) {
+        Ok(entries) if entries.is_empty() => DoctorCheck {
+            name: "mysql-data",
+            status: DoctorCheckStatus::Pass,
+            message: "기존 MySQL 데이터가 없습니다.".to_string(),
+        },
+        Ok(entries) => DoctorCheck {
+            name: "mysql-data",
+            status: DoctorCheckStatus::Fail,
+            message: format!(
+                "/var/lib/mysql에 기존 데이터 {}개가 있습니다. 새 설치 전에 이전 설치를 정상 초기화하거나 데이터를 별도로 보존하세요.",
+                entries.len()
+            ),
+        },
+        Err(err) => DoctorCheck {
+            name: "mysql-data",
+            status: DoctorCheckStatus::Pending,
+            message: format!("/var/lib/mysql 확인 실패: {err}"),
+        },
+    }
+}
+
 fn installer_state_check<R: CommandRunner>(probe: &SystemProbe<R>) -> DoctorCheck {
     if probe.path_exists(Path::new(STATE_PATH)) {
         DoctorCheck {
@@ -704,6 +728,28 @@ mod tests {
             check.name == "g7-web-root" && check.status == DoctorCheckStatus::Fail
         }));
         assert!(!report.install_allowed);
+        Ok(())
+    }
+
+    #[test]
+    fn doctor_blocks_existing_mysql_data_before_package_install()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let os_release_path = write_temp_os_release()?;
+        let fs_root = create_temp_fs_root()?;
+        let mysql_data = fs_root.join("var/lib/mysql");
+        fs::create_dir_all(&mysql_data)?;
+        fs::write(mysql_data.join("mysql.ibd"), "existing data")?;
+        let probe = clean_probe(&os_release_path, &fs_root, "0\n")?;
+
+        let report = run_with_probe(&probe);
+
+        fs::remove_file(os_release_path)?;
+        fs::remove_dir_all(fs_root)?;
+
+        assert!(!report.install_allowed);
+        assert!(report.checks.iter().any(|check| {
+            check.name == "mysql-data" && check.status == DoctorCheckStatus::Fail
+        }));
         Ok(())
     }
 

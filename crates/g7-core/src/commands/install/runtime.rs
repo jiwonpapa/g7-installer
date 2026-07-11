@@ -566,6 +566,23 @@ pub(super) fn short_text(value: &str) -> String {
     }
 }
 
+pub(super) fn short_tail_text(value: &str) -> String {
+    tail_text(value, 800)
+}
+
+pub(super) fn tail_text(value: &str, limit: usize) -> String {
+    let text = value.trim().replace('\n', " ");
+    let length = text.chars().count();
+    if length > limit {
+        format!(
+            "...{}",
+            text.chars().skip(length - limit).collect::<String>()
+        )
+    } else {
+        text
+    }
+}
+
 pub(super) fn pool_value(content: &str, key: &str) -> Option<String> {
     content.lines().find_map(|line| {
         let line = line.trim();

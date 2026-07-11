@@ -544,11 +544,12 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         Err(failure) => {
             let failure = *failure;
             let err = failure.error;
+            let problem = command_failure_message("패키지 설치 단계 실패", &err);
             let mut failed_summary = failure.summary;
             failed_summary.safety_checks = safety_checks(&install_plan, "package-failed");
             completed_steps.extend(failure.completed_steps);
             state.set_phase(InstallerPhase::PackageFailed);
-            state.fail_step("packages", err.to_string(), false);
+            state.fail_step("packages", problem.clone(), false);
             state.completed_steps = completed_steps.clone();
             write_state_file(&state_path, &state).map_err(|source| Error::FileWriteFailed {
                 path: STATE_PATH.to_string(),
@@ -557,12 +558,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             write_existing_file(
                 paths,
                 REPORT_PATH,
-                &report_content(
-                    &install_plan,
-                    &state.phase,
-                    &failed_summary,
-                    Some(&err.to_string()),
-                )?,
+                &report_content(&install_plan, &state.phase, &failed_summary, Some(&problem))?,
             )?;
             return Err(err);
         }

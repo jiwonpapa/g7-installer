@@ -30,6 +30,8 @@ const MANAGED_SWAP_MARKERS: [(&str, &str); 2] = [
     (SWAP_SYSCTL_PATH, "Managed by g7inst."),
 ];
 const BASELINE_NOT_INSTALLED: &str = "not-installed";
+const MYSQL_SERVER_PACKAGE: &str = "mysql-server";
+const MYSQL_DATA_DIR: &str = "/var/lib/mysql";
 const PHP_SOURCE_ONDREJ: &str = "ondrej";
 const ONDREJ_PHP_SOURCE_PATHS: [&str; 3] = [
     "/etc/apt/sources.list.d/ondrej-ubuntu-php-noble.sources",
@@ -148,7 +150,17 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         ));
     }
 
-    if metadata.database_name.is_some() || metadata.database_user.is_some() {
+    if metadata.database_server_installed_by_installer {
+        actions.push(ResetAction::new(
+            "database",
+            if dry_run {
+                "would-remove-with-server-data"
+            } else {
+                "remove-with-server-data"
+            },
+            "설치기가 새로 구성한 MySQL이므로 개별 DB 삭제 대신 전체 데이터 디렉터리를 초기화합니다.",
+        ));
+    } else if metadata.database_name.is_some() || metadata.database_user.is_some() {
         let database_name = metadata.database_name.as_deref();
         let database_user = metadata.database_user.as_deref();
         if dry_run {
@@ -210,6 +222,9 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
 
     let packages = metadata.packages_to_purge.clone();
     actions.extend(reset_packages(probe, &packages, dry_run)?);
+    if let Some(action) = reset_mysql_data_dir(paths, &metadata, dry_run)? {
+        actions.push(action);
+    }
 
     let (removed, missing) = remove_reset_files(paths, &metadata, dry_run)?;
 
@@ -485,6 +500,7 @@ struct ResetMetadata {
     packages_to_purge: Vec<String>,
     services: Vec<String>,
     certbot_issued: bool,
+    database_server_installed_by_installer: bool,
 }
 
 fn reset_metadata(paths: &ResetPaths) -> Result<ResetMetadata> {
@@ -561,8 +577,14 @@ fn fill_metadata_from_report(metadata: &mut ResetMetadata, report: &serde_json::
         .php_source
         .take()
         .or_else(|| report_string(report, "php_source"));
+    let preinstall_packages = report_checks(report, "preinstall_package_checks");
+    metadata.database_server_installed_by_installer = metadata
+        .database_server_installed_by_installer
+        || preinstall_packages.iter().any(|check| {
+            check.name == MYSQL_SERVER_PACKAGE && check.status == BASELINE_NOT_INSTALLED
+        });
     metadata.packages_to_purge.extend(
-        report_checks(report, "preinstall_package_checks")
+        preinstall_packages
             .into_iter()
             .filter(|check| check.status == BASELINE_NOT_INSTALLED)
             .map(|check| check.name),
@@ -776,16 +798,13 @@ fn reset_packages<R: CommandRunner>(
         }
 
         match probe.package_status(package).map_err(command_error)? {
-            PackageStatus::Installed => purge_packages.push(package.clone()),
+            PackageStatus::Installed | PackageStatus::Unknown => {
+                purge_packages.push(package.clone())
+            }
             PackageStatus::NotInstalled => actions.push(ResetAction::new(
                 format!("package:{package}"),
                 "skipped",
                 "현재 dpkg 설치 상태가 아니어서 apt purge 대상에서 제외했습니다.",
-            )),
-            PackageStatus::Unknown => actions.push(ResetAction::new(
-                format!("package:{package}"),
-                "skipped",
-                "dpkg 상태가 명확하지 않아 전체 리셋 실패를 막기 위해 apt purge 대상에서 제외했습니다.",
             )),
         }
     }
@@ -816,6 +835,42 @@ fn database_reset_message(database_name: Option<&str>, database_user: Option<&st
         (None, Some(database_user)) => format!("database user `{database_user}`"),
         (None, None) => "database metadata missing".to_string(),
     }
+}
+
+fn reset_mysql_data_dir(
+    paths: &ResetPaths,
+    metadata: &ResetMetadata,
+    dry_run: bool,
+) -> Result<Option<ResetAction>> {
+    if !metadata.database_server_installed_by_installer {
+        return Ok(None);
+    }
+
+    let data_dir = paths.resolve(MYSQL_DATA_DIR);
+    if !data_dir.exists() {
+        return Ok(Some(ResetAction::new(
+            "database-data",
+            "missing",
+            "MySQL 데이터 디렉터리가 이미 없습니다.",
+        )));
+    }
+    if dry_run {
+        return Ok(Some(ResetAction::new(
+            "database-data",
+            "would-delete",
+            format!("설치기가 생성한 {MYSQL_DATA_DIR}을 삭제할 예정입니다."),
+        )));
+    }
+
+    fs::remove_dir_all(&data_dir).map_err(|source| Error::FileRemoveFailed {
+        path: MYSQL_DATA_DIR.to_string(),
+        source,
+    })?;
+    Ok(Some(ResetAction::new(
+        "database-data",
+        "deleted",
+        format!("설치기가 생성한 {MYSQL_DATA_DIR}을 삭제했습니다."),
+    )))
 }
 
 fn reset_database<R: CommandRunner>(
@@ -1117,8 +1172,8 @@ fn files_contain_systemd_units(files: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        ResetPaths, delete_site_user_account, reset_database, run_with_probe_and_paths,
-        validate_reset_path,
+        ResetMetadata, ResetPaths, delete_site_user_account, reset_database, reset_mysql_data_dir,
+        reset_packages, run_with_probe_and_paths, validate_reset_path,
     };
     use crate::installer_paths::MYSQL_CONFIG_CANDIDATE_PATH;
     use g7_state::owned_files::{OWNED_FILES_PATH, OwnedFiles, write_owned_files};
@@ -1537,6 +1592,7 @@ mod tests {
                 "preinstall_package_checks": [
                     {"name": "nginx", "status": "not-installed", "message": "fresh"},
                     {"name": "php8.3-fpm", "status": "not-installed", "message": "fresh"},
+                    {"name": "mysql-server", "status": "not-installed", "message": "fresh"},
                     {"name": "certbot", "status": "not-installed", "message": "fresh"},
                     {"name": "python3-certbot-nginx", "status": "not-installed", "message": "fresh"},
                     {"name": "curl", "status": "installed", "message": "preexisting"}
@@ -1570,6 +1626,8 @@ mod tests {
         )?;
         fs::write(fs_root.join("etc/php/8.3/fpm/pool.d/g7-g7.conf"), "pool")?;
         fs::write(fs_root.join("etc/mysql/conf.d/g7-installer.cnf"), "mysql")?;
+        fs::create_dir_all(fs_root.join("var/lib/mysql"))?;
+        fs::write(fs_root.join("var/lib/mysql/mysql.ibd"), "installer data")?;
 
         let owned = OwnedFiles {
             version: 1,
@@ -1588,22 +1646,17 @@ mod tests {
 
         let runner = FakeCommandRunner::default();
         runner.push_output(CommandOutput::success("0\n"));
-        runner.push_output(CommandOutput::success(""));
-        runner.push_output(CommandOutput::success(""));
-        runner.push_output(CommandOutput::success("active\n"));
-        runner.push_output(CommandOutput::success(""));
-        runner.push_output(CommandOutput::success("active\n"));
-        runner.push_output(CommandOutput::success(""));
-        runner.push_output(CommandOutput::success("active\n"));
-        runner.push_output(CommandOutput::success(""));
-        runner.push_output(CommandOutput::success(""));
-        runner.push_output(CommandOutput::success(""));
+        for _service in 0..4 {
+            runner.push_output(CommandOutput::success("active\n"));
+            runner.push_output(CommandOutput::success(""));
+        }
+        runner.push_output(CommandOutput::success("0\n"));
         runner.push_output(CommandOutput::success("terminated"));
         runner.push_output(CommandOutput::failure(1, "no remaining process"));
-        runner.push_output(CommandOutput::success("0\n"));
-        runner.push_output(CommandOutput::success("install ok installed"));
-        runner.push_output(CommandOutput::success("install ok installed"));
         runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success("install ok installed"));
+        runner.push_output(CommandOutput::success("install ok installed"));
+        runner.push_output(CommandOutput::success("install ok installed"));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
@@ -1617,12 +1670,9 @@ mod tests {
                 .iter()
                 .any(|action| { action.name == "account:g7" && action.status == "deleted" })
         );
-        assert!(
-            report
-                .actions
-                .iter()
-                .any(|action| { action.name == "database" && action.status == "dropped" })
-        );
+        assert!(report.actions.iter().any(|action| {
+            action.name == "database" && action.status == "remove-with-server-data"
+        }));
         assert!(report.actions.iter().any(|action| {
             action.name == "certificate:example.com" && action.status == "preserved"
         }));
@@ -1662,19 +1712,19 @@ mod tests {
                 .exists()
         );
         assert!(!fs_root.join("swapfile").exists());
+        assert!(!fs_root.join("var/lib/mysql").exists());
+        assert!(
+            report
+                .actions
+                .iter()
+                .any(|action| { action.name == "database-data" && action.status == "deleted" })
+        );
 
         let recorded = probe.runner().recorded();
         assert_eq!(recorded[0].program, OsString::from("id"));
-        assert_eq!(recorded[1].program, OsString::from("mysql"));
+        assert_ne!(recorded[1].program, OsString::from("mysql"));
         assert!(!recorded.iter().any(|spec| { spec.program == "certbot" }));
-        assert!(recorded.iter().any(|spec| {
-            spec.program == "mysql"
-                && spec.stdin.as_deref().is_some_and(|stdin| {
-                    let sql = String::from_utf8_lossy(stdin);
-                    sql.contains("DROP DATABASE IF EXISTS `g7_example`;")
-                        && sql.contains("DROP USER IF EXISTS 'g7_user'@'localhost';")
-                })
-        }));
+        assert!(!recorded.iter().any(|spec| spec.program == "mysql"));
         assert!(recorded.iter().any(|spec| {
             spec.program == "pkill"
                 && spec.args
@@ -1700,6 +1750,46 @@ mod tests {
         }));
 
         fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn reset_preserves_mysql_data_when_server_predates_installer()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let fs_root = create_temp_fs_root()?;
+        let mysql_data = fs_root.join("var/lib/mysql");
+        fs::create_dir_all(&mysql_data)?;
+        fs::write(mysql_data.join("mysql.ibd"), "operator data")?;
+        let metadata = ResetMetadata::default();
+
+        let action = reset_mysql_data_dir(&ResetPaths::with_root(&fs_root), &metadata, false)?;
+
+        assert!(action.is_none());
+        assert!(mysql_data.join("mysql.ibd").exists());
+        fs::remove_dir_all(fs_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn reset_purges_installer_owned_partially_configured_package()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success("install ok unpacked"));
+        runner.push_output(CommandOutput::success("purged"));
+        let probe = SystemProbe::new(runner);
+
+        let actions = reset_packages(&probe, &["mysql-server".to_string()], false)?;
+
+        assert!(
+            actions.iter().any(|action| {
+                action.name == "package:mysql-server" && action.status == "purged"
+            })
+        );
+        assert!(probe.runner().recorded().iter().any(|spec| {
+            spec.program == "env"
+                && spec.args.contains(&OsString::from("purge"))
+                && spec.args.contains(&OsString::from("mysql-server"))
+        }));
         Ok(())
     }
 

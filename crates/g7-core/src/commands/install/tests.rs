@@ -507,6 +507,55 @@ fn command_failure_message_includes_command_output_excerpt() {
 }
 
 #[test]
+fn command_failure_message_keeps_the_end_of_long_command_output() {
+    let err = Error::InstallCommandFailed {
+        step: "apt-install",
+        command: "apt-get install".to_string(),
+        status: 100,
+        stdout: "package output ".repeat(100),
+        stderr: format!(
+            "{}Invalid MySQL server downgrade: Cannot downgrade from 80410 to 80046",
+            "debconf noise ".repeat(100)
+        ),
+    };
+
+    let message = super::command_failure_message("패키지 설치 단계 실패", &err);
+
+    assert!(message.contains("Cannot downgrade from 80410 to 80046"));
+}
+
+#[test]
+fn package_failure_collects_mysql_error_log_tail()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let fs_root = create_temp_fs_root()?;
+    let error_log = fs_root.join("var/log/mysql/error.log");
+    fs::create_dir_all(error_log.parent().expect("mysql log parent"))?;
+    fs::write(
+        &error_log,
+        format!(
+            "{}Invalid MySQL server downgrade: Cannot downgrade from 80410 to 80046\n",
+            "old mysql log line\n".repeat(100)
+        ),
+    )?;
+    let err = Error::InstallCommandFailed {
+        step: "apt-install",
+        command: "apt-get install mysql-server".to_string(),
+        status: 100,
+        stdout: String::new(),
+        stderr: "mysql.service failed".to_string(),
+    };
+
+    let enriched =
+        super::attach_package_failure_diagnostics(&InstallPaths::with_root(&fs_root), err);
+    let message = super::command_failure_message("패키지 설치 단계 실패", &enriched);
+
+    assert!(message.contains("MySQL error log"));
+    assert!(message.contains("Cannot downgrade from 80410 to 80046"));
+    fs::remove_dir_all(fs_root)?;
+    Ok(())
+}
+
+#[test]
 fn letsencrypt_rate_limit_detection_reads_stderr() {
     let err = Error::InstallCommandFailed {
         step: "certbot-certonly",
