@@ -181,3 +181,7 @@ sudo g7inst reset --yes
 - [보안 정책](SECURITY.md)
 - [추천 도구 배너 JSON 정책](docs/promo-manifest.md)
 - [SIR 게시판 소개글 초안](docs/sir-board-post.md)
+
+## 라이선스
+
+G7 Installer는 [MIT License](LICENSE)로 배포합니다. 저작권 고지와 라이선스 원문을 유지하면 사용, 수정, 재배포 및 상업적 이용이 가능합니다.
