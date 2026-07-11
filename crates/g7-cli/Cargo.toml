@@ -1,6 +1,6 @@
 [package]
 name = "g7-cli"
-version = "0.2.41"
+version = "0.2.42"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -15,9 +15,9 @@ path = "src/main.rs"
 axum.workspace = true
 clap.workspace = true
 getrandom.workspace = true
-g7-core = { path = "../g7-core", version = "=0.2.41" }
-g7-state = { path = "../g7-state", version = "=0.2.41" }
-g7-system = { path = "../g7-system", version = "=0.2.41" }
+g7-core = { path = "../g7-core", version = "=0.2.42" }
+g7-state = { path = "../g7-state", version = "=0.2.42" }
+g7-system = { path = "../g7-system", version = "=0.2.42" }
 miette.workspace = true
 serde.workspace = true
 serde_json.workspace = true

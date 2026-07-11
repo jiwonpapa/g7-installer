@@ -115,26 +115,26 @@ pub fn resume_with_probe_and_paths<R: CommandRunner>(
         owned_files_path: &owned_files_path,
     };
 
-    if let Some(step) = state.current_step.clone()
-        && restore_unfinished_transaction(paths, &state.install_id, &step)?
-    {
-        let error = state
-            .steps
-            .iter()
-            .find(|record| record.id == step)
-            .and_then(|record| record.last_error.clone())
-            .unwrap_or_else(|| "이전 실행이 설정 적용 중 중단되었습니다.".to_string());
-        state.fail_step(&step, error, true);
-        state.completed_steps = completed_steps.clone();
-        persist_progress(
-            &progress,
-            &mut owned_files,
-            &owned_file_list,
-            &state,
-            &install_plan,
-            &apply_summary,
-            None,
-        )?;
+    if let Some(step) = state.current_step.clone() {
+        if restore_unfinished_transaction(paths, &state.install_id, &step)? {
+            let error = state
+                .steps
+                .iter()
+                .find(|record| record.id == step)
+                .and_then(|record| record.last_error.clone())
+                .unwrap_or_else(|| "이전 실행이 설정 적용 중 중단되었습니다.".to_string());
+            state.fail_step(&step, error, true);
+            state.completed_steps = completed_steps.clone();
+            persist_progress(
+                &progress,
+                &mut owned_files,
+                &owned_file_list,
+                &state,
+                &install_plan,
+                &apply_summary,
+                None,
+            )?;
+        }
     }
 
     resume_pre_tls_steps(
