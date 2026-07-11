@@ -2346,6 +2346,7 @@ async function runResumeAction(button, statusNode) {
     await refreshRecoveryStatus();
     setAlert(nodes.reportStatus, "success", "설치 이어서 진행 완료", "중단 지점 이후 설정과 검증을 완료했습니다.");
     await finishInstallProgressDialog(true);
+    await refreshRecoveryStatus();
     showStep("report", { force: true });
   } catch (error) {
     setAlert(statusNode, "error", "설치 이어서 진행 실패", formatError(error));
@@ -4482,6 +4483,7 @@ function bindEvents() {
       setAlert(nodes.installStatus, "success", "서버 세팅 완료", "결과 리포트에서 웹서버, PHP, DB, SSL, 앱 경로와 재시작 명령을 확인하세요.");
       log(`서버 세팅 완료: ${report.phase}`);
       await finishInstallProgressDialog(true);
+      await refreshRecoveryStatus();
       showStep("report", { force: true });
     } catch (error) {
       stopPackageTicker();

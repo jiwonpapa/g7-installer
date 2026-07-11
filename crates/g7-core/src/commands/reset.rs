@@ -813,6 +813,31 @@ fn reset_packages<R: CommandRunner>(
         return Ok(actions);
     }
 
+    let mut protected_packages = vec![
+        "certbot".to_string(),
+        "letsencrypt".to_string(),
+        "python3-certbot".to_string(),
+    ];
+    protected_packages.extend(
+        packages
+            .iter()
+            .filter(|package| preserve_package_on_reset(package))
+            .cloned(),
+    );
+    protected_packages = unique_names(protected_packages.iter().map(String::as_str));
+    let mut installed_protected = Vec::new();
+    for package in protected_packages {
+        if probe.package_status(&package).map_err(command_error)? == PackageStatus::Installed {
+            installed_protected.push(package);
+        }
+    }
+    if !installed_protected.is_empty() {
+        let output = probe
+            .apt_mark_manual(&installed_protected)
+            .map_err(command_error)?;
+        require_success("package-preserve", "apt-mark manual", output)?;
+    }
+
     let output = probe.apt_purge(&purge_packages).map_err(command_error)?;
     require_success("package-purge", "apt-get purge", output)?;
     actions.extend(purge_packages.iter().map(|package| {
@@ -1657,6 +1682,11 @@ mod tests {
         runner.push_output(CommandOutput::success("install ok installed"));
         runner.push_output(CommandOutput::success("install ok installed"));
         runner.push_output(CommandOutput::success("install ok installed"));
+        runner.push_output(CommandOutput::success("install ok installed"));
+        runner.push_output(CommandOutput::failure(1, "not installed"));
+        runner.push_output(CommandOutput::success("install ok installed"));
+        runner.push_output(CommandOutput::success("install ok installed"));
+        runner.push_output(CommandOutput::success("marked manual"));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
@@ -1739,6 +1769,12 @@ mod tests {
                 && spec.args == vec![OsString::from("-r"), OsString::from("g7")]
         }));
         assert!(recorded.iter().any(|spec| {
+            spec.program == "apt-mark"
+                && spec.args.contains(&OsString::from("manual"))
+                && spec.args.contains(&OsString::from("certbot"))
+                && spec.args.contains(&OsString::from("python3-certbot-nginx"))
+        }));
+        assert!(recorded.iter().any(|spec| {
             spec.program == "env"
                 && spec.args.contains(&OsString::from("apt-get"))
                 && spec.args.contains(&OsString::from("purge"))
@@ -1775,6 +1811,9 @@ mod tests {
     -> std::result::Result<(), Box<dyn std::error::Error>> {
         let runner = FakeCommandRunner::default();
         runner.push_output(CommandOutput::success("install ok unpacked"));
+        runner.push_output(CommandOutput::failure(1, "not installed"));
+        runner.push_output(CommandOutput::failure(1, "not installed"));
+        runner.push_output(CommandOutput::failure(1, "not installed"));
         runner.push_output(CommandOutput::success("purged"));
         let probe = SystemProbe::new(runner);
 
@@ -1812,6 +1851,9 @@ mod tests {
         runner.push_output(CommandOutput::success("0\n"));
         runner.push_output(CommandOutput::failure(1, "dpkg-query: no packages found"));
         runner.push_output(CommandOutput::success("install ok installed"));
+        runner.push_output(CommandOutput::failure(1, "not installed"));
+        runner.push_output(CommandOutput::failure(1, "not installed"));
+        runner.push_output(CommandOutput::failure(1, "not installed"));
         runner.push_output(CommandOutput::success(""));
         let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
         let report =

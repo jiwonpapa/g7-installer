@@ -20,7 +20,7 @@ use std::os::unix::fs as unix_fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::commands::doctor::{self, DoctorCheckStatus};
 use crate::commands::plan;

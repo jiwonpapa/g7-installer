@@ -140,7 +140,7 @@ pub(super) fn apply_vhost_phase<R: CommandRunner>(
 
     let smoke_host = primary_http_host(plan);
     let smoke_path = format!("/{PHP_READY_FILENAME}");
-    match probe.http_host_path_smoke(&smoke_host, &smoke_path) {
+    match http_host_path_smoke_with_reload_grace(probe, &smoke_host, &smoke_path) {
         Ok(true) => checks.push(InstallCheck::pass(
             "http-smoke",
             format!("HTTP smoke passed for Host: {smoke_host}, Path: {smoke_path}."),
@@ -167,6 +167,25 @@ pub(super) fn apply_vhost_phase<R: CommandRunner>(
     ));
 
     Ok(checks)
+}
+
+const VHOST_SMOKE_ATTEMPTS: usize = 20;
+const VHOST_SMOKE_RETRY_DELAY: Duration = Duration::from_secs(1);
+
+pub(super) fn http_host_path_smoke_with_reload_grace<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    host: &str,
+    path: &str,
+) -> std::result::Result<bool, g7_system::SystemProbeError> {
+    for attempt in 0..VHOST_SMOKE_ATTEMPTS {
+        if probe.http_host_path_smoke(host, path)? {
+            return Ok(true);
+        }
+        if attempt + 1 < VHOST_SMOKE_ATTEMPTS {
+            std::thread::sleep(VHOST_SMOKE_RETRY_DELAY);
+        }
+    }
+    Ok(false)
 }
 
 pub(super) fn install_frankenphp_app_server<R: CommandRunner>(

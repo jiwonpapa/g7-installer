@@ -69,6 +69,17 @@ pub fn apt_purge<R: CommandRunner>(
     )
 }
 
+pub fn apt_mark_manual<R: CommandRunner>(
+    runner: &R,
+    packages: &[String],
+) -> Result<CommandOutput, CommandError> {
+    runner.run(
+        &CommandSpec::new("apt-mark")
+            .arg("manual")
+            .args(packages.iter().cloned()),
+    )
+}
+
 pub fn apt_add_repository<R: CommandRunner>(
     runner: &R,
     repository: &str,
@@ -108,7 +119,7 @@ fn apt_env() -> CommandSpec {
 mod tests {
     use super::{
         apt_add_repository, apt_candidate_available, apt_install, apt_install_mysql_repo_config,
-        apt_purge, apt_update,
+        apt_mark_manual, apt_purge, apt_update,
     };
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
@@ -194,6 +205,28 @@ mod tests {
         assert!(recorded[0].args.contains(&OsString::from("--auto-remove")));
         assert!(recorded[0].args.contains(&OsString::from("nginx")));
         assert!(recorded[0].args.contains(&OsString::from("php8.3-fpm")));
+        Ok(())
+    }
+
+    #[test]
+    fn apt_mark_manual_is_shell_free() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success("certbot set to manually installed"));
+
+        apt_mark_manual(
+            &runner,
+            &["certbot".to_string(), "python3-certbot-nginx".to_string()],
+        )?;
+        let recorded = runner.recorded();
+
+        assert_eq!(recorded[0].program, OsString::from("apt-mark"));
+        assert_eq!(recorded[0].args[0], OsString::from("manual"));
+        assert!(recorded[0].args.contains(&OsString::from("certbot")));
+        assert!(
+            recorded[0]
+                .args
+                .contains(&OsString::from("python3-certbot-nginx"))
+        );
         Ok(())
     }
 

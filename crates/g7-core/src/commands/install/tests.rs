@@ -1,4 +1,4 @@
-use super::{InstallPaths, run_with_probe_and_paths};
+use super::{InstallPaths, http_host_path_smoke_with_reload_grace, run_with_probe_and_paths};
 use crate::Error;
 use g7_state::owned_files::OWNED_FILES_PATH;
 use g7_state::state::STATE_PATH;
@@ -13,6 +13,23 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[test]
+fn vhost_smoke_retries_while_reload_workers_converge()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let runner = FakeCommandRunner::default();
+    runner.push_output(CommandOutput::failure(22, "not active yet"));
+    runner.push_output(CommandOutput::success(""));
+    let probe = SystemProbe::new(runner);
+
+    assert!(http_host_path_smoke_with_reload_grace(
+        &probe,
+        "www.example.com",
+        "/g7inst-ready.php"
+    )?);
+    assert_eq!(probe.runner().recorded().len(), 2);
+    Ok(())
+}
 
 #[test]
 fn install_writes_prepared_state_and_owned_files()
