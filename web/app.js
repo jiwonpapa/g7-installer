@@ -113,6 +113,25 @@ const nodes = {
   promoPanel: document.querySelector("#promo-panel"),
   summaryPanel: document.querySelector("#summary-panel"),
   floatingHelp: document.querySelector("#floating-help"),
+  stepProgressLabel: document.querySelector("#step-progress-label"),
+  stackStage: document.querySelector("#stack-stage"),
+  stackProfileLabel: document.querySelector("#stack-profile-label"),
+  stackProfileDescription: document.querySelector("#stack-profile-description"),
+  stackRepositoryLabel: document.querySelector("#stack-repository-label"),
+  stackWebProduct: document.querySelector("#stack-web-product"),
+  stackWebLabel: document.querySelector("#stack-web-label"),
+  stackPhpLabel: document.querySelector("#stack-php-label"),
+  stackDatabaseLabel: document.querySelector("#stack-database-label"),
+  stackRedisProduct: document.querySelector("#stack-redis-product"),
+  stackRedisLabel: document.querySelector("#stack-redis-label"),
+  accountSettings: document.querySelector("#account-settings"),
+  credentialState: document.querySelector("#credential-state"),
+  siteCredentialLane: document.querySelector("#site-credential-lane"),
+  siteCredentialStatus: document.querySelector("#site-credential-status"),
+  databaseCredentialLane: document.querySelector("#database-credential-lane"),
+  databaseCredentialStatus: document.querySelector("#database-credential-status"),
+  advancedSettings: document.querySelector("#advanced-settings"),
+  summaryProfile: document.querySelector("#summary-profile"),
   summaryDomain: document.querySelector("#summary-domain"),
   summaryRuntime: document.querySelector("#summary-runtime"),
   summaryData: document.querySelector("#summary-data"),
@@ -120,6 +139,15 @@ const nodes = {
 };
 
 const stepOrder = ["login", "check", "options", "plan", "install", "report", "provision"];
+const stepDisplayLabels = {
+  login: "접속",
+  check: "진단",
+  options: "프로필",
+  plan: "검토",
+  install: "설치",
+  report: "완료",
+  provision: "설정",
+};
 const stepRoutes = {
   login: "/setup/connect",
   check: "/setup/doctor",
@@ -228,44 +256,36 @@ const errorLabel = {
   "rollback is blocked while another install action is running": "다른 설치 작업 중에는 되돌릴 수 없습니다.",
 };
 
-const templates = {
-  recommended: {
-    domain: null,
-    deployment_mode: "public",
-    web_server: "nginx",
-    php_version: "8.5",
-    database: "mysql",
-  database_version: "8.0",
-    redis: "enable",
-    mail_mode: "none",
-    app_package: "gnuboard7",
-    web_root_mode: "public-html",
-    www_mode: "redirect-to-www",
-    security_profile: "standard",
-    ssh_policy: "audit-only",
-  },
-  apache: {
-    domain: null,
-    deployment_mode: "public",
-    web_server: "apache",
-    php_version: "8.5",
-    database: "mysql",
+const stackProfiles = {
+  stable: {
+    label: "운영 권장",
+    description: "Ubuntu 기본 저장소를 중심으로 호환성과 관리 편의성을 우선합니다.",
+    repositoryLabel: "Ubuntu 기본 저장소 중심",
+    php_version: "8.3",
     database_version: "8.0",
-    redis: "enable",
-    mail_mode: "none",
-    app_package: "gnuboard7",
-    web_root_mode: "public-html",
-    www_mode: "redirect-to-www",
-    security_profile: "standard",
-    ssh_policy: "audit-only",
+  },
+  latest: {
+    label: "최신 지원",
+    description: "검증된 공식 외부 저장소를 사용해 현재 지원 계열의 기능을 구성합니다.",
+    repositoryLabel: "Ondrej PPA · MySQL 공식 APT",
+    php_version: "8.5",
+    database_version: "8.4",
+  },
+  custom: {
+    label: "직접 선택",
+    description: "PHP와 MySQL 버전 계열을 직접 지정하고 저장소 후보를 사전 검증합니다.",
+    repositoryLabel: "선택한 버전별 저장소 자동 검증",
   },
 };
 
-const publicInstallTemplates = new Set(Object.keys(templates));
+const publicInstallTemplates = new Set(["recommended", "apache"]);
+const publicStackProfiles = new Set(Object.keys(stackProfiles));
 const publicWebServers = new Set(["nginx", "apache"]);
 const publicAppPackages = new Set(["gnuboard7"]);
 
 let operationOverlayResolve = null;
+let applyingStackProfile = false;
+let lastStackVisualSignature = null;
 
 // Icon paths are sourced from lucide-static and rendered inline to avoid extra requests.
 const iconSvg = {
@@ -861,6 +881,16 @@ function applyFormValues(values) {
   Object.entries(values).forEach(([name, value]) => {
     setFormValue(name, value);
   });
+
+  if (!Object.prototype.hasOwnProperty.call(values, "stack_profile")) {
+    setFormValue(
+      "stack_profile",
+      stackProfileForVersions(
+        values.php_version || nodes.optionsForm.elements.php_version?.value,
+        values.database_version || nodes.optionsForm.elements.database_version?.value,
+      ),
+    );
+  }
 }
 
 function normalizeSavedFormValues(values) {
@@ -872,6 +902,16 @@ function normalizeSavedFormValues(values) {
   normalized.database = "mysql";
   if (!new Set(["8.0", "8.4"]).has(normalized.database_version)) {
     normalized.database_version = "8.0";
+  }
+  const inferredProfile = stackProfileForVersions(
+    normalized.php_version || "8.3",
+    normalized.database_version,
+  );
+  if (
+    !publicStackProfiles.has(normalized.stack_profile)
+    || (normalized.stack_profile !== "custom" && normalized.stack_profile !== inferredProfile)
+  ) {
+    normalized.stack_profile = inferredProfile;
   }
   return normalized;
 }
@@ -950,19 +990,19 @@ function refreshInstallButtonState(label = null) {
 
   if (state.installCompleted) {
     nodes.installButton.disabled = true;
-    setButtonLabel(nodes.installButton, "기본 구성 완료");
+    setButtonLabel(nodes.installButton, "설치 완료");
     return;
   }
 
   nodes.installButton.disabled = false;
-  setButtonLabel(nodes.installButton, label || "기본 구성 시작");
+  setButtonLabel(nodes.installButton, label || "설치 시작");
 }
 
 function setDoctorPassed(passed) {
   state.doctorPassed = passed;
   if (nodes.checkNextButton) {
     nodes.checkNextButton.disabled = !passed;
-    setButtonLabel(nodes.checkNextButton, passed ? "다음: 설치 방식" : "점검 통과 후 다음");
+    setButtonLabel(nodes.checkNextButton, passed ? "다음: 설치 프로필" : "점검 통과 후 다음");
   }
 }
 
@@ -1037,7 +1077,7 @@ function showStep(nextStep, options = {}) {
       nodes.doctorStatus,
       "warning",
       "서버 점검이 먼저 필요합니다",
-      "신규 서버 상태를 통과해야 설치 방식 선택으로 넘어갈 수 있습니다.",
+      "신규 서버 상태를 통과해야 설치 프로필 선택으로 넘어갈 수 있습니다.",
     );
     step = "check";
   }
@@ -1078,8 +1118,8 @@ function showStep(nextStep, options = {}) {
     setAlert(
       nodes.planStatus,
       "warning",
-      "설치 사양 확정이 필요합니다",
-      "4단계에서 자동 생성된 설치 계획을 확인한 뒤 이 사양으로 진행 버튼을 누르세요.",
+      "설치 검토가 필요합니다",
+      "4단계에서 자동 생성된 설치 계획을 확인한 뒤 설치로 이동하세요.",
     );
     step = "plan";
   }
@@ -1099,6 +1139,9 @@ function showStep(nextStep, options = {}) {
   state.activeStep = step;
   document.body.dataset.activeStep = step;
   const activeIndex = stepOrder.indexOf(step);
+  if (nodes.stepProgressLabel) {
+    nodes.stepProgressLabel.textContent = `${activeIndex + 1} / ${stepOrder.length} · ${stepDisplayLabels[step]}`;
+  }
 
   document.querySelectorAll("[data-view]").forEach((view) => {
     view.classList.toggle("is-visible", view.dataset.view === step);
@@ -1212,18 +1255,51 @@ function selectedInstallTemplate() {
   return nodes.optionsForm.elements.install_template?.value || "recommended";
 }
 
+function selectedStackProfile() {
+  const value = nodes.optionsForm.elements.stack_profile?.value || "stable";
+  return publicStackProfiles.has(value) ? value : "stable";
+}
+
+function stackProfileForVersions(phpVersion, databaseVersion) {
+  if (phpVersion === "8.3" && databaseVersion === "8.0") {
+    return "stable";
+  }
+  if (phpVersion === "8.5" && databaseVersion === "8.4") {
+    return "latest";
+  }
+  return "custom";
+}
+
+function syncInstallTemplate() {
+  const webServer = nodes.optionsForm.elements.web_server?.value;
+  setFormValue("install_template", webServer === "apache" ? "apache" : "recommended");
+}
+
 function normalizePublicSelection() {
   const form = nodes.optionsForm;
 
-  if (!publicInstallTemplates.has(form.elements.install_template?.value || "")) {
-    setFormValue("install_template", "recommended");
-  }
   if (!publicWebServers.has(form.elements.web_server?.value || "")) {
     setFormValue("web_server", "nginx");
+  }
+  if (!new Set(["8.3", "8.5"]).has(form.elements.php_version?.value || "")) {
+    setFormValue("php_version", "8.3");
+  }
+  if (!new Set(["8.0", "8.4"]).has(form.elements.database_version?.value || "")) {
+    setFormValue("database_version", "8.0");
+  }
+  if (!publicStackProfiles.has(form.elements.stack_profile?.value || "")) {
+    setFormValue(
+      "stack_profile",
+      stackProfileForVersions(
+        form.elements.php_version?.value,
+        form.elements.database_version?.value,
+      ),
+    );
   }
   if (!publicAppPackages.has(form.elements.app_package?.value || "")) {
     setFormValue("app_package", "gnuboard7");
   }
+  syncInstallTemplate();
 }
 
 function appTemplateError(payload = optionPayload()) {
@@ -1356,6 +1432,33 @@ function refreshSitePasswordState(options = {}) {
     nodes.templateAppStatus.dataset.status = templateError ? "fail" : "pass";
     nodes.templateAppStatus.textContent = templateError || "설치 템플릿과 앱 조합이 맞습니다.";
   }
+  if (nodes.credentialState) {
+    nodes.credentialState.dataset.status = combinedError ? "pending" : "pass";
+    nodes.credentialState.textContent = error
+      ? "1단계 사이트 계정"
+      : dbError
+        ? "2단계 DB 계정"
+        : "입력 확인 완료";
+  }
+  const siteLaneState = error ? "active" : "pass";
+  const databaseLaneState = dbError ? (error ? "pending" : "active") : "pass";
+  if (nodes.siteCredentialLane) {
+    nodes.siteCredentialLane.dataset.state = siteLaneState;
+  }
+  if (nodes.siteCredentialStatus) {
+    nodes.siteCredentialStatus.textContent = error ? (hasInput ? "확인 필요" : "입력 중") : "완료";
+  }
+  if (nodes.databaseCredentialLane) {
+    nodes.databaseCredentialLane.dataset.state = databaseLaneState;
+  }
+  if (nodes.databaseCredentialStatus) {
+    nodes.databaseCredentialStatus.textContent = dbError
+      ? (hasDbPasswordInput ? "확인 필요" : (error ? "다음 단계" : "입력 중"))
+      : "완료";
+  }
+  if (options.show && combinedError && nodes.accountSettings) {
+    nodes.accountSettings.open = true;
+  }
   nodes.optionsPlanButtons.forEach((button) => {
     button.disabled = Boolean(combinedError);
     button.title = combinedError || "";
@@ -1456,20 +1559,79 @@ function syncDatabaseDefaults() {
   syncDatabaseDefaultField(nodes.databaseUser, nextUser);
 }
 
-function applyTemplate(templateName) {
-  const template = templates[templateName];
-  if (!template) {
+function applyStackProfile(profileName) {
+  const profile = stackProfiles[profileName];
+  if (!profile) {
     return;
   }
 
-  Object.entries(template).forEach(([name, value]) => {
-    if (name === "domain" && value === null) {
-      return;
+  applyingStackProfile = true;
+  try {
+    if (profile.php_version) {
+      setFormValue("php_version", profile.php_version);
     }
-    setFormValue(name, value);
-  });
+    if (profile.database_version) {
+      setFormValue("database_version", profile.database_version);
+    }
+  } finally {
+    applyingStackProfile = false;
+  }
+
+  if (nodes.advancedSettings) {
+    nodes.advancedSettings.open = profileName === "custom";
+  }
 
   refreshFormState();
+}
+
+function refreshStackPreview() {
+  const payload = optionPayload();
+  const profileName = selectedStackProfile();
+  const profile = stackProfiles[profileName] || stackProfiles.custom;
+
+  if (nodes.stackProfileLabel) {
+    nodes.stackProfileLabel.textContent = profile.label;
+  }
+  if (nodes.stackProfileDescription) {
+    nodes.stackProfileDescription.textContent = profile.description;
+  }
+  if (nodes.stackRepositoryLabel) {
+    nodes.stackRepositoryLabel.textContent = profile.repositoryLabel;
+  }
+  if (nodes.stackWebProduct) {
+    nodes.stackWebProduct.dataset.product = payload.web_server;
+  }
+  if (nodes.stackWebLabel) {
+    nodes.stackWebLabel.textContent = runtimeLabel(payload.web_server);
+  }
+  if (nodes.stackPhpLabel) {
+    nodes.stackPhpLabel.textContent = `${payload.php_version}.x`;
+  }
+  if (nodes.stackDatabaseLabel) {
+    nodes.stackDatabaseLabel.textContent = `MySQL ${payload.database_version}.x`;
+  }
+  if (nodes.stackRedisProduct) {
+    nodes.stackRedisProduct.dataset.enabled = String(payload.redis === "enable");
+  }
+  if (nodes.stackRedisLabel) {
+    nodes.stackRedisLabel.textContent = payload.redis === "enable" ? "Redis 사용" : "Redis 미사용";
+  }
+  if (nodes.stackStage) {
+    const visualSignature = [
+      profileName,
+      payload.web_server,
+      payload.php_version,
+      payload.database_version,
+      payload.redis,
+    ].join(":");
+    nodes.stackStage.dataset.profile = profileName;
+    if (lastStackVisualSignature !== visualSignature) {
+      nodes.stackStage.classList.remove("is-refreshing");
+      void nodes.stackStage.offsetWidth;
+      nodes.stackStage.classList.add("is-refreshing");
+      lastStackVisualSignature = visualSignature;
+    }
+  }
 }
 
 function refreshFormState(options = {}) {
@@ -1515,6 +1677,7 @@ function refreshFormState(options = {}) {
   syncDatabaseDefaults();
   refreshSecurityGuidance();
   refreshSitePasswordState();
+  refreshStackPreview();
   refreshSummary();
   if (shouldPersist) {
     saveWizardState();
@@ -1525,13 +1688,16 @@ function refreshSummary() {
   if (nodes.summaryPanel) {
     const shouldShowSummary = Boolean(
       state.authenticated
-        && !["login", "check"].includes(state.activeStep)
+        && !["login", "check", "options"].includes(state.activeStep)
         && (state.doctorPassed || state.planReady || state.reportReady || state.installCompleted),
     );
     nodes.summaryPanel.hidden = !shouldShowSummary;
   }
 
   const payload = optionPayload();
+  if (nodes.summaryProfile) {
+    nodes.summaryProfile.textContent = stackProfiles[selectedStackProfile()]?.label || "직접 선택";
+  }
   nodes.summaryDomain.textContent = payload.domain;
   nodes.summaryRuntime.textContent = `${runtimeLabel(payload.web_server)} / ${phpRuntimeLabel(payload.php_version, payload.php_source)}`;
   nodes.summaryData.textContent = `${databaseLabel(payload.database)} / Redis ${payload.redis === "enable" ? "사용" : "미사용"}`;
@@ -1730,9 +1896,38 @@ async function refreshRecoveryStatus() {
   }
 }
 
+function formatResourceMib(value) {
+  const mib = Number(value || 0);
+  if (!mib) {
+    return "확인 안 됨";
+  }
+  if (mib >= 1024) {
+    const gib = mib / 1024;
+    return `${gib >= 10 ? gib.toFixed(0) : gib.toFixed(1)} GB`;
+  }
+  return `${mib} MB`;
+}
+
 function renderDoctor(report) {
   state.doctorReport = report;
-  nodes.doctorResults.innerHTML = "";
+  const checks = Array.isArray(report.checks) ? report.checks : [];
+  const passed = checks.filter((check) => check.status === "pass").length;
+  const warned = checks.filter((check) => ["warn", "unknown"].includes(check.status)).length;
+  const failed = checks.filter((check) => check.status === "fail").length;
+  const resources = report.resources || {};
+
+  nodes.doctorResults.innerHTML = `
+    <section class="doctor-overview" aria-label="서버 자원 요약">
+      <div class="doctor-metric"><span>전체 메모리</span><strong>${escapeHtml(formatResourceMib(resources.total_memory_mib))}</strong></div>
+      <div class="doctor-metric"><span>사용 가능 메모리</span><strong>${escapeHtml(formatResourceMib(resources.available_memory_mib))}</strong></div>
+      <div class="doctor-metric"><span>루트 디스크 여유</span><strong>${escapeHtml(formatResourceMib(resources.root_available_mib))}</strong></div>
+      <div class="doctor-metric"><span>점검 결과</span><strong>${passed} 통과 · ${failed} 실패</strong></div>
+    </section>
+    <details class="doctor-details"${failed > 0 ? " open" : ""}>
+      <summary><strong>상세 점검 ${checks.length}개</strong><span>통과 ${passed} · 주의 ${warned} · 실패 ${failed}</span></summary>
+      <div class="doctor-detail-list"></div>
+    </details>
+  `;
   setDoctorPassed(Boolean(report.install_allowed));
 
   setAlert(
@@ -1744,7 +1939,8 @@ function renderDoctor(report) {
       : "실패 항목을 해결한 뒤 다시 점검하세요.",
   );
 
-  report.checks.forEach((check) => {
+  const detailList = nodes.doctorResults.querySelector(".doctor-detail-list");
+  checks.forEach((check) => {
     const item = document.createElement("div");
     item.className = "result-row";
     item.dataset.status = check.status;
@@ -1755,7 +1951,7 @@ function renderDoctor(report) {
       </div>
       <strong>${escapeHtml(statusLabel[check.status] || check.status)}</strong>
     `;
-    nodes.doctorResults.append(item);
+    detailList.append(item);
   });
   applyResourceDefaults(report.resources);
   renderRecoveryStatus(state.recoveryStatus);
@@ -1775,8 +1971,9 @@ function applyResourceDefaults(resources) {
     refreshMailFields();
   }
   state.resourceDefaultsApplied = true;
+  refreshStackPreview();
   log(`저사양 안전 기본값 적용: 메모리 ${totalMemoryMib} MiB, Redis와 로컬 Postfix 비활성화`);
-  setAlert(nodes.doctorStatus, "success", "서버 점검 통과", `메모리 ${totalMemoryMib} MiB 서버에 맞춰 Redis와 로컬 Postfix를 기본 비활성화했습니다. 설치 방식 단계에서 변경할 수 있습니다.`);
+  setAlert(nodes.doctorStatus, "success", "서버 점검 통과", `메모리 ${totalMemoryMib} MiB 서버에 맞춰 Redis와 로컬 Postfix를 기본 비활성화했습니다. 설치 프로필 단계에서 변경할 수 있습니다.`);
 }
 
 function auditDoctorReport(report) {
@@ -3836,7 +4033,7 @@ function renderPlanReport(report) {
       ${stopConditions.length ? compactPlanDetails("중단 조건", stopConditions) : ""}
     </div>`,
     compactListCard("진행 전 확인", [
-      "맞으면 이 사양으로 진행을 눌러 5단계 기본 구성을 시작합니다.",
+      "맞으면 검토 완료 버튼을 눌러 5단계 설치를 시작합니다.",
       "안 맞으면 이전을 눌러 3단계 설치 방식에서 사양을 수정합니다.",
       "수정 후 4단계로 돌아오면 계획은 자동으로 다시 생성됩니다.",
     ]),
@@ -4414,11 +4611,11 @@ function bindEvents() {
     void runProvisionAction(nodes.provisionActionDialog?.dataset.action, event.currentTarget);
   });
 
-  document.querySelectorAll('input[name="install_template"]').forEach((radio) => {
+  document.querySelectorAll('input[name="stack_profile"]').forEach((radio) => {
     radio.addEventListener("change", () => {
       if (radio.checked) {
-        applyTemplate(radio.value);
-        log("설치 템플릿 적용");
+        applyStackProfile(radio.value);
+        log(`설치 프로필 적용: ${stackProfiles[radio.value]?.label || radio.value}`);
       }
     });
   });
@@ -4575,9 +4772,26 @@ function bindEvents() {
     if (event.target === nodes.databaseName || event.target === nodes.databaseUser) {
       event.target.dataset.userEdited = "true";
     }
+    if (event.target.name === "stack_profile") {
+      return;
+    }
+    if (["php_version", "database_version"].includes(event.target.name)) {
+      return;
+    }
     refreshFormState();
   });
-  nodes.optionsForm.addEventListener("change", refreshFormState);
+  nodes.optionsForm.addEventListener("change", (event) => {
+    if (event.target.name === "stack_profile") {
+      return;
+    }
+    if (!applyingStackProfile && ["php_version", "database_version"].includes(event.target.name)) {
+      setFormValue("stack_profile", "custom");
+      if (nodes.advancedSettings) {
+        nodes.advancedSettings.open = true;
+      }
+    }
+    refreshFormState();
+  });
 }
 
 async function boot() {

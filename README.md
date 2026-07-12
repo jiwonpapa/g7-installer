@@ -6,6 +6,16 @@ Ubuntu VPS에 `g7inst`를 설치하고 웹 마법사로 그누보드7용 서버 
 
 `completed`는 **서버 프로비저닝 완료**를 뜻합니다. 그누보드7의 CMS 내부 설정, 테이블 구성, 관리자 계정 생성은 결과 리포트의 앱 링크에서 공식 브라우저 설치기를 한 번 더 진행해야 완료됩니다.
 
+## 설치 마법사 화면
+
+운영 권장·최신 지원 프로필을 고르면 웹서버, PHP, MySQL, Redis, SSL 구성이 한 화면에서 동기화됩니다.
+
+![G7 Installer 설치 프로필과 서버 스택 선택 화면](docs/images/g7-installer-profile.png)
+
+설치 중에는 단계별 상태와 실제 명령 로그를 같은 화면에서 확인할 수 있습니다.
+
+![G7 Installer 실시간 설치 진행과 로그 화면](docs/images/g7-installer-install-progress.png)
+
 ## 무엇부터 보면 되나요?
 
 | 상황 | 문서 |
@@ -56,8 +66,9 @@ Ubuntu VPS에 `g7inst`를 설치하고 웹 마법사로 그누보드7용 서버 
 
 ## PHP 버전과 apt 소스
 
-- 기본 PHP는 8.5입니다. 설치기가 `software-properties-common`, `ca-certificates`, `lsb-release`를 먼저 설치하고 `ppa:ondrej/php`를 자동 추가한 뒤 다시 `apt update`를 실행합니다.
-- PHP 8.3을 선택하면 Ubuntu 24.04 기본 apt 소스를 사용합니다.
+- `운영 권장` 프로필은 PHP 8.3과 MySQL 8.0을 선택하고 Ubuntu 24.04 기본 apt 소스를 우선합니다.
+- `최신 지원` 프로필은 PHP 8.5와 MySQL 8.4 LTS를 선택합니다. 설치기가 필요한 서명·저장소를 검증한 뒤 Ondrej PHP PPA와 MySQL 공식 APT를 추가합니다.
+- `직접 선택`에서는 PHP와 MySQL 계열을 각각 지정할 수 있습니다.
 - 리포트와 웹 UI에는 `php_source`가 `ubuntu` 또는 `ondrej`로 표시됩니다.
 
 ## 공개 지원 범위
@@ -143,7 +154,7 @@ sudo -n /usr/local/bin/g7inst --version
 
 웹 UI의 `사이트 계정 비밀번호`는 별도입니다. 설치기가 만들 Linux 사이트 계정의 SFTP/파일관리 비밀번호이며 sudo 권한은 주지 않습니다.
 
-웹 UI 기본 조합은 `Nginx / PHP 8.5 / Ubuntu 24.04 apt의 MySQL / www로 통일 / Redis 사용 / 메일 발송 안 함 / 그누보드7`입니다. 외부 SMTP를 선택하면 계정과 비밀번호를 필수로 받고, 비밀번호는 루트 전용 비밀 파일에만 저장합니다. 로컬 Postfix는 발신 IP 평판·PTR·25번 포트 정책을 직접 관리할 사용자만 선택합니다.
+웹 UI 기본 조합은 `Nginx / PHP 8.3 / MySQL 8.0 / www로 통일 / Redis 사용 / 메일 발송 안 함 / 그누보드7`입니다. 외부 SMTP를 선택하면 계정과 비밀번호를 필수로 받고, 비밀번호는 루트 전용 비밀 파일에만 저장합니다. 로컬 Postfix는 발신 IP 평판·PTR·25번 포트 정책을 직접 관리할 사용자만 선택합니다.
 
 웹 UI에서 `사이트 계정`과 `사이트 계정 비밀번호`를 입력하면 설치기가 `/home/계정/public_html` 웹루트를 만들고 `계정:www-data` 소유권으로 맞춥니다. Nginx/Apache는 PHP-FPM pool을 이 사이트 계정 기준으로 연결합니다.
 

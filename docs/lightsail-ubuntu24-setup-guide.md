@@ -279,9 +279,9 @@ http://127.0.0.1:7717/?token=...
 
 `사이트 계정 비밀번호`는 새로 정합니다. 설치기가 만들 `g7` 같은 사이트 계정의 SFTP/파일관리 비밀번호이며, sudo 권한은 주지 않습니다. 기본 웹루트는 `/home/계정/public_html`이고 소유권은 `계정:www-data`로 맞춥니다.
 
-PHP 기본값은 8.5입니다. 설치기가 `ppa:ondrej/php` apt 소스를 자동 추가하고 다시 `apt update`를 실행한 뒤 `php8.5-fpm`을 설치합니다. PHP 8.3을 선택하면 Ubuntu 24.04 기본 apt 소스를 사용합니다.
+`운영 권장` 프로필은 Ubuntu 24.04 기본 apt의 PHP 8.3과 MySQL 8.0을 사용합니다. `최신 지원` 프로필은 검증된 Ondrej PPA의 PHP 8.5와 MySQL 공식 APT의 8.4 LTS를 사용합니다.
 
-웹 UI 기본 조합은 `Nginx / PHP 8.5 / MySQL 8.0 Ubuntu 기본 APT / www로 통일 / Redis 사용 / 메일 발송 안 함 / 그누보드7`입니다. MySQL 8.4 LTS는 Oracle 공식 APT 저장소를 추가하는 선택지로 제공합니다. 외부 SMTP를 선택하면 계정과 비밀번호를 필수로 받고 비밀번호는 루트 전용 비밀 파일에만 저장합니다. 로컬 Postfix는 발신 IP 평판·PTR·25번 포트 정책을 직접 관리할 사용자만 선택합니다.
+웹 UI 기본 조합은 `운영 권장 / Nginx / PHP 8.3 / MySQL 8.0 Ubuntu 기본 APT / www로 통일 / Redis 사용 / 메일 발송 안 함 / 그누보드7`입니다. 최신 지원은 PHP 8.5와 MySQL 8.4 LTS를 함께 선택합니다. 외부 SMTP를 선택하면 계정과 비밀번호를 필수로 받고 비밀번호는 루트 전용 비밀 파일에만 저장합니다. 로컬 Postfix는 발신 IP 평판·PTR·25번 포트 정책을 직접 관리할 사용자만 선택합니다.
 
 기본 서버 구성 후 확인:
 

@@ -276,7 +276,7 @@ test("wizard routes render report, downloads, and provision cards", async ({ pag
   const { server, baseUrl } = await startServer();
   try {
     await page.goto(`${baseUrl}/setup/result?token=e2e`);
-    await expect(page.getByRole("heading", { name: "결과 리포트" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "설치 결과" })).toBeVisible();
     await expect(page.locator("#live-log")).toHaveCount(1);
     await expect(page.locator("#install-live-log")).toHaveCount(0);
     await expect(page.getByText("설치 완료 상태")).toBeVisible();
@@ -326,12 +326,85 @@ test("options expose MySQL 8.0 and 8.4 only with account autocomplete disabled",
   }
 });
 
+test("stack profiles synchronize runtime versions and render desktop/mobile product views", async ({ page }, testInfo) => {
+  const { server, baseUrl } = await startServer({ reportExists: false });
+  try {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto(`${baseUrl}/setup/doctor?token=e2e`);
+    await page.getByRole("button", { name: "점검 실행" }).click();
+    await expect(page.locator(".doctor-overview")).toContainText("전체 메모리");
+    await expect(page.locator(".doctor-overview")).toContainText("2.0 GB");
+    await expect(page.locator(".doctor-details")).not.toHaveAttribute("open", "");
+    await page.getByRole("button", { name: "다음: 설치 프로필" }).click();
+
+    await expect(page.locator('input[name="stack_profile"][value="stable"]')).toBeChecked();
+    await expect(page.locator('select[name="php_version"]')).toHaveValue("8.3");
+    await expect(page.locator('select[name="database_version"]')).toHaveValue("8.0");
+    await expect(page.locator("#stack-profile-label")).toHaveText("운영 권장");
+    await expect(page.locator("#site-credential-lane")).toHaveAttribute("data-state", "active");
+    await expect(page.locator("#database-credential-lane")).toHaveAttribute("data-state", "pending");
+
+    await page.fill("#site-password", "Test-only_9x!");
+    await page.fill("#site-password-confirm", "Test-only_9x!");
+    await expect(page.locator("#site-credential-lane")).toHaveAttribute("data-state", "pass");
+    await expect(page.locator("#database-credential-lane")).toHaveAttribute("data-state", "active");
+
+    await page.fill("#database-password", "Test-only_9x!");
+    await page.fill("#database-password-confirm", "Test-only_9x!");
+    await expect(page.locator("#database-credential-lane")).toHaveAttribute("data-state", "pass");
+    await expect(page.locator("#credential-state")).toHaveText("입력 확인 완료");
+
+    await page.fill("#site-password", "");
+    await page.fill("#site-password-confirm", "");
+    await page.fill("#database-password", "");
+    await page.fill("#database-password-confirm", "");
+
+    await page.locator('label.profile-segment:has(input[name="stack_profile"][value="latest"])').click();
+    await expect(page.locator('select[name="php_version"]')).toHaveValue("8.5");
+    await expect(page.locator('select[name="database_version"]')).toHaveValue("8.4");
+    await expect(page.locator("#stack-repository-label")).toContainText("MySQL 공식 APT");
+
+    await page.locator('.runtime-segments label:has(input[name="web_server"][value="apache"])').click();
+    await expect(page.locator('input[name="install_template"]')).toHaveValue("apache");
+    await expect(page.locator("#stack-web-product")).toHaveAttribute("data-product", "apache");
+    await expect(page.locator("#stack-web-label")).toHaveText("Apache");
+
+    await page.locator('label.profile-segment:has(input[name="stack_profile"][value="custom"])').click();
+    await page.locator('select[name="php_version"]').selectOption("8.3");
+    await expect(page.locator('input[name="stack_profile"][value="custom"]')).toBeChecked();
+    await expect(page.locator("#advanced-settings")).toHaveAttribute("open", "");
+
+    await page.locator('label.profile-segment:has(input[name="stack_profile"][value="stable"])').click();
+    await page.locator('.runtime-segments label:has(input[name="web_server"][value="nginx"])').click();
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({
+      path: testInfo.outputPath("profile-desktop.png"),
+      animations: "disabled",
+      fullPage: false,
+    });
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect(page.locator(".product-mark")).toBeVisible();
+    await expect(page.locator(".wizard-progress .step")).toHaveCount(7);
+    expect(await page.locator(".wizard-progress .step").first().evaluate((element) => element.getBoundingClientRect().height)).toBeLessThanOrEqual(5);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
+    await page.screenshot({
+      path: testInfo.outputPath("profile-mobile.png"),
+      animations: "disabled",
+      fullPage: false,
+    });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("manually cleared database identifiers stay empty and block the next step", async ({ page }) => {
   const { server, baseUrl } = await startServer({ reportExists: false });
   try {
     await page.goto(`${baseUrl}/setup/doctor?token=e2e`);
     await page.getByRole("button", { name: "점검 실행" }).click();
-    await page.getByRole("button", { name: "다음: 설치 방식" }).click();
+    await page.getByRole("button", { name: "다음: 설치 프로필" }).click();
     await expect(page).toHaveURL(/\/setup\/options/);
     const databaseName = page.locator('#database-name-input');
     const databaseUser = page.locator('#database-user-input');
@@ -343,7 +416,7 @@ test("manually cleared database identifiers stay empty and block the next step",
 
     await expect(databaseName).toHaveValue("");
     await expect(databaseUser).toHaveValue("");
-    await expect(page.getByRole("button", { name: "다음: 사양 확정" }).last()).toBeDisabled();
+    await expect(page.getByRole("button", { name: "다음: 설치 검토" })).toBeDisabled();
 
     await page.reload();
     await expect(databaseName).toHaveValue("");
@@ -428,7 +501,7 @@ test("plan route auto-generates a review after doctor pass", async ({ page }) =>
     await page.getByRole("button", { name: "점검 실행" }).click();
     await expect(page.getByText("서버 점검 통과")).toBeVisible();
 
-    await page.getByRole("button", { name: "다음: 설치 방식" }).click();
+    await page.getByRole("button", { name: "다음: 설치 프로필" }).click();
     await expect(page.locator('input[name="install_template"][value="frankenphp"]')).toHaveCount(0);
     await expect(page.locator('input[name="install_template"][value="frankenphp-octane"]')).toHaveCount(0);
     await expect(page.locator('input[name="app_package"][value="gnuboard7-octane"]')).toHaveCount(0);
@@ -442,13 +515,13 @@ test("plan route auto-generates a review after doctor pass", async ({ page }) =>
     await page.fill("#database-user-input", "g7devops");
     await page.fill("#database-password", "Test-only_9x!");
     await page.fill("#database-password-confirm", "Test-only_9x!");
-    await page.getByRole("button", { name: "다음: 사양 확정" }).last().click();
+    await page.getByRole("button", { name: "다음: 설치 검토" }).click();
 
     await expect(page).toHaveURL(/\/setup\/plan/);
     await expect(page.getByText("선택한 설치 사양")).toBeVisible();
     await expect(page.locator("details.plan-details[open]")).toHaveCount(0);
     await expect(page.locator("details.plan-details .plan-summary-title .icon")).toHaveCount(5);
-    await expect(page.getByRole("button", { name: "이 사양으로 진행" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "검토 완료, 설치로 이동" })).toBeEnabled();
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -459,7 +532,7 @@ test("install uses one modal graph and groups PHP packages", async ({ page }, te
   try {
     await page.goto(`${baseUrl}/setup/doctor?token=e2e`);
     await page.getByRole("button", { name: "점검 실행" }).click();
-    await page.getByRole("button", { name: "다음: 설치 방식" }).click();
+    await page.getByRole("button", { name: "다음: 설치 프로필" }).click();
     for (const [selector, value] of [
       ["#site-password", "Test-only_9x!"],
       ["#site-password-confirm", "Test-only_9x!"],
@@ -470,20 +543,23 @@ test("install uses one modal graph and groups PHP packages", async ({ page }, te
     ]) {
       await page.fill(selector, value);
     }
-    await page.getByRole("button", { name: "다음: 사양 확정" }).last().click();
-    await page.getByRole("button", { name: "이 사양으로 진행" }).click();
+    await page.getByRole("button", { name: "다음: 설치 검토" }).click();
+    await page.getByRole("button", { name: "검토 완료, 설치로 이동" }).click();
     await expect(page.getByRole("heading", { name: "그누보드7" })).toBeVisible();
 
-    await page.getByRole("button", { name: "기본 구성 시작" }).click();
+    await page.getByRole("button", { name: "설치 시작" }).click();
     await page.getByRole("button", { name: "시작", exact: true }).click();
 
     await expect(page.locator("#install-progress-dialog[open]")).toBeVisible();
+    await expect(page.locator(".execution-brand")).toContainText("Provisioning run");
     await expect(page.locator("#install-stages .install-graph-node")).toHaveCount(9);
     await expect(page.locator('[data-package-group="php"]')).toContainText("PHP 8.5 런타임 · 2개");
     await expect(page.locator("#install-log-slot #live-log")).toHaveCount(1);
     await expect(page.locator("#install-log-slot #log-dock[open]")).toHaveCount(1);
     await expect(page.locator("#install-log-slot #live-log")).toBeVisible();
     await expect(page.locator("#live-log")).toHaveCount(1);
+    await expect(page.locator("dialog[open]")).toHaveCount(1);
+    await page.waitForTimeout(220);
     await page.screenshot({ path: testInfo.outputPath("install-progress-modal.png"), fullPage: false });
 
     await expect(page).toHaveURL(/\/setup\/result/, { timeout: 5000 });
@@ -515,7 +591,7 @@ test("failed install unlocks the modal and exposes the restored step retry", asy
   try {
     await page.goto(`${baseUrl}/setup/doctor?token=e2e`);
     await page.getByRole("button", { name: "점검 실행" }).click();
-    await page.getByRole("button", { name: "다음: 설치 방식" }).click();
+    await page.getByRole("button", { name: "다음: 설치 프로필" }).click();
     for (const [selector, value] of [
       ["#site-password", "Test-only_9x!"],
       ["#site-password-confirm", "Test-only_9x!"],
@@ -526,9 +602,9 @@ test("failed install unlocks the modal and exposes the restored step retry", asy
     ]) {
       await page.fill(selector, value);
     }
-    await page.getByRole("button", { name: "다음: 사양 확정" }).last().click();
-    await page.getByRole("button", { name: "이 사양으로 진행" }).click();
-    await page.getByRole("button", { name: "기본 구성 시작" }).click();
+    await page.getByRole("button", { name: "다음: 설치 검토" }).click();
+    await page.getByRole("button", { name: "검토 완료, 설치로 이동" }).click();
+    await page.getByRole("button", { name: "설치 시작" }).click();
     await page.getByRole("button", { name: "시작", exact: true }).click();
 
     const closeButton = page.locator("#install-progress-close");
@@ -614,7 +690,7 @@ test("mobile plan keeps one-column flow without horizontal overflow", async ({ p
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${baseUrl}/setup/doctor?token=e2e`);
     await page.getByRole("button", { name: "점검 실행" }).click();
-    await page.getByRole("button", { name: "다음: 설치 방식" }).click();
+    await page.getByRole("button", { name: "다음: 설치 프로필" }).click();
     for (const [selector, value] of [
       ["#site-password", "Test-only_9x!"],
       ["#site-password-confirm", "Test-only_9x!"],
@@ -625,7 +701,7 @@ test("mobile plan keeps one-column flow without horizontal overflow", async ({ p
     ]) {
       await page.fill(selector, value);
     }
-    await page.getByRole("button", { name: "다음: 사양 확정" }).last().click();
+    await page.getByRole("button", { name: "다음: 설치 검토" }).click();
     await expect(page.getByText("선택한 설치 사양")).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(1);

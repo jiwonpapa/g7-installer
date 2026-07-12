@@ -9,23 +9,33 @@
     <link rel="stylesheet" href="/app.css?v=__G7INST_ASSET_VERSION__" />
   </head>
   <body class="min-h-screen bg-base-200 text-base-content">
+    <svg class="brand-sprite" aria-hidden="true">
+      <symbol id="brand-nginx" viewBox="0 0 24 24"><path d="M12 0L1.605 6v12L12 24l10.395-6V6L12 0zm6 16.59c0 .705-.646 1.29-1.529 1.29-.631 0-1.351-.255-1.801-.81l-6-7.141v6.66c0 .721-.57 1.29-1.274 1.29H7.32c-.721 0-1.29-.6-1.29-1.29V7.41c0-.705.63-1.29 1.5-1.29.646 0 1.38.255 1.83.81l5.97 7.141V7.41c0-.721.6-1.29 1.29-1.29h.075c.72 0 1.29.6 1.29 1.29v9.18H18z" /></symbol>
+      <symbol id="brand-apache" viewBox="0 0 24 24"><path d="M15.42.112c-.376.222-1 .85-1.748 1.763l.686 1.294c.48-.687.97-1.307 1.462-1.836-.16.176-.644.74-1.375 1.863.703-.035 1.784-.18 2.666-.33.262-1.47-.258-2.142-.258-2.142s-.66-1.07-1.436-.61zm-3.084 6.402a40.253 40.253 0 011.306-2.26c.224-.352.45-.693.677-1.02l-.685-1.293c-.25.3-.51.63-.77.98a39.853 39.853 0 00-2.016 2.97l.893 1.763c.19-.378.38-.752.575-1.118zm-3.73 8.32c.158-.406.319-.81.483-1.225.156-.394.32-.79.484-1.19a91.133 91.133 0 011.6-3.604c.19-.39.38-.77.565-1.15l-.895-1.763c-.43.69-.84 1.39-1.235 2.112a24.573 24.573 0 00-1.778 4.95l.896 1.77c.117-.317.24-.638.364-.963zm-.336 1.616c-.117.323-.236.654-.355.992-.1.28-.2.56-.36.99.264.12.475.435.675.793a1.44 1.44 0 00-.466-.99c1.293.06 2.41-.27 2.99-1.217.05-.084.096-.173.14-.268-.26.333-.59.474-1.2.44.9-.404 1.354-.79 1.754-1.433.094-.153.186-.32.28-.503-.788.81-1.702 1.04-2.664.865l-.72.078a6.43 6.43 0 00-.067.183zm-1.04-2.092a13.38 13.38 0 00-.234 1.692c-.28-.45-1.03-.888-1.026-.884.537.778.944 1.55 1.005 2.31-.29.058-.684-.027-1.14-.195.475.436.83.556.97.588-.434.03-.89.328-1.346.67.668-.27 1.21-.38 1.596-.29-.61 1.74-1.23 3.655-1.843 5.69a.538.538 0 00.364-.354c.11-.368.84-2.786 1.978-5.965.15-.43.31-.87.5-1.37l.09-.237z" /></symbol>
+      <symbol id="brand-php" viewBox="0 0 24 24"><path d="M7.01 10.207h-.944l-.515 2.648h.838c.556 0 .97-.105 1.242-.314.272-.21.455-.559.55-1.049.092-.47.05-.802-.124-.995-.175-.193-.523-.29-1.047-.29zM12 5.688C5.373 5.688 0 8.514 0 12s5.373 6.313 12 6.313S24 15.486 24 12c0-3.486-5.373-6.312-12-6.312zm-3.26 7.451c-.261.25-.575.438-.917.551-.336.108-.765.164-1.285.164H5.357l-.327 1.681H3.652l1.23-6.326h2.65c.797 0 1.378.209 1.744.628.366.418.476 1.002.33 1.752a2.836 2.836 0 0 1-.305.847c-.143.255-.33.49-.561.703zm4.024.715l.543-2.799c.063-.318.039-.536-.068-.651-.107-.116-.336-.174-.687-.174H11.46l-.704 3.625H9.388l1.23-6.327h1.367l-.327 1.682h1.218c.767 0 1.295.134 1.586.401s.378.7.263 1.299l-.572 2.944h-1.389zm7.597-2.265a2.782 2.782 0 0 1-.305.847c-.143.255-.33.49-.561.703a2.44 2.44 0 0 1-.917.551c-.336.108-.765.164-1.286.164h-1.18l-.327 1.682h-1.378l1.23-6.326h2.649c.797 0 1.378.209 1.744.628.366.417.477 1.001.331 1.751zM17.766 10.207h-.943l-.516 2.648h.838c.557 0 .971-.105 1.242-.314.272-.21.455-.559.551-1.049.092-.47.049-.802-.125-.995s-.524-.29-1.047-.29z" /></symbol>
+      <symbol id="brand-mysql" viewBox="0 0 24 24"><path d="M5.77 18.695h-.927a50.854 50.854 0 00-.27-4.41h-.008l-1.41 4.41H2.45l-1.4-4.41h-.01a72.892 72.892 0 00-.195 4.41H0c.055-1.966.192-3.81.41-5.53h1.15l1.335 4.064h.008l1.347-4.064h1.095c.242 2.015.384 3.86.428 5.53zm4.017-4.08c-.378 2.045-.876 3.533-1.492 4.46-.482.716-1.01 1.073-1.583 1.073-.153 0-.34-.046-.566-.138v-.494c.11.017.24.026.386.026.268 0 .483-.075.647-.222.197-.18.295-.382.295-.605 0-.155-.077-.47-.23-.944L6.23 14.615h.91l.727 2.36c.164.536.233.91.205 1.123.4-1.064.678-2.227.835-3.483zm4.055 2.548c0 .47-.172.856-.516 1.156-.344.3-.803.45-1.384.45-.543 0-1.064-.172-1.573-.515l.237-.476c.438.22.833.328 1.19.328.332 0 .593-.073.783-.22a.754.754 0 00.3-.615c0-.33-.23-.61-.648-.845-.388-.213-1.163-.657-1.163-.657-.422-.307-.632-.636-.632-1.177 0-.45.157-.81.47-1.085.315-.278.72-.415 1.22-.415.512 0 .98.136 1.4.41l-.213.476a2.726 2.726 0 00-1.064-.23c-.283 0-.502.068-.654.206a.685.685 0 00-.248.524c0 .328.234.61.666.85.393.215 1.187.67 1.187.67.433.305.648.63.648 1.168zm4.95 1.667l-1.016-.5c.09-.076.177-.158.255-.25.433-.506.648-1.258.648-2.253 0-1.83-.718-2.746-2.155-2.746-.704 0-1.254.232-1.65.697-.43.508-.646 1.256-.646 2.245 0 .972.19 1.686.574 2.14.35.41.877.615 1.583.615.264 0 .506-.033.725-.098l1.325.772.36-.622zm-3.294-1.242c-.225-.36-.337-.94-.337-1.736 0-1.393.424-2.09 1.27-2.09.443 0 .77.167.977.5.224.362.336.936.336 1.723 0 1.404-.424 2.108-1.27 2.108-.445 0-.77-.167-.978-.5zm6.614 1.107h-2.63v-5.53h.885v4.85h1.745zM23.224 11.31c-.535-.014-.95.04-1.297.188-.1.04-.26.04-.274.167.055.053.063.14.11.214.08.134.218.313.346.407.14.11.28.216.427.31.26.16.555.255.81.416.145.094.293.213.44.313.073.05.12.14.214.172-.046-.06-.06-.147-.105-.214-.067-.067-.134-.127-.2-.193a3.223 3.223 0 00-.695-.675c-.214-.146-.682-.35-.77-.595.146-.013.32-.066.46-.106.227-.06.435-.047.67-.106.106-.027.213-.06.32-.094v-.06c-.12-.12-.21-.283-.334-.395a8.867 8.867 0 00-1.104-.823c-.21-.134-.476-.22-.697-.334-.08-.04-.214-.06-.26-.127-.12-.146-.19-.34-.275-.514a17.69 17.69 0 01-.547-1.163c-.12-.262-.193-.523-.34-.763-.69-1.137-1.437-1.826-2.586-2.5-.247-.14-.543-.2-.856-.274-.167-.008-.334-.02-.5-.027-.11-.047-.216-.174-.31-.235-.38-.24-1.364-.76-1.644-.072-.18.434.267.862.422 1.082.115.153.26.328.34.5.047.116.06.235.107.356.106.294.207.622.347.897.073.14.153.287.247.413.054.073.146.107.167.227-.094.136-.1.334-.154.5-.24.757-.146 1.693.194 2.25.107.166.362.534.703.393.3-.12.234-.5.32-.835.02-.08.007-.133.048-.187.094.188.188.367.274.555.206.328.566.668.867.895.16.12.287.328.487.402-.043-.058-.1-.086-.154-.133a3.445 3.445 0 01-.35-.4 8.76 8.76 0 01-.747-1.218c-.11-.21-.202-.436-.29-.643-.04-.08-.04-.2-.107-.24-.1.146-.247.273-.32.453-.127.288-.14.642-.188 1.01-.214-.052-.287-.274-.367-.46-.2-.475-.233-1.238-.06-1.785.047-.14.247-.582.167-.716-.042-.127-.174-.2-.247-.303a2.478 2.478 0 01-.24-.427c-.16-.374-.24-.788-.414-1.162-.08-.173-.22-.354-.334-.513-.127-.18-.267-.307-.368-.52-.033-.073-.08-.194-.027-.274.014-.054.042-.075.094-.09.088-.072.335.022.422.062.247.1.455.194.662.334.094.066.195.193.315.226h.14c.214.047.455.014.655.073.355.114.675.28.962.46a5.953 5.953 0 012.085 2.286c.08.154.115.295.188.455.14.33.313.663.455.982.14.315.275.636.476.897.1.14.502.213.682.286.133.06.34.115.46.188.23.14.454.3.67.454.11.076.443.243.463.378z" /></symbol>
+      <symbol id="brand-redis" viewBox="0 0 24 24"><path d="M22.71 13.145c-1.66 2.092-3.452 4.483-7.038 4.483-3.203 0-4.397-2.825-4.48-5.12.701 1.484 2.073 2.685 4.214 2.63 4.117-.133 6.94-3.852 6.94-7.239 0-4.05-3.022-6.972-8.268-6.972-3.752 0-8.4 1.428-11.455 3.685C2.59 6.937 3.885 9.958 4.35 9.626c2.648-1.904 4.748-3.13 6.784-3.744C8.12 9.244.886 17.05 0 18.425c.1 1.261 1.66 4.648 2.424 4.648.232 0 .431-.133.664-.365a100.49 100.49 0 0 0 5.54-6.765c.222 3.104 1.748 6.898 6.014 6.898 3.819 0 7.604-2.756 9.33-8.965.2-.764-.73-1.361-1.261-.73zm-4.349-5.013c0 1.959-1.926 2.922-3.685 2.922-.941 0-1.664-.247-2.235-.568 1.051-1.592 2.092-3.225 3.21-4.973 1.972.334 2.71 1.43 2.71 2.619z" /></symbol>
+      <symbol id="brand-letsencrypt" viewBox="0 0 24 24"><path d="M11.9914 0a.8829.8829 0 00-.8718.817v3.0209A.8829.8829 0 0012 4.7207a.8829.8829 0 00.8803-.8803V.817a.8829.8829 0 00-.889-.817zm7.7048 3.1089a.8804.8804 0 00-.5214.1742l-2.374 1.9482a.8804.8804 0 00.5592 1.5622.8794.8794 0 00.5592-.2001l2.3714-1.9506a.8804.8804 0 00-.5944-1.534zm-15.3763.0133a.8829.8829 0 00-.611 1.5206l2.37 1.9506a.876.876 0 00.5606.2001.8804.8804 0 00.5597-1.5602L4.8277 3.2831a.8829.8829 0 00-.5078-.161zm7.6598 3.2275a5.0456 5.0456 0 00-5.0262 5.0455v1.4876H5.787a.9672.9672 0 00-.9647.9643v9.1887a.9672.9672 0 00.9647.9643H18.213a.9672.9672 0 00.9643-.9643v-9.1907a.9672.9672 0 00-.9643-.9623h-1.1684v-1.4876a5.0456 5.0456 0 00-5.0649-5.0455zm.0127 2.8933a2.1522 2.1522 0 012.1593 2.1522v1.4876H9.8473v-1.4876a2.1522 2.1522 0 012.145-2.1522zm7.3812.5033a.8829.8829 0 10.0705 1.7632h3.0267a.8829.8829 0 000-1.7609H19.444a.8829.8829 0 00-.0705-.0023zm-17.8444.0023a.8829.8829 0 000 1.7609h2.9983a.8829.8829 0 000-1.7609zm10.4596 6.7746a1.2792 1.2792 0 01.641 2.3926v1.2453a.6298.6298 0 01-1.2595 0v-1.2453a1.2792 1.2792 0 01.6185-2.3926z" /></symbol>
+      <symbol id="brand-ubuntu" viewBox="0 0 24 24"><path d="M17.61.455a3.41 3.41 0 0 0-3.41 3.41 3.41 3.41 0 0 0 3.41 3.41 3.41 3.41 0 0 0 3.41-3.41 3.41 3.41 0 0 0-3.41-3.41zM12.92.8C8.923.777 5.137 2.941 3.148 6.451a4.92 4.92 0 0 1 2.845.73A8.316 8.316 0 0 1 12.688 3.6 4.944 4.944 0 0 1 13.723.834 11.008 11.008 0 0 0 12.92.8zm9.226 4.994a4.915 4.915 0 0 1-1.918 2.246 8.36 8.36 0 0 1-.273 8.303 4.89 4.89 0 0 1 1.632 2.54 11.156 11.156 0 0 0 .559-13.089zM3.41 7.932A3.41 3.41 0 0 0 0 11.342a3.41 3.41 0 0 0 3.41 3.409 3.41 3.41 0 0 0 3.41-3.41 3.41 3.41 0 0 0-3.41-3.41zm2.027 7.866a4.908 4.908 0 0 1-2.915.358 11.1 11.1 0 0 0 10.413 6.947 4.879 4.879 0 0 1-.999-2.85 8.304 8.304 0 0 1-6.499-4.455zm11.405.928a3.41 3.41 0 0 0-3.41 3.41 3.41 3.41 0 0 0 3.41 3.41 3.41 3.41 0 0 0 3.41-3.41 3.41 3.41 0 0 0-3.41-3.41z" /></symbol>
+    </svg>
     <main class="app-shell">
       <header class="app-header">
         <div class="titlebar-left">
-          <div class="window-dots" aria-hidden="true">
-            <span></span>
-            <span></span>
-            <span></span>
+          <div class="product-mark" aria-hidden="true">
+            <span>G7</span>
           </div>
-          <div>
-            <p class="text-sm font-semibold text-primary">G7 Installer</p>
-            <h1 class="mt-1 text-2xl font-semibold tracking-normal sm:text-3xl">G7 설치 마법사</h1>
-            <p class="mt-2 text-sm text-base-content/60">서버 점검부터 도메인 연결 검증 리포트까지 단계별로 진행합니다.</p>
+          <div class="product-copy">
+            <h1>G7 Installer</h1>
+            <p>Fresh Ubuntu Provisioner</p>
           </div>
         </div>
         <div class="command-bar">
+          <details class="scope-menu">
+            <summary data-ui-icon="info">지원 범위</summary>
+            <p>Ubuntu 24.04에서 Nginx/Apache, PHP-FPM, MySQL, Redis, SSL과 그누보드7 설치 준비를 수행합니다.</p>
+          </details>
           <span class="status-pill">
-            <span class="text-base-content/50">연결</span>
+            <span class="status-dot" aria-hidden="true"></span>
             <span id="connection-status" class="badge badge-warning">시작 중</span>
           </span>
           <button id="theme-toggle" class="btn btn-sm btn-outline icon-button" type="button" data-icon="moon" title="다크 모드">다크 모드</button>
@@ -33,20 +43,20 @@
         </div>
       </header>
 
-      <section class="system-banner">
-        <span>현재 공개 버전은 apt 패키지 설치, Nginx/Apache 도메인 연결, PHP/DB 튜닝, DB 계정 생성, SSL 발급/갱신 검증, 그누보드7 설치 링크, 설정 안내서 저장까지 수행합니다.</span>
-      </section>
-
       <section class="app-workspace">
         <nav class="wizard-progress" aria-label="설치 단계">
+          <div class="wizard-progress-head">
+            <span>설치 진행</span>
+            <strong id="step-progress-label">1 / 7 · 접속</strong>
+          </div>
           <ul class="steps steps-horizontal w-full lg:steps-vertical">
-            <li class="step step-primary" data-progress="login"><span class="step-copy" data-ui-icon="log-in">접속 확인</span></li>
-            <li class="step" data-progress="check"><span class="step-copy" data-ui-icon="shield-check">서버 점검</span></li>
-            <li class="step" data-progress="options"><span class="step-copy" data-ui-icon="sliders-horizontal">설치 방식</span></li>
-            <li class="step" data-progress="plan"><span class="step-copy" data-ui-icon="clipboard-list">사양 확정</span></li>
-            <li class="step" data-progress="install"><span class="step-copy" data-ui-icon="package-plus">기본 구성</span></li>
-            <li class="step" data-progress="report"><span class="step-copy" data-ui-icon="file-check">결과</span></li>
-            <li class="step" data-progress="provision"><span class="step-copy" data-ui-icon="scan-line">세부 설정</span></li>
+            <li class="step step-primary" data-progress="login"><span class="step-copy" data-ui-icon="log-in">접속</span></li>
+            <li class="step" data-progress="check"><span class="step-copy" data-ui-icon="shield-check">진단</span></li>
+            <li class="step" data-progress="options"><span class="step-copy" data-ui-icon="sliders-horizontal">프로필</span></li>
+            <li class="step" data-progress="plan"><span class="step-copy" data-ui-icon="clipboard-list">검토</span></li>
+            <li class="step" data-progress="install"><span class="step-copy" data-ui-icon="package-plus">설치</span></li>
+            <li class="step" data-progress="report"><span class="step-copy" data-ui-icon="file-check">완료</span></li>
+            <li class="step" data-progress="provision"><span class="step-copy" data-ui-icon="scan-line">설정</span></li>
           </ul>
           <section id="promo-panel" class="promo-panel" aria-label="추천 도구" hidden></section>
         </nav>
@@ -135,60 +145,130 @@
             <div class="section-heading">
               <div>
                 <span class="step-eyebrow">3단계</span>
-                <h2>설치 방식 선택</h2>
-                <p>일반 사용자는 권장 조합을 선택하고 다음으로 넘어가면 됩니다.</p>
+                <h2>설치 프로필</h2>
+                <p>운영 목적에 맞는 버전 계열을 고르면 패키지 저장소와 설치 사양을 자동으로 맞춥니다.</p>
               </div>
-              <button class="btn btn-primary icon-button" type="button" data-icon="chevron-right" data-next="plan">다음: 사양 확정</button>
             </div>
 
-            <form id="options-form" class="mt-5 grid gap-5" autocomplete="off">
-              <fieldset>
-                <legend class="field-label mb-3">
-                  설치 템플릿
-                  <span class="help-wrap">
-                    <button class="help-circle" type="button" aria-label="설치 템플릿 도움말">?</button>
-                    <span class="help-text">자주 쓰는 서버 조합을 미리 적용합니다. 상세 설정에서 나중에 바꿀 수 있습니다.</span>
-                  </span>
-                </legend>
-                <div class="template-grid">
-                  <label class="template-card">
-                    <input class="radio radio-primary" type="radio" name="install_template" value="recommended" checked />
-                    <span>
-                      <strong>권장 설치</strong>
-                      <small>Nginx + MySQL + Redis</small>
-                    </span>
-                  </label>
-                  <label class="template-card">
-                    <input class="radio radio-primary" type="radio" name="install_template" value="apache" />
-                    <span>
-                      <strong>Apache 호환</strong>
-                      <small>Apache + MySQL + Redis</small>
-                    </span>
-                  </label>
+            <form id="options-form" class="options-form" autocomplete="off">
+              <input name="install_template" type="hidden" value="recommended" />
+              <section class="profile-console" aria-labelledby="profile-console-title">
+                <div class="profile-console-head">
+                  <div>
+                    <span class="interface-label">설치 방식</span>
+                    <h3 id="profile-console-title">서버 스택 선택</h3>
+                  </div>
+                  <fieldset class="profile-segments">
+                    <legend class="sr-only">런타임 프로필</legend>
+                    <label class="profile-segment">
+                      <input type="radio" name="stack_profile" value="stable" checked />
+                      <span><strong>운영 권장</strong><small>PHP 8.3 · MySQL 8.0</small></span>
+                    </label>
+                    <label class="profile-segment">
+                      <input type="radio" name="stack_profile" value="latest" />
+                      <span><strong>최신 지원</strong><small>PHP 8.5 · MySQL 8.4</small></span>
+                    </label>
+                    <label class="profile-segment">
+                      <input type="radio" name="stack_profile" value="custom" />
+                      <span><strong>직접 선택</strong><small>세부 버전 지정</small></span>
+                    </label>
+                  </fieldset>
                 </div>
-              </fieldset>
 
-              <fieldset>
-                <legend class="field-label mb-3">
-                  설치할 앱
-                  <span class="help-wrap">
-                    <button class="help-circle" type="button" aria-label="설치 앱 도움말">?</button>
-                    <span class="help-text">서버 스택을 준비한 뒤 마지막 단계에서 그누보드7 공식 설치 화면으로 연결합니다.</span>
-                  </span>
-                </legend>
-                <div class="template-grid">
-                  <label class="template-card">
-                    <input class="radio radio-primary" type="radio" name="app_package" value="gnuboard7" checked />
-                    <span>
-                      <strong>그누보드7</strong>
-                      <small>기본 목표 앱</small>
-                    </span>
-                  </label>
-                </div>
+                <section id="stack-stage" class="stack-stage" data-profile="stable" aria-label="선택한 서버 스택">
+                  <header class="stack-stage-header">
+                    <div class="stack-stage-title">
+                      <span class="app-target-mark">G7</span>
+                      <div>
+                        <small>그누보드7 서버 구성</small>
+                        <h3 id="stack-profile-label">운영 권장</h3>
+                        <p id="stack-profile-description">Ubuntu 기본 저장소를 중심으로 호환성과 관리 편의성을 우선합니다.</p>
+                      </div>
+                    </div>
+                    <div class="stack-source">
+                      <span>패키지 소스</span>
+                      <strong id="stack-repository-label">Ubuntu 기본 저장소 중심</strong>
+                      <small class="stack-confidence"><i aria-hidden="true"></i>호환성 검증 프로필</small>
+                    </div>
+                  </header>
+
+                  <div class="stack-product-row stack-flow">
+                    <div class="stack-product" id="stack-web-product" data-product="nginx">
+                      <span class="stack-step-label">01</span>
+                      <span class="stack-product-logo stack-logo-nginx"><svg><use href="#brand-nginx" /></svg></span>
+                      <span class="stack-product-logo stack-logo-apache"><svg><use href="#brand-apache" /></svg></span>
+                      <small>웹서버</small>
+                      <strong id="stack-web-label">Nginx</strong>
+                    </div>
+                    <div class="stack-product">
+                      <span class="stack-step-label">02</span>
+                      <span class="stack-product-logo stack-logo-php"><svg><use href="#brand-php" /></svg></span>
+                      <small>PHP-FPM</small>
+                      <strong id="stack-php-label">8.3.x</strong>
+                    </div>
+                    <div class="stack-product">
+                      <span class="stack-step-label">03</span>
+                      <span class="stack-product-logo stack-logo-mysql"><svg><use href="#brand-mysql" /></svg></span>
+                      <small>데이터베이스</small>
+                      <strong id="stack-database-label">MySQL 8.0.x</strong>
+                    </div>
+                    <div class="stack-product" id="stack-redis-product" data-enabled="true">
+                      <span class="stack-step-label">04</span>
+                      <span class="stack-product-logo stack-logo-redis"><svg><use href="#brand-redis" /></svg></span>
+                      <small>캐시·세션</small>
+                      <strong id="stack-redis-label">Redis 사용</strong>
+                    </div>
+                    <div class="stack-product">
+                      <span class="stack-step-label">05</span>
+                      <span class="stack-product-logo stack-logo-ssl"><svg><use href="#brand-letsencrypt" /></svg></span>
+                      <small>HTTPS</small>
+                      <strong>Let's Encrypt</strong>
+                    </div>
+                  </div>
+
+                  <footer class="stack-stage-footer">
+                    <fieldset class="runtime-switch">
+                      <legend>
+                        웹서버
+                        <span class="help-wrap">
+                          <button class="help-circle" type="button" aria-label="웹서버 도움말">?</button>
+                          <span class="help-text">일반 설치는 Nginx를 권장하고, Apache 호환이 필요한 경우에만 Apache를 선택합니다.</span>
+                        </span>
+                      </legend>
+                      <div class="runtime-segments">
+                        <label>
+                          <input type="radio" name="web_server" value="nginx" checked />
+                          <span><svg class="stack-logo-nginx"><use href="#brand-nginx" /></svg><strong>Nginx</strong><small>권장</small></span>
+                        </label>
+                        <label>
+                          <input type="radio" name="web_server" value="apache" />
+                          <span><svg class="stack-logo-apache"><use href="#brand-apache" /></svg><strong>Apache</strong><small>호환</small></span>
+                        </label>
+                      </div>
+                    </fieldset>
+                    <div class="delivery-target">
+                      <span>설치 대상</span>
+                      <strong>그누보드7 최신 안정 릴리스</strong>
+                    </div>
+                  </footer>
+                </section>
+                <input type="hidden" name="app_package" value="gnuboard7" />
                 <p id="template-app-status" class="password-status mt-3" aria-live="polite" hidden></p>
-              </fieldset>
+              </section>
 
-              <div class="grid gap-4 md:grid-cols-2">
+              <details id="account-settings" class="account-settings" open>
+                <summary>
+                  <span><strong>사이트와 계정</strong><small>도메인, SFTP 계정과 앱 데이터베이스를 순서대로 준비합니다.</small></span>
+                  <em id="credential-state" data-status="pending">필수 입력 대기</em>
+                </summary>
+                <div class="account-settings-body">
+                  <section id="site-credential-lane" class="credential-lane" data-state="active">
+                    <header>
+                      <span>01</span>
+                      <div><strong>사이트 계정</strong><small>도메인과 파일 소유 계정</small></div>
+                      <em id="site-credential-status" class="credential-lane-status">입력 중</em>
+                    </header>
+                    <div class="grid gap-4 md:grid-cols-2">
                 <label class="field">
                   <span class="field-label">
                     도메인
@@ -230,9 +310,16 @@
                   <input name="site_password_confirm" id="site-password-confirm" class="input input-bordered w-full" type="password" autocomplete="off" data-1p-ignore data-lpignore="true" minlength="8" required />
                 </label>
                 <p id="site-password-status" class="password-status md:col-span-2" aria-live="polite" hidden></p>
-              </div>
+                    </div>
+                  </section>
 
-              <div class="grid gap-4 md:grid-cols-2">
+                  <section id="database-credential-lane" class="credential-lane" data-state="pending">
+                    <header>
+                      <span>02</span>
+                      <div><strong>데이터베이스</strong><small>그누보드7 전용 DB 계정</small></div>
+                      <em id="database-credential-status" class="credential-lane-status">다음 단계</em>
+                    </header>
+                    <div class="grid gap-4 md:grid-cols-2">
                 <label class="field">
                   <span class="field-label">
                     DB 이름
@@ -274,35 +361,25 @@
                   <input name="database_password_confirm" id="database-password-confirm" class="input input-bordered w-full" type="password" autocomplete="off" data-1p-ignore data-lpignore="true" minlength="8" required />
                 </label>
                 <p id="database-password-status" class="password-status md:col-span-2" aria-live="polite" hidden></p>
-              </div>
+                    </div>
+                  </section>
+                </div>
+              </details>
 
-              <details class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-100">
-                <summary class="collapse-title font-semibold">상세 설정</summary>
+              <details id="advanced-settings" class="advanced-settings collapse collapse-arrow">
+                <summary class="collapse-title font-semibold">고급 설정 <span>버전·웹루트·메일·보안 정책</span></summary>
                 <div class="collapse-content grid gap-4 md:grid-cols-2">
-                  <label class="field">
-                    <span class="field-label">
-                      웹서버
-                      <span class="help-wrap">
-                    <button class="help-circle" type="button" aria-label="웹서버 도움말">?</button>
-                    <span class="help-text">방문자의 HTTP 요청을 PHP 앱으로 전달합니다. 일반 설치는 Nginx, Apache 호환이 필요하면 Apache를 선택합니다.</span>
-                  </span>
-                    </span>
-                    <select name="web_server" class="select select-bordered w-full">
-                      <option value="nginx">Nginx</option>
-                      <option value="apache">Apache</option>
-                    </select>
-                  </label>
                   <label class="field">
                     <span class="field-label">
                       PHP 실행기
                       <span class="help-wrap">
                     <button class="help-circle" type="button" aria-label="PHP 실행기 도움말">?</button>
-                    <span class="help-text">기본 설치는 PHP 8.5입니다. Ubuntu 기본 apt에 없으면 Ondrej PHP PPA를 자동 추가한 뒤 설치합니다.</span>
+                    <span class="help-text">운영 권장은 Ubuntu 기본 PHP 8.3을 사용합니다. PHP 8.5 선택 시 검증된 Ondrej PPA를 자동 추가합니다.</span>
                   </span>
                     </span>
                     <select name="php_version" class="select select-bordered w-full">
-                      <option value="8.3">PHP 8.3 (Ubuntu 기본)</option>
-                      <option value="8.5" selected>PHP 8.5 (Ondrej PPA 자동 추가)</option>
+                      <option value="8.3" selected>PHP 8.3 (Ubuntu 기본)</option>
+                      <option value="8.5">PHP 8.5 (Ondrej PPA 자동 추가)</option>
                     </select>
                   </label>
                   <label class="field">
@@ -486,7 +563,7 @@
             </form>
             <div class="wizard-actions">
               <button class="btn btn-ghost icon-button" type="button" data-icon="chevron-left" data-next="check">이전</button>
-              <button class="btn btn-primary icon-button" type="button" data-icon="chevron-right" data-next="plan">다음: 사양 확정</button>
+              <button class="btn btn-primary icon-button" type="button" data-icon="chevron-right" data-next="plan">다음: 설치 검토</button>
             </div>
           </section>
 
@@ -494,8 +571,8 @@
             <div class="section-heading">
               <div>
                 <span class="step-eyebrow">4단계</span>
-                <h2>설치 사양 확정</h2>
-                <p>이전 단계에서 선택한 사양을 자동으로 설치 계획으로 정리합니다. 맞으면 진행하고, 다르면 이전으로 돌아가 수정합니다.</p>
+                <h2>설치 검토</h2>
+                <p>선택한 서버 스택과 변경 예정 항목을 자동으로 정리합니다. 맞지 않으면 이전 단계에서 수정하세요.</p>
               </div>
               <button id="plan-button" class="btn btn-primary icon-button" type="button" data-icon="refresh-cw">계획 새로고침</button>
             </div>
@@ -505,7 +582,7 @@
             </div>
             <div class="wizard-actions">
               <button class="btn btn-ghost icon-button" type="button" data-icon="chevron-left" data-next="options">이전</button>
-              <button id="confirm-spec-button" class="btn btn-primary icon-button" type="button" data-icon="check" data-next="install" disabled>이 사양으로 진행</button>
+              <button id="confirm-spec-button" class="btn btn-primary icon-button" type="button" data-icon="check" data-next="install" disabled>검토 완료, 설치로 이동</button>
             </div>
           </section>
 
@@ -513,13 +590,14 @@
             <div class="section-heading">
               <div>
                 <span class="step-eyebrow">5단계</span>
-                <h2>기본 서버 구성 실행</h2>
+                <h2>설치 진행</h2>
                 <p>apt 패키지, 웹서버 도메인 연결, PHP/DB 튜닝, DB 계정, SSL, 앱 설치 링크, 설정 안내서를 순서대로 처리합니다.</p>
               </div>
-              <button id="install-button" class="btn btn-primary icon-button" type="button" data-icon="package-plus">기본 구성 시작</button>
+              <button id="install-button" class="btn btn-primary icon-button" type="button" data-icon="package-plus">설치 시작</button>
             </div>
             <div id="install-status" class="mt-5 hidden"></div>
             <section id="install-app-summary" class="install-app-summary mt-5" data-status="pending">
+              <span class="install-app-mark" aria-hidden="true">G7</span>
               <div>
                 <span class="install-app-kicker">설치 대상</span>
                 <h3 id="install-app-title">그누보드7</h3>
@@ -556,7 +634,7 @@
             <div class="section-heading">
               <div>
                 <span class="step-eyebrow">6단계</span>
-                <h2>결과 리포트</h2>
+                <h2>설치 결과</h2>
                 <p>기본 서버 구성 결과를 요약합니다. 세부 적용/점검은 다음 단계에서 항목별로 확인합니다.</p>
               </div>
               <div class="flex flex-wrap gap-2">
@@ -609,10 +687,14 @@
           </section>
         </div>
 
-        <aside class="side-panel">
+        <footer class="workspace-footer">
           <section id="summary-panel" class="summary-panel" hidden>
-            <h2 class="text-lg font-semibold">현재 선택</h2>
-            <dl class="mt-4 grid gap-3">
+            <h2>현재 선택</h2>
+            <dl>
+              <div class="metric">
+                <dt>설치 프로필</dt>
+                <dd id="summary-profile">운영 권장</dd>
+              </div>
               <div class="metric">
                 <dt>도메인</dt>
                 <dd id="summary-domain">확인 중</dd>
@@ -632,21 +714,21 @@
             </dl>
           </section>
 
-          <div id="log-dock-home">
-            <details id="log-dock" class="log-dock collapse collapse-arrow">
-              <summary class="collapse-title font-semibold">실시간 로그</summary>
+          <div id="log-dock-home" class="log-dock-home">
+            <details id="log-dock" class="log-dock collapse collapse-arrow" open>
+              <summary class="collapse-title font-semibold"><span class="live-indicator" aria-hidden="true"></span>실시간 로그</summary>
               <div class="collapse-content">
                 <pre id="live-log" class="code-box log-box">웹 컨트롤러를 불러오는 중...</pre>
               </div>
             </details>
           </div>
-        </aside>
+        </footer>
       </section>
       </section>
     </main>
     <dialog id="install-confirm-dialog" class="modal">
       <div class="modal-box">
-        <h3 class="text-lg font-semibold">기본 서버 구성을 시작할까요?</h3>
+        <h3 class="text-lg font-semibold">서버 설치를 시작할까요?</h3>
         <p class="mt-2 text-sm text-base-content/60">신규 Ubuntu VPS 기준으로 서버 패키지, 웹서버, PHP/DB, SSL, 앱 설치 준비를 진행합니다. 이미 운영 중인 서버라면 중단하고 새 서버에서 진행하세요.</p>
         <div id="install-confirm-summary" class="report-card mt-5"></div>
         <div class="modal-action">
@@ -663,14 +745,18 @@
     <dialog id="install-progress-dialog" class="install-progress-dialog" aria-labelledby="activity-current-stage" aria-describedby="activity-current-message">
       <section class="install-progress-shell">
         <header class="install-progress-heading">
-          <div>
-            <span class="execution-kicker">기본 서버 구성</span>
+          <div class="execution-copy">
+            <div class="execution-brand"><span aria-hidden="true">G7</span><strong>Provisioning run</strong></div>
+            <span class="execution-kicker">서버 설치</span>
             <h2 id="activity-current-stage">대기 중</h2>
             <p id="activity-current-message">기본 구성을 시작하면 현재 작업과 완료 순서가 표시됩니다.</p>
           </div>
-          <div class="execution-progress-row">
-            <progress id="install-progress" class="progress progress-primary w-full" value="0" max="100"></progress>
-            <strong id="activity-progress-label">0%</strong>
+          <div class="execution-meter">
+            <span>9개 구성 작업</span>
+            <div class="execution-progress-row">
+              <progress id="install-progress" class="progress progress-primary w-full" value="0" max="100"></progress>
+              <strong id="activity-progress-label">0%</strong>
+            </div>
           </div>
         </header>
 

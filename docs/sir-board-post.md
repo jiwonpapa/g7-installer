@@ -20,7 +20,7 @@ GitHub: https://github.com/jiwonpapa/g7-installer
 ### 하는 일
 
 - 새 Ubuntu 24.04 VPS 점검과 설치 가능 여부 확인
-- Nginx 권장 구성 또는 Apache 호환 구성, PHP 8.5 기본/PHP 8.3 선택, MySQL 8.0 또는 8.4 LTS, Redis, PHP-FPM 사이트 계정 pool 설정
+- Nginx 권장 또는 Apache 호환 구성, PHP 8.3·MySQL 8.0 운영 권장 프로필, PHP 8.5·MySQL 8.4 LTS 최신 지원 프로필, Redis, PHP-FPM 사이트 계정 pool 설정
 - RAM과 vCPU에 맞춘 PHP, DB, Redis, swap 기준값 적용 및 리포트 저장
 - 도메인과 `www` DNS/IP 확인, vhost 생성, Let's Encrypt 인증서 발급 또는 기존 인증서 재사용·갱신 점검
 - 사이트 Linux 계정, 웹루트, DB와 DB 계정 생성

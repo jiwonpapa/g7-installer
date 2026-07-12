@@ -17,10 +17,1129 @@
   }
 }
 
+@layer utilities {
+  .brand-sprite {
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+  }
+
+  .app-shell {
+    @apply max-w-[1536px] border-base-300/80 shadow-lg;
+    border-radius: 8px;
+    box-shadow: inset 0 3px 0 hsl(var(--p)), 0 18px 48px rgb(15 23 42 / 0.08);
+  }
+
+  .app-header {
+    @apply min-h-[68px] flex-row items-center justify-between gap-3 px-4 py-2 sm:px-5;
+  }
+
+  .titlebar-left {
+    @apply items-center gap-3;
+  }
+
+  .product-mark {
+    @apply grid h-10 w-10 shrink-0 place-items-center bg-primary text-sm font-black text-primary-content;
+    border-radius: 7px;
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.2), 0 6px 14px hsl(var(--p) / 0.2);
+  }
+
+  .product-copy h1 {
+    @apply text-lg font-bold leading-5;
+  }
+
+  .product-copy p {
+    @apply mt-1 text-[0.7rem] font-semibold uppercase text-base-content/45;
+    letter-spacing: 0;
+  }
+
+  .scope-menu {
+    @apply relative hidden md:block;
+  }
+
+  .scope-menu summary {
+    @apply flex min-h-9 cursor-pointer list-none items-center gap-2 rounded-md px-3 text-xs font-semibold text-base-content/60 hover:bg-base-200 hover:text-base-content;
+  }
+
+  .scope-menu summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .scope-menu summary .icon {
+    @apply h-3.5 w-3.5;
+  }
+
+  .scope-menu p {
+    @apply absolute right-0 top-11 z-50 w-80 rounded-md border border-base-300 bg-base-100 p-4 text-xs leading-5 text-base-content/70 shadow-xl;
+  }
+
+  .command-bar {
+    @apply flex-nowrap;
+  }
+
+  .status-pill {
+    @apply min-h-9 gap-2 border-0 bg-base-200 px-3;
+  }
+
+  .status-dot {
+    @apply h-2 w-2 rounded-full bg-success;
+    box-shadow: 0 0 0 3px rgb(34 197 94 / 0.13);
+  }
+
+  .status-pill .badge {
+    @apply border-0 bg-transparent p-0 text-xs font-semibold text-base-content;
+  }
+
+  .app-workspace {
+    @apply lg:grid-cols-[9.5rem_minmax(0,1fr)];
+  }
+
+  .wizard-progress {
+    @apply bg-base-200/50 lg:px-3 lg:py-6;
+  }
+
+  .wizard-progress-head {
+    @apply mb-3 flex items-center justify-between gap-3 px-1 lg:mb-6 lg:block;
+  }
+
+  .wizard-progress-head span {
+    @apply text-[0.68rem] font-semibold uppercase text-base-content/40;
+  }
+
+  .wizard-progress-head strong {
+    @apply text-xs font-semibold text-base-content/70 lg:mt-1 lg:block;
+  }
+
+  .wizard-progress .step {
+    @apply text-base-content/45;
+  }
+
+  .wizard-progress .step.step-primary {
+    @apply text-base-content;
+  }
+
+  .step-copy {
+    @apply text-xs;
+  }
+
+  .workspace-grid {
+    @apply grid-cols-1;
+  }
+
+  .view-panel {
+    @apply mx-auto w-full max-w-[78rem] px-5 py-6 md:px-8 md:py-8;
+    animation: g7inst-view-enter 160ms ease-out;
+  }
+
+  .section-heading {
+    @apply gap-4 pb-5;
+  }
+
+  .section-heading h2 {
+    @apply mt-1 text-[1.65rem] font-bold leading-tight;
+  }
+
+  .section-heading p {
+    @apply mt-2 max-w-2xl text-sm leading-6;
+  }
+
+  .step-eyebrow {
+    @apply text-[0.7rem] uppercase;
+  }
+
+  .summary-panel {
+    @apply mx-auto w-full max-w-[78rem] bg-base-100 px-5 py-4 md:px-8;
+  }
+
+  .summary-panel h2 {
+    @apply text-xs font-semibold uppercase text-base-content/45;
+  }
+
+  .summary-panel dl {
+    @apply mt-3 grid gap-px overflow-hidden border border-base-300 bg-base-300 sm:grid-cols-2 lg:grid-cols-5;
+    border-radius: 7px;
+  }
+
+  .metric {
+    @apply border-0 bg-base-100 px-4 py-3;
+  }
+
+  .metric dd {
+    @apply mt-1 text-sm;
+  }
+
+  .log-dock {
+    @apply rounded-none border-0 bg-neutral text-neutral-content;
+  }
+
+  .log-dock .collapse-title {
+    @apply flex min-h-12 items-center gap-2 px-5 text-xs font-semibold text-neutral-content/75 md:px-8;
+  }
+
+  .live-indicator {
+    @apply h-2 w-2 rounded-full bg-success;
+    box-shadow: 0 0 0 3px rgb(34 197 94 / 0.15);
+  }
+
+  .log-dock .collapse-content {
+    @apply px-5 pb-4 md:px-8;
+  }
+
+  .log-box {
+    @apply max-h-52 min-h-32 border-neutral/10 bg-neutral text-[0.7rem] leading-5 text-neutral-content/80;
+  }
+
+  .workspace-footer {
+    @apply min-w-0 border-t border-base-300 bg-base-100;
+  }
+
+  .log-dock-home {
+    @apply border-t border-base-300;
+  }
+
+  body[data-active-step="options"] .summary-panel {
+    display: none !important;
+  }
+
+  .options-form {
+    @apply mt-4 grid gap-7;
+  }
+
+  .profile-console {
+    @apply border-y border-base-300 py-5;
+  }
+
+  .profile-console-head {
+    @apply grid gap-4 lg:grid-cols-[minmax(12rem,0.7fr)_minmax(30rem,1.3fr)] lg:items-end;
+  }
+
+  .interface-label {
+    @apply text-[0.68rem] font-semibold uppercase text-primary;
+  }
+
+  .profile-console-head h3 {
+    @apply mt-1 text-lg font-bold;
+  }
+
+  .profile-segments {
+    @apply grid grid-cols-3 gap-1 border border-base-300 bg-base-200 p-1;
+    border-radius: 7px;
+  }
+
+  .profile-segment {
+    @apply relative min-w-0 cursor-pointer;
+  }
+
+  .profile-segment input,
+  .runtime-segments input {
+    @apply sr-only;
+  }
+
+  .profile-segment > span {
+    @apply relative grid min-h-14 content-center px-3 text-center transition duration-150 hover:bg-base-100/70;
+    border-radius: 5px;
+  }
+
+  .profile-segment strong,
+  .profile-segment small {
+    @apply block min-w-0;
+  }
+
+  .profile-segment strong {
+    @apply text-sm font-bold;
+  }
+
+  .profile-segment small {
+    @apply mt-1 text-[0.68rem] text-base-content/50;
+  }
+
+  .profile-segment input:checked + span {
+    @apply bg-base-100 text-primary shadow-sm;
+    box-shadow: inset 0 0 0 1px hsl(var(--p) / 0.22), 0 1px 3px rgb(15 23 42 / 0.08);
+  }
+
+  .profile-segment input:checked + span::after {
+    content: "";
+    @apply absolute inset-x-4 bottom-0 h-0.5 bg-primary;
+    border-radius: 999px 999px 0 0;
+  }
+
+  .stack-stage {
+    @apply mt-5 overflow-hidden px-5 py-5 text-neutral-content md:px-6 md:py-6;
+    background: #202936;
+    border-radius: 7px;
+    box-shadow: inset 0 3px 0 hsl(var(--p)), 0 18px 36px rgb(15 23 42 / 0.14);
+  }
+
+  .stack-stage-header {
+    @apply flex flex-col gap-4 border-b border-neutral-content/15 pb-5 md:flex-row md:items-center md:justify-between;
+  }
+
+  .stack-stage-title {
+    @apply flex min-w-0 items-center gap-4;
+  }
+
+  .stack-stage .app-target-mark {
+    @apply h-14 w-14 bg-primary text-primary-content;
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.15);
+  }
+
+  .stack-stage-title small,
+  .stack-source span,
+  .delivery-target span {
+    @apply text-[0.65rem] font-semibold uppercase text-neutral-content/45;
+  }
+
+  .stack-stage-title h3 {
+    @apply mt-1 text-xl font-bold;
+  }
+
+  .stack-stage-title p {
+    @apply mt-1 max-w-2xl text-xs leading-5 text-neutral-content/60;
+  }
+
+  .stack-source {
+    @apply min-w-52 border-l border-neutral-content/15 pl-4 md:text-right;
+  }
+
+  .stack-source strong {
+    @apply mt-1 block text-xs font-semibold text-neutral-content/75;
+  }
+
+  .stack-confidence {
+    @apply mt-2 flex items-center gap-1.5 text-[0.62rem] font-semibold text-neutral-content/45 md:justify-end;
+  }
+
+  .stack-confidence i {
+    @apply h-1.5 w-1.5 rounded-full bg-success;
+    box-shadow: 0 0 0 3px rgb(34 197 94 / 0.12);
+  }
+
+  .stack-stage .stack-product-row {
+    @apply relative mt-5 grid grid-cols-5 gap-3 overflow-visible border-0 bg-transparent;
+  }
+
+  .stack-stage .stack-product-row::before {
+    content: "";
+    @apply absolute left-[8%] right-[8%] top-1/2 h-px bg-neutral-content/15;
+  }
+
+  .stack-stage .stack-product {
+    @apply relative z-10 min-h-36 bg-[#273241] px-3 py-5 text-neutral-content transition duration-150 hover:-translate-y-0.5 hover:border-neutral-content/25;
+    border: 1px solid rgb(255 255 255 / 0.1);
+    border-radius: 6px;
+  }
+
+  .stack-stage .stack-product:not(:last-child)::after {
+    content: "";
+    @apply absolute -right-[0.58rem] top-1/2 z-20 h-2 w-2 -translate-y-1/2 rotate-45 border-r border-t border-neutral-content/35;
+  }
+
+  .stack-stage .stack-product-logo {
+    @apply mb-4 grid h-14 w-14 place-items-center bg-white p-2.5;
+    border-radius: 7px;
+    box-shadow: 0 7px 16px rgb(0 0 0 / 0.18);
+  }
+
+  .stack-stage .stack-product-logo svg {
+    @apply h-full w-full;
+  }
+
+  .stack-stage .stack-product small {
+    @apply text-neutral-content/45;
+  }
+
+  .stack-stage .stack-product strong {
+    @apply text-sm text-neutral-content;
+  }
+
+  .stack-step-label {
+    @apply absolute left-2 top-2 font-mono text-[0.58rem] text-neutral-content/30;
+  }
+
+  .stack-stage.is-refreshing .stack-product-logo {
+    animation: g7inst-product-pop 220ms ease-out;
+  }
+
+  .stack-stage.is-refreshing .stack-product:nth-child(2) .stack-product-logo { animation-delay: 35ms; }
+  .stack-stage.is-refreshing .stack-product:nth-child(3) .stack-product-logo { animation-delay: 70ms; }
+  .stack-stage.is-refreshing .stack-product:nth-child(4) .stack-product-logo { animation-delay: 105ms; }
+  .stack-stage.is-refreshing .stack-product:nth-child(5) .stack-product-logo { animation-delay: 140ms; }
+
+  .stack-stage-footer {
+    @apply mt-5 flex flex-col gap-4 border-t border-neutral-content/15 pt-5 md:flex-row md:items-end md:justify-between;
+  }
+
+  .runtime-switch legend {
+    @apply mb-2 text-xs font-semibold text-neutral-content/60;
+  }
+
+  .runtime-segments {
+    @apply inline-grid grid-cols-2 gap-1 bg-neutral-content/10 p-1;
+    border-radius: 6px;
+  }
+
+  .runtime-segments label {
+    @apply cursor-pointer;
+  }
+
+  .runtime-segments label > span {
+    @apply flex min-h-10 items-center gap-2 px-3 text-xs transition;
+    border-radius: 4px;
+  }
+
+  .runtime-segments svg {
+    @apply h-5 w-5;
+    fill: currentColor;
+  }
+
+  .runtime-segments small {
+    @apply text-[0.62rem] text-neutral-content/40;
+  }
+
+  .runtime-segments input:checked + span {
+    @apply bg-base-100 text-base-content shadow-sm;
+  }
+
+  .delivery-target {
+    @apply border-l-2 border-primary pl-4 md:text-right;
+  }
+
+  .delivery-target strong {
+    @apply mt-1 block text-sm font-semibold;
+  }
+
+  .account-settings {
+    @apply border-y border-base-300 bg-base-100;
+  }
+
+  .account-settings > summary {
+    @apply flex min-h-16 cursor-pointer list-none items-center justify-between gap-4 bg-base-200/25 px-4 py-3;
+  }
+
+  .account-settings > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .account-settings > summary strong,
+  .account-settings > summary small {
+    @apply block;
+  }
+
+  .account-settings > summary strong {
+    @apply text-base font-bold;
+  }
+
+  .account-settings > summary small {
+    @apply mt-1 text-xs text-base-content/50;
+  }
+
+  #credential-state {
+    @apply inline-flex shrink-0 items-center rounded-full bg-warning/15 px-3 py-1 text-xs font-semibold not-italic text-warning-content;
+  }
+
+  #credential-state::after {
+    content: "";
+    width: 0.38rem;
+    height: 0.38rem;
+    margin-left: 0.55rem;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: rotate(45deg) translateY(-0.08rem);
+    transition: transform 160ms ease;
+  }
+
+  .account-settings[open] #credential-state::after {
+    transform: rotate(225deg) translate(-0.08rem, -0.08rem);
+  }
+
+  #credential-state[data-status="pass"] {
+    @apply bg-success/10 text-success;
+  }
+
+  .account-settings-body {
+    @apply grid border-t border-base-300 lg:grid-cols-2;
+  }
+
+  .credential-lane {
+    @apply relative px-4 py-5 transition duration-200 lg:px-5;
+  }
+
+  .credential-lane + .credential-lane {
+    @apply border-t border-base-300 lg:border-l lg:border-t-0;
+  }
+
+  .credential-lane > header {
+    @apply mb-4 flex items-center gap-3;
+  }
+
+  .credential-lane > header > span {
+    @apply grid h-7 w-7 place-items-center rounded-full bg-base-200 font-mono text-[0.65rem] font-semibold text-base-content/45;
+  }
+
+  .credential-lane > header strong,
+  .credential-lane > header small {
+    @apply block;
+  }
+
+  .credential-lane > header strong {
+    @apply text-sm font-bold;
+  }
+
+  .credential-lane > header small {
+    @apply mt-0.5 text-[0.68rem] text-base-content/45;
+  }
+
+  .credential-lane-status {
+    @apply ml-auto shrink-0 text-[0.65rem] font-semibold not-italic text-base-content/45;
+  }
+
+  .credential-lane[data-state="pending"] {
+    @apply bg-base-200/20;
+    opacity: 0.62;
+  }
+
+  .credential-lane[data-state="active"] {
+    box-shadow: inset 3px 0 0 hsl(var(--p));
+  }
+
+  .credential-lane[data-state="active"] > header > span {
+    @apply bg-primary text-primary-content;
+  }
+
+  .credential-lane[data-state="active"] .credential-lane-status {
+    @apply text-primary;
+  }
+
+  .credential-lane[data-state="pass"] > header > span {
+    @apply bg-success/15 text-success;
+  }
+
+  .credential-lane[data-state="pass"] .credential-lane-status {
+    @apply text-success;
+  }
+
+  .alert.alert-success {
+    @apply border border-success/25 border-l-2 bg-success/[0.055] text-base-content;
+  }
+
+  .install-app-summary {
+    @apply grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 border-y border-base-300 bg-base-100 px-1 py-5;
+    border-radius: 0;
+  }
+
+  .install-app-mark {
+    @apply grid h-12 w-12 place-items-center bg-neutral text-sm font-black text-neutral-content;
+    border-radius: 7px;
+  }
+
+  @keyframes g7inst-product-pop {
+    from { opacity: 0.55; transform: translateY(5px) scale(0.96); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  .profile-section > .field-label {
+    @apply mb-3;
+  }
+
+  .profile-grid {
+    @apply grid gap-3 lg:grid-cols-[1fr_1fr_0.8fr];
+  }
+
+  .profile-card {
+    @apply flex min-h-36 cursor-pointer items-start gap-3 border border-base-300 bg-base-100 p-4 transition duration-150 hover:border-primary/60 hover:bg-primary/[0.03];
+    border-radius: 7px;
+  }
+
+  .profile-card:has(input:checked) {
+    @apply border-primary bg-primary/[0.06];
+    box-shadow: inset 0 0 0 1px hsl(var(--p));
+  }
+
+  .profile-card-copy {
+    @apply min-w-0 flex-1;
+  }
+
+  .profile-card-heading {
+    @apply flex items-center justify-between gap-2;
+  }
+
+  .profile-card-heading strong {
+    @apply text-base font-bold;
+  }
+
+  .profile-card-heading em {
+    @apply rounded bg-primary/10 px-2 py-1 text-[0.65rem] font-bold not-italic text-primary;
+  }
+
+  .profile-card-copy > small {
+    @apply mt-3 block text-sm font-semibold text-base-content;
+  }
+
+  .profile-card-copy > span:last-child {
+    @apply mt-2 block text-xs leading-5 text-base-content/55;
+  }
+
+  .stack-preview {
+    @apply border-y border-base-300 bg-base-200/35 py-5;
+  }
+
+  .stack-preview-heading {
+    @apply mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between;
+  }
+
+  .stack-preview-heading > div span {
+    @apply block text-[0.68rem] font-semibold uppercase text-base-content/40;
+  }
+
+  .stack-preview-heading > div strong {
+    @apply mt-1 block text-base font-bold;
+  }
+
+  .stack-preview-heading > span {
+    @apply text-xs font-semibold text-base-content/50;
+  }
+
+  .stack-product-row {
+    @apply grid grid-cols-2 gap-px overflow-hidden border border-base-300 bg-base-300 sm:grid-cols-3 lg:grid-cols-5;
+    border-radius: 7px;
+  }
+
+  .stack-product {
+    @apply grid min-h-32 place-items-center content-center bg-base-100 px-3 py-4 text-center;
+  }
+
+  .stack-product-logo {
+    @apply mb-3 grid h-10 w-12 place-items-center;
+  }
+
+  .stack-product-logo svg,
+  .server-choice-logo {
+    @apply h-full w-full;
+    fill: currentColor;
+  }
+
+  .stack-product small {
+    @apply text-[0.65rem] font-semibold uppercase text-base-content/40;
+  }
+
+  .stack-product strong {
+    @apply mt-1 text-xs font-bold;
+  }
+
+  .stack-logo-nginx { color: #009639; }
+  .stack-logo-apache { color: #d22128; }
+  .stack-logo-php { color: #777bb4; }
+  .stack-logo-mysql { color: #4479a1; }
+  .stack-logo-redis { color: #ff4438; }
+  .stack-logo-ssl { color: #2c3c69; }
+
+  #stack-web-product .stack-logo-apache {
+    @apply hidden;
+  }
+
+  #stack-web-product[data-product="apache"] .stack-logo-nginx {
+    @apply hidden;
+  }
+
+  #stack-web-product[data-product="apache"] .stack-logo-apache {
+    @apply grid;
+  }
+
+  #stack-redis-product[data-enabled="false"] {
+    opacity: 0.45;
+  }
+
+  .options-band {
+    @apply border-b border-base-300 pb-6;
+  }
+
+  .options-band-split {
+    @apply grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(15rem,0.65fr)];
+  }
+
+  .options-band .field-label,
+  .options-band-split .field-label {
+    @apply mb-3;
+  }
+
+  .options-band-heading {
+    @apply mb-5;
+  }
+
+  .options-band-heading strong {
+    @apply block text-base font-bold;
+  }
+
+  .options-band-heading small {
+    @apply mt-1 block text-xs leading-5 text-base-content/55;
+  }
+
+  .server-choice-grid {
+    @apply grid gap-3 sm:grid-cols-2;
+  }
+
+  .server-choice {
+    @apply flex min-h-20 cursor-pointer items-center gap-3 border border-base-300 bg-base-100 px-4 py-3 transition hover:border-primary/60;
+    border-radius: 7px;
+  }
+
+  .server-choice:has(input:checked) {
+    @apply border-primary bg-primary/[0.05];
+  }
+
+  .server-choice-logo {
+    @apply h-9 w-9 shrink-0;
+  }
+
+  .server-choice span {
+    @apply min-w-0;
+  }
+
+  .server-choice strong,
+  .server-choice small {
+    @apply block;
+  }
+
+  .server-choice strong {
+    @apply text-sm font-bold;
+  }
+
+  .server-choice small {
+    @apply mt-1 text-xs text-base-content/50;
+  }
+
+  .app-target {
+    @apply flex min-h-28 items-center gap-4 border-l-2 border-primary bg-base-200/45 px-5 py-4;
+  }
+
+  .app-target-mark {
+    @apply grid h-12 w-12 shrink-0 place-items-center bg-neutral text-sm font-black text-neutral-content;
+    border-radius: 7px;
+  }
+
+  .app-target small,
+  .app-target strong,
+  .app-target em {
+    @apply block;
+  }
+
+  .app-target small {
+    @apply text-[0.65rem] font-semibold uppercase text-base-content/40;
+  }
+
+  .app-target strong {
+    @apply mt-1 text-base font-bold;
+  }
+
+  .app-target em {
+    @apply mt-1 text-xs not-italic text-base-content/55;
+  }
+
+  .advanced-settings {
+    @apply rounded-md border border-base-300 bg-base-100;
+  }
+
+  .advanced-settings > summary {
+    @apply min-h-14;
+  }
+
+  .advanced-settings > summary span {
+    @apply ml-2 text-xs font-normal text-base-content/45;
+  }
+
+  .field .input,
+  .field .select {
+    @apply h-11 min-h-11 rounded-md bg-base-100 text-sm;
+  }
+
+  .guidance-panel {
+    @apply border-0 border-l-2 border-info bg-info/[0.06];
+  }
+
+  .doctor-overview {
+    @apply grid gap-px overflow-hidden border border-base-300 bg-base-300 sm:grid-cols-2 lg:grid-cols-4;
+    border-radius: 7px;
+  }
+
+  .doctor-results {
+    display: block;
+  }
+
+  .doctor-metric {
+    @apply bg-base-100 px-4 py-4;
+  }
+
+  .doctor-metric span {
+    @apply text-[0.65rem] font-semibold uppercase text-base-content/40;
+  }
+
+  .doctor-metric strong {
+    @apply mt-2 block text-base font-bold;
+  }
+
+  .doctor-details {
+    @apply mt-4 rounded-md border border-base-300 bg-base-100;
+  }
+
+  .doctor-details > summary {
+    @apply flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-4 text-sm font-semibold;
+  }
+
+  .doctor-details > summary::-webkit-details-marker { display: none; }
+  .doctor-details > summary span { @apply text-xs text-base-content/45; }
+  .doctor-detail-list { @apply grid gap-2 border-t border-base-300 p-3 md:grid-cols-2; }
+
+  .result-row,
+  .stage-row {
+    @apply shadow-none;
+  }
+
+  .result-row[data-status="pass"] strong,
+  .stage-row[data-status="성공"] strong {
+    @apply bg-success/10 text-success;
+  }
+
+  .wizard-actions {
+    @apply z-20 mt-7 px-0 py-3;
+  }
+
+  .install-progress-dialog {
+    width: min(72rem, calc(100vw - 2rem));
+  }
+
+  .install-progress-shell {
+    @apply gap-0 overflow-hidden border-0 p-0;
+    border-radius: 8px;
+  }
+
+  .install-progress-heading {
+    @apply border-0 bg-neutral px-5 py-5 text-neutral-content md:px-6 md:py-6;
+  }
+
+  .execution-brand {
+    @apply mb-4 flex items-center gap-2.5;
+  }
+
+  .execution-brand > span {
+    @apply grid h-8 w-8 place-items-center bg-primary text-[0.65rem] font-black text-primary-content;
+    border-radius: 6px;
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.18);
+  }
+
+  .execution-brand > strong {
+    @apply text-[0.65rem] font-semibold uppercase text-neutral-content/45;
+  }
+
+  .install-progress-heading .execution-kicker {
+    @apply text-primary-content/70;
+  }
+
+  .install-progress-heading h2 {
+    @apply text-neutral-content;
+  }
+
+  .install-progress-heading p {
+    @apply text-neutral-content/60;
+  }
+
+  .execution-meter > span {
+    @apply mb-2 block text-[0.65rem] font-semibold text-neutral-content/45 md:text-right;
+  }
+
+  .execution-progress-row strong {
+    @apply text-neutral-content/70;
+  }
+
+  .execution-progress-row .progress {
+    @apply bg-neutral-content/15;
+  }
+
+  .install-graph {
+    @apply content-start gap-0 px-5 py-4 md:px-6;
+  }
+
+  .install-graph-node {
+    @apply rounded-none border-x-0 border-t-0 px-3 shadow-none;
+  }
+
+  .install-graph-node[data-status="진행"],
+  .install-graph-node[data-status="실패"] {
+    @apply border-l-2;
+  }
+
+  .install-log-slot {
+    @apply mx-5 mb-5 md:mb-6 md:ml-0 md:mr-6 md:mt-4;
+  }
+
+  .install-progress-footer {
+    @apply mx-5 mb-5 md:mx-6 md:mb-6;
+  }
+
+  .install-progress-dialog[data-outcome="complete"] .execution-brand > span {
+    @apply bg-success text-success-content;
+  }
+
+  @media (min-width: 900px) {
+    .install-progress-shell {
+      grid-template-columns: minmax(0, 1fr) 22rem;
+    }
+
+    .install-progress-heading,
+    .install-progress-footer {
+      grid-column: 1 / -1;
+    }
+
+    .install-graph {
+      grid-column: 1;
+      grid-row: 2;
+      align-content: space-between;
+    }
+
+    .install-log-slot {
+      grid-column: 2;
+      grid-row: 2;
+      min-width: 0;
+    }
+
+    .install-log-slot .log-box {
+      @apply max-h-[34rem] min-h-[34rem];
+    }
+  }
+
+  .report-card {
+    @apply shadow-none;
+  }
+
+  .plan-review > .report-card:first-child,
+  .report-panel > .report-card:first-child {
+    @apply border-l-2 border-l-primary bg-base-200/25;
+  }
+
+  .plan-review .plan-details {
+    @apply rounded-none border-x-0 bg-base-100 px-1 shadow-none;
+  }
+
+  .plan-review .plan-details + .plan-details {
+    @apply -mt-px;
+  }
+
+  .provisioning-action-card {
+    @apply shadow-none transition duration-150 hover:border-primary/45 hover:bg-primary/[0.025];
+  }
+
+  .provisioning-action-grid {
+    @apply gap-2;
+  }
+
+  @keyframes g7inst-view-enter {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (max-width: 1023px) {
+    .app-shell {
+      @apply min-h-screen border-0 shadow-none;
+      border-radius: 0;
+    }
+
+    .app-header {
+      @apply sticky top-0 z-40 min-h-[60px] px-3 py-2;
+    }
+
+    .product-mark {
+      @apply h-9 w-9;
+    }
+
+    .product-copy h1 {
+      @apply text-base;
+    }
+
+    .product-copy p,
+    #shutdown-button,
+    .status-pill {
+      @apply hidden;
+    }
+
+    #theme-toggle {
+      @apply w-10 px-0;
+    }
+
+    #theme-toggle .btn-label {
+      @apply sr-only;
+    }
+
+    .wizard-progress {
+      @apply sticky top-[60px] z-30 grid grid-cols-[8.5rem_minmax(0,1fr)] items-center gap-3 px-3 py-2.5;
+    }
+
+    .wizard-progress-head {
+      @apply mb-0 block px-0;
+    }
+
+    .wizard-progress-head > span {
+      @apply hidden;
+    }
+
+    .wizard-progress-head strong {
+      @apply mt-0 whitespace-nowrap text-[0.7rem];
+    }
+
+    .wizard-progress .steps-horizontal {
+      @apply grid w-full grid-cols-7 gap-1;
+    }
+
+    .wizard-progress .steps-horizontal .step {
+      @apply block h-1 min-h-1 min-w-0 rounded-full bg-base-300 p-0 text-[0px];
+    }
+
+    .wizard-progress .steps-horizontal .step.step-primary {
+      @apply bg-primary;
+    }
+
+    .wizard-progress .steps-horizontal .step::before,
+    .wizard-progress .steps-horizontal .step::after,
+    .wizard-progress .step-copy {
+      display: none !important;
+    }
+
+    .view-panel {
+      @apply px-4 py-5;
+    }
+
+    .section-heading {
+      @apply flex-col items-stretch;
+    }
+
+    .section-heading > .btn {
+      @apply mt-1 w-full;
+    }
+
+    .profile-console-head {
+      @apply gap-3;
+    }
+
+    .profile-segment > span {
+      @apply min-h-12 px-2;
+    }
+
+    .profile-segment strong {
+      @apply text-xs;
+    }
+
+    .profile-segment small {
+      @apply hidden;
+    }
+
+    .stack-stage {
+      @apply mt-4 px-4 py-4;
+    }
+
+    .stack-stage-header {
+      @apply items-stretch;
+    }
+
+    .stack-stage .app-target-mark {
+      @apply h-12 w-12;
+    }
+
+    .stack-stage-title h3 {
+      @apply text-lg;
+    }
+
+    .stack-source {
+      @apply min-w-0 border-l-0 border-t border-neutral-content/15 pl-0 pt-3 text-left;
+    }
+
+    .stack-stage .stack-product-row {
+      @apply grid-cols-2 gap-2;
+    }
+
+    .stack-stage .stack-product-row::before {
+      display: none;
+    }
+
+    .stack-stage .stack-product {
+      @apply min-h-28 py-4;
+    }
+
+    .stack-stage .stack-product:not(:last-child)::after {
+      display: none;
+    }
+
+    .stack-stage .stack-product:last-child {
+      @apply col-span-2;
+    }
+
+    .stack-stage .stack-product-logo {
+      @apply mb-3 h-12 w-12 p-2;
+    }
+
+    .stack-stage-footer {
+      @apply items-stretch;
+    }
+
+    .runtime-segments {
+      @apply grid w-full;
+    }
+
+    .runtime-segments label > span {
+      @apply justify-center;
+    }
+
+    .delivery-target {
+      @apply border-l-0 border-t border-neutral-content/15 pl-0 pt-3 text-left;
+    }
+
+    .account-settings > summary {
+      @apply items-start px-3;
+    }
+
+    .account-settings > summary small {
+      @apply max-w-56;
+    }
+
+    #credential-state {
+      @apply px-2 text-[0.65rem];
+    }
+
+    .credential-lane {
+      @apply px-3;
+    }
+
+    .credential-lane[data-state="active"] {
+      box-shadow: inset 2px 0 0 hsl(var(--p));
+    }
+
+    .install-progress-heading {
+      @apply px-4 py-5;
+    }
+
+    .install-graph {
+      @apply px-4;
+    }
+
+    .install-log-slot,
+    .install-progress-footer {
+      @apply mx-4 mb-4;
+    }
+
+    .summary-panel {
+      @apply hidden;
+    }
+
+    .log-dock .collapse-content {
+      @apply px-3 pb-3;
+    }
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .install-progress-shell,
   .install-progress-dialog[data-outcome="complete"] .install-progress-shell,
-  .install-graph-node[data-status="진행"] {
+  .install-graph-node[data-status="진행"],
+  .stack-stage.is-refreshing .stack-product-logo {
     animation: none !important;
   }
 
