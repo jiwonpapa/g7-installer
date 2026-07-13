@@ -295,8 +295,14 @@ const iconSvg = {
   "clipboard-list": "<rect width=\"8\" height=\"4\" x=\"8\" y=\"2\" rx=\"1\" ry=\"1\" /> <path d=\"M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2\" /> <path d=\"M12 11h4\" /> <path d=\"M12 16h4\" /> <path d=\"M8 11h.01\" /> <path d=\"M8 16h.01\" />",
   "download": "<path d=\"M12 15V3\" /> <path d=\"m7 10 5 5 5-5\" /> <path d=\"M5 21h14\" />",
   "file-check": "<path d=\"M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z\" /> <path d=\"M14 2v5a1 1 0 0 0 1 1h5\" /> <path d=\"m9 15 2 2 4-4\" />",
+  "folder-check": "<path d=\"M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8z\" /> <path d=\"m9 13 2 2 4-4\" />",
+  "gauge": "<path d=\"m12 14 4-4\" /> <path d=\"M3.34 19a10 10 0 1 1 17.32 0\" />",
+  "hard-drive": "<line x1=\"22\" x2=\"2\" y1=\"12\" y2=\"12\" /> <path d=\"M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z\" /> <line x1=\"6\" x2=\"6.01\" y1=\"16\" y2=\"16\" /> <line x1=\"10\" x2=\"10.01\" y1=\"16\" y2=\"16\" />",
   "home": "<path d=\"M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8\" /> <path d=\"M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z\" />",
+  "layout-panel-top": "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\" /> <path d=\"M3 9h18\" />",
+  "list-checks": "<path d=\"m3 7 2 2 4-4\" /> <path d=\"M13 6h8\" /> <path d=\"m3 17 2 2 4-4\" /> <path d=\"M13 18h8\" />",
   "log-in": "<path d=\"m10 17 5-5-5-5\" /> <path d=\"M15 12H3\" /> <path d=\"M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4\" />",
+  "memory-stick": "<path d=\"M6 19v-3\" /> <path d=\"M10 19v-3\" /> <path d=\"M14 19v-3\" /> <path d=\"M18 19v-3\" /> <path d=\"M8 11V9\" /> <path d=\"M16 11V9\" /> <path d=\"M12 11V9\" /> <path d=\"M2 15h20\" /> <path d=\"M2 7a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v8H2z\" />",
   "moon": "<path d=\"M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401\" />",
   "package-plus": "<path d=\"M12 22V12\" /> <path d=\"M16 17h6\" /> <path d=\"M19 14v6\" /> <path d=\"M21 10.535V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.729l7 4a2 2 0 0 0 2 .001l1.675-.955\" /> <path d=\"M3.29 7 12 12l8.71-5\" /> <path d=\"m7.5 4.27 8.997 5.148\" />",
   "play": "<path d=\"M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z\" />",
@@ -304,6 +310,9 @@ const iconSvg = {
   "refresh-cw": "<path d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8\" /> <path d=\"M21 3v5h-5\" /> <path d=\"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16\" /> <path d=\"M8 16H3v5\" />",
   "rotate-ccw": "<path d=\"M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8\" /> <path d=\"M3 3v5h5\" />",
   "scan-line": "<path d=\"M3 7V5a2 2 0 0 1 2-2h2\" /> <path d=\"M17 3h2a2 2 0 0 1 2 2v2\" /> <path d=\"M21 17v2a2 2 0 0 1-2 2h-2\" /> <path d=\"M7 21H5a2 2 0 0 1-2-2v-2\" /> <path d=\"M7 12h10\" />",
+  "server": "<rect width=\"20\" height=\"8\" x=\"2\" y=\"2\" rx=\"2\" ry=\"2\" /> <rect width=\"20\" height=\"8\" x=\"2\" y=\"14\" rx=\"2\" ry=\"2\" /> <line x1=\"6\" x2=\"6.01\" y1=\"6\" y2=\"6\" /> <line x1=\"6\" x2=\"6.01\" y1=\"18\" y2=\"18\" />",
+  "database": "<ellipse cx=\"12\" cy=\"5\" rx=\"9\" ry=\"3\" /> <path d=\"M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5\" /> <path d=\"M3 12c0 1.7 4 3 9 3s9-1.3 9-3\" />",
+  "shield-alert": "<path d=\"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z\" /> <path d=\"M12 8v4\" /> <path d=\"M12 16h.01\" />",
   "shield-check": "<path d=\"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z\" /> <path d=\"m9 12 2 2 4-4\" />",
   "sliders-horizontal": "<path d=\"M10 5H3\" /> <path d=\"M12 19H3\" /> <path d=\"M14 3v4\" /> <path d=\"M16 17v4\" /> <path d=\"M21 12h-9\" /> <path d=\"M21 19h-5\" /> <path d=\"M21 5h-7\" /> <path d=\"M8 10v4\" /> <path d=\"M8 12H3\" />",
   "sun": "<circle cx=\"12\" cy=\"12\" r=\"4\" /> <path d=\"M12 2v2\" /> <path d=\"M12 20v2\" /> <path d=\"m4.93 4.93 1.41 1.41\" /> <path d=\"m17.66 17.66 1.41 1.41\" /> <path d=\"M2 12h2\" /> <path d=\"M20 12h2\" /> <path d=\"m6.34 17.66-1.41 1.41\" /> <path d=\"m19.07 4.93-1.41 1.41\" />",
@@ -840,9 +849,18 @@ function setAlert(node, type, title, message) {
     warning: "alert alert-warning",
     info: "alert alert-info",
   };
+  const iconByType = {
+    success: "shield-check",
+    error: "x",
+    warning: "shield-alert",
+    info: "scan-line",
+  };
 
   node.className = `${classByType[type] || classByType.info} mt-5`;
-  node.innerHTML = `<div><strong>${escapeHtml(title)}</strong><p class="mt-1 whitespace-pre-line text-sm">${escapeHtml(message)}</p></div>`;
+  node.innerHTML = `
+    <span class="alert-icon" aria-hidden="true">${iconMarkup(iconByType[type] || iconByType.info)}</span>
+    <div><strong>${escapeHtml(title)}</strong><p class="mt-1 whitespace-pre-line text-sm">${escapeHtml(message)}</p></div>
+  `;
 }
 
 function hideAlert(node) {
@@ -1820,36 +1838,42 @@ function lifecycleView(status) {
   const views = {
     "app-installed": {
       tone: "installed",
+      icon: "shield-check",
       title: "그누보드7 설치 완료",
       description: "서버 구성, DB와 그누보드7 설치 완료 잠금을 확인했습니다.",
       recoveryTitle: "기존 설치 관리",
     },
     "app-install-pending": {
       tone: "pending",
+      icon: "layout-panel-top",
       title: "서버 구성 완료 · 웹 설치 대기",
       description: "서버와 DB 준비는 끝났습니다. 그누보드7 웹 설치 화면에서 관리자 설정을 마무리하세요.",
       recoveryTitle: "웹 설치 마무리 / 초기화",
     },
     "server-configured": {
       tone: "configured",
+      icon: "server",
       title: "서버 구성 완료",
       description: "설치기의 서버 구성 단계는 완료됐습니다. DB와 앱 파일 상태를 확인하세요.",
       recoveryTitle: "서버 구성 관리 / 초기화",
     },
     "install-interrupted": {
       tone: "interrupted",
+      icon: "shield-alert",
       title: "설치 진행 중 또는 중단됨",
       description: "저장된 단계와 실패 원인을 확인한 뒤 현재 단계부터 다시 진행할 수 있습니다.",
       recoveryTitle: "중단된 설치 복구 / 초기화",
     },
     "managed-existing": {
       tone: "configured",
+      icon: "server",
       title: "설치기 관리 서버 확인",
       description: "설치기 메타데이터가 있습니다. 신규 설치를 다시 실행하기 전에 현재 상태를 확인하세요.",
       recoveryTitle: "설치 상태 / 초기화",
     },
     fresh: {
       tone: "fresh",
+      icon: "shield-check",
       title: "신규 서버 설치 가능",
       description: "설치기 소유 구성이나 앱 설치 흔적이 없습니다.",
       recoveryTitle: "설치 상태 / 관리",
@@ -1887,17 +1911,31 @@ function lifecycleSummaryHtml(status) {
   return `
     <section class="doctor-lifecycle" data-lifecycle="${escapeHtml(view.tone)}" aria-label="기존 설치 상태">
       <div class="doctor-lifecycle-heading">
-        <div><strong>${escapeHtml(view.title)}</strong><p>${escapeHtml(view.description)}</p></div>
+        <div class="doctor-lifecycle-title">
+          <span class="doctor-lifecycle-mark" aria-hidden="true">${iconMarkup(view.icon)}</span>
+          <div><strong>${escapeHtml(view.title)}</strong><p>${escapeHtml(view.description)}</p></div>
+        </div>
         ${action}
       </div>
       <dl>
-        <div><dt>서버 구성</dt><dd>${status.server_configured ? "완료" : "진행 중/확인 필요"}</dd></div>
-        <div><dt>데이터베이스</dt><dd>${escapeHtml(databaseLifecycleLabel(status))}</dd></div>
-        <div><dt>앱 파일</dt><dd>${status.app_files_prepared ? "배치 완료" : "확인 필요"}</dd></div>
-        <div><dt>그누보드7</dt><dd>${escapeHtml(appStatus)}</dd></div>
+        <div data-state="${status.server_configured ? "pass" : "pending"}"><span aria-hidden="true">${iconMarkup("server")}</span><div><dt>서버 구성</dt><dd>${status.server_configured ? "완료" : "진행 중/확인 필요"}</dd></div></div>
+        <div data-state="${status.g7_database_confirmed ? "pass" : "pending"}"><span aria-hidden="true">${iconMarkup("database")}</span><div><dt>데이터베이스</dt><dd>${escapeHtml(databaseLifecycleLabel(status))}</dd></div></div>
+        <div data-state="${status.app_files_prepared ? "pass" : "pending"}"><span aria-hidden="true">${iconMarkup("folder-check")}</span><div><dt>앱 파일</dt><dd>${status.app_files_prepared ? "배치 완료" : "확인 필요"}</dd></div></div>
+        <div data-state="${status.g7_install_completed ? "pass" : "pending"}"><span aria-hidden="true">${iconMarkup("layout-panel-top")}</span><div><dt>그누보드7</dt><dd>${escapeHtml(appStatus)}</dd></div></div>
       </dl>
     </section>
   `;
+}
+
+function recoveryPanelMessage(status) {
+  const lifecycle = status?.lifecycle_status || "fresh";
+  const messages = {
+    "app-installed": "설치가 완료된 사이트입니다. 재설치할 때만 전체 초기화를 사용하며 Let's Encrypt 인증서는 보존합니다.",
+    "app-install-pending": "웹 설치를 마친 뒤 상태를 새로고침하세요. 처음부터 다시 설치할 때만 전체 초기화를 사용합니다.",
+    "server-configured": "DB와 앱 파일 상태를 확인하세요. 재설치가 필요하면 전체 초기화로 설치기 소유 리소스만 정리합니다.",
+    "managed-existing": "설치기 관리 기록이 있습니다. 현재 상태를 확인한 뒤 이어서 진행하거나 초기화하세요.",
+  };
+  return messages[lifecycle] || status?.message || "설치기 소유 흔적을 확인하지 못했습니다.";
 }
 
 function renderRecoveryStatus(status) {
@@ -1913,13 +1951,15 @@ function renderRecoveryStatus(status) {
     const title = panel.querySelector("[data-recovery-title]");
 
     if (title) {
-      title.textContent = lifecycleView(status).recoveryTitle;
+      title.dataset.label = lifecycleView(status).recoveryTitle;
+      title.dataset.uiIcon = "sliders-horizontal";
+      hydrateIconLabel(title);
     }
 
     if (message) {
       const failed = status?.failed_step ? ` 실패 단계: ${status.failed_step}.` : "";
       const restored = status?.restore_status === "restored" ? " 해당 단계 변경은 자동 복원되었습니다." : "";
-      message.textContent = `${status?.message || "설치기 소유 흔적을 확인하지 못했습니다."}${failed}${restored}`;
+      message.textContent = `${recoveryPanelMessage(status)}${failed}${restored}`;
     }
     if (paths) {
       const rows = status?.metadata_paths?.length
@@ -1942,6 +1982,8 @@ function renderRecoveryStatus(status) {
   });
 
   recoveryActionButtons("rollback").forEach((button) => {
+    button.hidden = !status?.can_rollback;
+    button.classList.toggle("hidden", !status?.can_rollback);
     button.disabled = !status?.can_rollback;
     button.title = status?.can_rollback
       ? "설치 직후 패키지와 설치 기록을 되돌립니다."
@@ -1950,6 +1992,7 @@ function renderRecoveryStatus(status) {
 
   recoveryActionButtons("resume").forEach((button) => {
     button.hidden = !status?.can_resume;
+    button.classList.toggle("hidden", !status?.can_resume);
     button.disabled = !status?.can_resume;
     setButtonLabel(button, status?.can_retry_step ? "수정 후 현재 단계 재실행" : "이어서 진행");
     button.title = status?.can_resume
@@ -2005,50 +2048,63 @@ function renderDoctor(report) {
   const warned = checks.filter((check) => ["warn", "unknown"].includes(check.status)).length;
   const failed = checks.filter((check) => check.status === "fail").length;
   const resources = report.resources || {};
+  const managedLifecycle = state.recoveryStatus
+    && state.recoveryStatus.lifecycle_status !== "fresh";
+  const protectedCount = managedLifecycle ? failed : 0;
+  const resultSummary = managedLifecycle
+    ? `${passed} 통과 · ${protectedCount} 보호`
+    : `${passed} 통과 · ${failed} 실패`;
 
   nodes.doctorResults.innerHTML = `
     ${lifecycleSummaryHtml(state.recoveryStatus)}
     <section class="doctor-overview" aria-label="서버 자원 요약">
-      <div class="doctor-metric"><span>전체 메모리</span><strong>${escapeHtml(formatResourceMib(resources.total_memory_mib))}</strong></div>
-      <div class="doctor-metric"><span>사용 가능 메모리</span><strong>${escapeHtml(formatResourceMib(resources.available_memory_mib))}</strong></div>
-      <div class="doctor-metric"><span>루트 디스크 여유</span><strong>${escapeHtml(formatResourceMib(resources.root_available_mib))}</strong></div>
-      <div class="doctor-metric"><span>점검 결과</span><strong>${passed} 통과 · ${failed} 실패</strong></div>
+      <div class="doctor-metric"><span class="doctor-metric-icon">${iconMarkup("memory-stick")}</span><div><span>전체 메모리</span><strong>${escapeHtml(formatResourceMib(resources.total_memory_mib))}</strong></div></div>
+      <div class="doctor-metric"><span class="doctor-metric-icon">${iconMarkup("gauge")}</span><div><span>사용 가능 메모리</span><strong>${escapeHtml(formatResourceMib(resources.available_memory_mib))}</strong></div></div>
+      <div class="doctor-metric"><span class="doctor-metric-icon">${iconMarkup("hard-drive")}</span><div><span>루트 디스크 여유</span><strong>${escapeHtml(formatResourceMib(resources.root_available_mib))}</strong></div></div>
+      <div class="doctor-metric" data-state="${managedLifecycle ? "protected" : (failed ? "fail" : "pass")}"><span class="doctor-metric-icon">${iconMarkup(managedLifecycle ? "shield-check" : (failed ? "shield-alert" : "shield-check"))}</span><div><span>${managedLifecycle ? "신규 설치 보호" : "점검 결과"}</span><strong>${escapeHtml(resultSummary)}</strong></div></div>
     </section>
-    <details class="doctor-details"${failed > 0 ? " open" : ""}>
-      <summary><strong>상세 점검 ${checks.length}개</strong><span>통과 ${passed} · 주의 ${warned} · 실패 ${failed}</span></summary>
+    <details class="doctor-details"${failed > 0 && !managedLifecycle ? " open" : ""}>
+      <summary><span class="doctor-details-title">${iconMarkup("list-checks")}<strong>상세 점검 ${checks.length}개</strong></span><span>통과 ${passed} · 주의 ${warned} · ${managedLifecycle ? `보호 ${protectedCount}` : `실패 ${failed}`}</span></summary>
       <div class="doctor-detail-list"></div>
     </details>
   `;
   hydrateIcons(nodes.doctorResults);
   setDoctorPassed(Boolean(report.install_allowed));
+  nodes.checkNextButton?.classList.toggle("hidden", Boolean(managedLifecycle));
 
-  const managedLifecycle = state.recoveryStatus
-    && state.recoveryStatus.lifecycle_status !== "fresh";
-  const lifecycle = lifecycleView(state.recoveryStatus);
-  setAlert(
-    nodes.doctorStatus,
-    report.install_allowed ? "success" : (managedLifecycle ? "info" : "error"),
-    report.install_allowed
-      ? "서버 점검 통과"
-      : (managedLifecycle ? lifecycle.title : "서버 점검 실패"),
-    report.install_allowed
-      ? "서버 설치를 계속 진행할 수 있습니다."
-      : (managedLifecycle
-        ? `${lifecycle.description} 아래 실패 표시는 신규 설치를 다시 실행하지 못하게 막는 보호 점검입니다.`
-        : "실패 항목을 해결한 뒤 다시 점검하세요."),
-  );
+  if (managedLifecycle) {
+    hideAlert(nodes.doctorStatus);
+  } else {
+    setAlert(
+      nodes.doctorStatus,
+      report.install_allowed ? "success" : "error",
+      report.install_allowed ? "서버 점검 통과" : "서버 점검 실패",
+      report.install_allowed
+        ? "서버 설치를 계속 진행할 수 있습니다."
+        : "실패 항목을 해결한 뒤 다시 점검하세요.",
+    );
+  }
 
   const detailList = nodes.doctorResults.querySelector(".doctor-detail-list");
   checks.forEach((check) => {
+    const displayStatus = managedLifecycle && check.status === "fail" ? "protected" : check.status;
+    const displayLabel = displayStatus === "protected"
+      ? "보호"
+      : (statusLabel[check.status] || check.status);
+    const checkIcon = displayStatus === "protected"
+      ? "shield-check"
+      : (check.status === "pass" ? "check" : (check.status === "fail" ? "x" : "shield-alert"));
     const item = document.createElement("div");
     item.className = "result-row";
     item.dataset.status = check.status;
+    item.dataset.displayStatus = displayStatus;
     item.innerHTML = `
+      <span class="result-row-icon" aria-hidden="true">${iconMarkup(checkIcon)}</span>
       <div class="result-copy">
         <span>${escapeHtml(checkDisplayName(check.name))}</span>
         <p>${escapeHtml(check.message)}</p>
       </div>
-      <strong>${escapeHtml(statusLabel[check.status] || check.status)}</strong>
+      <strong>${escapeHtml(displayLabel)}</strong>
     `;
     detailList.append(item);
   });

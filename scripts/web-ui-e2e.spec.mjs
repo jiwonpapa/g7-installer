@@ -138,6 +138,7 @@ async function asset(pathname) {
 
 async function startServer(options = {}) {
   let installPrepared = false;
+  let installFailed = false;
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     const pathname = url.pathname;
@@ -202,7 +203,10 @@ async function startServer(options = {}) {
         app_install_url: "https://g7devops.com/install/",
         lifecycle_status: "app-install-pending",
       };
-      json(response, options.recovery || (options.reportExists === false && !installPrepared ? freshRecovery : pendingRecovery));
+      const configuredRecovery = options.recovery && (!options.installFailure || installFailed)
+        ? options.recovery
+        : null;
+      json(response, configuredRecovery || (options.reportExists === false && !installPrepared ? freshRecovery : pendingRecovery));
       return;
     }
     if (pathname === "/api/status") {
@@ -249,6 +253,7 @@ async function startServer(options = {}) {
     if (pathname === "/api/install/prepare") {
       await new Promise((resolve) => setTimeout(resolve, options.installDelayMs || 0));
       if (options.installFailure) {
+        installFailed = true;
         json(response, {
           error: "mock vhost failure",
           hint: "복원된 실패 단계를 다시 실행하세요.",
@@ -341,7 +346,7 @@ test("wizard routes render report, downloads, and provision cards", async ({ pag
   }
 });
 
-test("managed server check reports web install pending instead of fresh-server failure", async ({ page }) => {
+test("managed server check reports web install pending instead of fresh-server failure", async ({ page }, testInfo) => {
   const { server, baseUrl } = await startServer({
     doctor: {
       install_allowed: false,
@@ -366,13 +371,26 @@ test("managed server check reports web install pending instead of fresh-server f
 
     await expect(page.getByText("서버 구성 완료 · 웹 설치 대기", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("서버 점검 실패", { exact: true })).toHaveCount(0);
+    await expect(page.locator("#doctor-status")).toHaveClass(/hidden/);
+    await expect(page.locator(".doctor-lifecycle .icon")).toHaveCount(5);
     await expect(page.locator(".doctor-lifecycle")).toContainText("서버 구성완료");
     await expect(page.locator(".doctor-lifecycle")).toContainText("g7devops 현재 확인됨");
     await expect(page.locator(".doctor-lifecycle")).toContainText("앱 파일배치 완료");
     await expect(page.locator(".doctor-lifecycle")).toContainText("그누보드7앱 파일 준비됨");
     await expect(page.getByRole("link", { name: "웹 설치 열기" })).toHaveAttribute("href", "https://g7devops.com/install/");
     await expect(page.getByText("웹 설치 마무리 / 초기화", { exact: true }).first()).toBeVisible();
+    await expect(page.locator(".doctor-overview")).toContainText("신규 설치 보호");
+    await expect(page.locator(".doctor-overview")).toContainText("1 통과 · 3 보호");
+    await expect(page.locator(".doctor-details")).not.toHaveAttribute("open", "");
+    await expect(page.locator('.result-row[data-display-status="protected"]')).toHaveCount(3);
+    await expect(page.locator(".recovery-technical").first()).not.toHaveAttribute("open", "");
+    await expect(page.locator('[data-view="check"] [data-recovery-action="resume"]')).toBeHidden();
+    await expect(page.locator('[data-view="check"] [data-recovery-action="rollback"]')).toBeHidden();
+    await expect(page.locator("#check-next-button")).toBeHidden();
+    await page.screenshot({ path: testInfo.outputPath("managed-server-doctor.png"), fullPage: true });
+    await page.locator(".doctor-details > summary").click();
     await expect(page.getByText("Nginx가 이미 실행 중입니다.", { exact: true })).toBeVisible();
+    await expect(page.locator('.result-row[data-display-status="protected"] strong').first()).toHaveText("보호");
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -566,7 +584,7 @@ test("restored failed step is offered as an in-place retry", async ({ page }) =>
 });
 
 test("plan route auto-generates a review after doctor pass", async ({ page }) => {
-  const { server, baseUrl } = await startServer();
+  const { server, baseUrl } = await startServer({ reportExists: false });
   try {
     await page.goto(`${baseUrl}/setup/doctor?token=e2e`);
     await page.getByRole("button", { name: "점검 실행" }).click();
@@ -763,7 +781,7 @@ test("reset confirmation warns when a completed G7 install is detected", async (
 });
 
 test("mobile plan keeps one-column flow without horizontal overflow", async ({ page }) => {
-  const { server, baseUrl } = await startServer();
+  const { server, baseUrl } = await startServer({ reportExists: false });
   try {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${baseUrl}/setup/doctor?token=e2e`);

@@ -119,14 +119,17 @@
             <section class="recovery-panel mt-5" data-recovery-panel hidden>
               <div>
                 <h3>
-                  <span data-recovery-title>설치 상태 / 관리</span>
+                  <span data-recovery-title data-ui-icon="sliders-horizontal">설치 상태 / 관리</span>
                   <span class="help-wrap">
                     <button class="help-circle" type="button" aria-label="초기화 도움말">?</button>
                     <span class="help-text">설치기는 실패 원인을 자동 수정하지 않습니다. 변경 파일을 복원하고, 설치기 업데이트나 입력·환경 수정 후 같은 단계부터 재실행합니다.</span>
                   </span>
                 </h3>
                 <p data-recovery-message>설치기 소유 흔적을 확인하는 중입니다.</p>
-                <ul data-recovery-paths></ul>
+                <details class="recovery-technical">
+                  <summary>설치기 관리 기록</summary>
+                  <ul data-recovery-paths></ul>
+                </details>
               </div>
               <div class="recovery-actions">
                 <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="refresh-cw" data-recovery-refresh>설치 상태 새로고침</button>
@@ -608,14 +611,17 @@
             <section class="recovery-panel mt-5" data-recovery-panel hidden>
               <div>
                 <h3>
-                  <span data-recovery-title>설치 상태 / 관리</span>
+                  <span data-recovery-title data-ui-icon="sliders-horizontal">설치 상태 / 관리</span>
                   <span class="help-wrap">
                     <button class="help-circle" type="button" aria-label="초기화 도움말">?</button>
                     <span class="help-text">설치기는 실패 원인을 자동 수정하지 않습니다. 변경 파일을 복원하고, 설치기 업데이트나 입력·환경 수정 후 같은 단계부터 재실행합니다.</span>
                   </span>
                 </h3>
                 <p data-recovery-message>설치기 소유 흔적을 확인하는 중입니다.</p>
-                <ul data-recovery-paths></ul>
+                <details class="recovery-technical">
+                  <summary>설치기 관리 기록</summary>
+                  <ul data-recovery-paths></ul>
+                </details>
               </div>
               <div class="recovery-actions">
                 <button class="btn btn-sm btn-outline icon-button" type="button" data-icon="refresh-cw" data-recovery-refresh>실패 상태 새로고침</button>
