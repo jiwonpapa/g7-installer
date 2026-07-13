@@ -21,7 +21,9 @@ use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use g7_core::commands::{DoctorCheckStatus, doctor, install, plan, reset, rollback, status};
-use g7_core::installer_paths::{CONFIG_PATH, LOCAL_HOSTS_PATH, REPORT_PATH, ROLLBACK_PATH};
+use g7_core::installer_paths::{
+    CONFIG_PATH, LOCAL_HOSTS_PATH, REPORT_PATH, ROLLBACK_PATH, SETUP_GUIDE_PATH,
+};
 use g7_state::owned_files::OWNED_FILES_PATH;
 use g7_state::state::{STATE_PATH, read_state_file};
 use g7_system::SystemProbe;

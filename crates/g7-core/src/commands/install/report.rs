@@ -1,6 +1,9 @@
 use super::*;
 
 pub struct InstallReport {
+    pub install_started_at_unix_ms: u128,
+    pub install_completed_at_unix_ms: Option<u128>,
+    pub elapsed_ms: u128,
     pub domain: String,
     pub deployment_mode: String,
     pub app_profile: String,
@@ -412,9 +415,28 @@ pub(super) fn report_content(
     summary: &ApplySummary,
     problem: Option<&str>,
 ) -> Result<String> {
+    let report_updated_at_unix_ms = unix_timestamp_millis();
+    let elapsed_ms = report_updated_at_unix_ms.saturating_sub(summary.install_started_at_unix_ms);
     let mut value = serde_json::Map::new();
     value.insert("schema_version".to_string(), serde_json::json!(1));
     value.insert("version".to_string(), serde_json::json!(1));
+    value.insert(
+        "install_started_at_unix_ms".to_string(),
+        serde_json::json!(summary.install_started_at_unix_ms),
+    );
+    value.insert(
+        "report_updated_at_unix_ms".to_string(),
+        serde_json::json!(report_updated_at_unix_ms),
+    );
+    value.insert("elapsed_ms".to_string(), serde_json::json!(elapsed_ms));
+    value.insert(
+        "install_completed_at_unix_ms".to_string(),
+        if phase == "completed" {
+            serde_json::json!(report_updated_at_unix_ms)
+        } else {
+            serde_json::Value::Null
+        },
+    );
     value.insert("domain".to_string(), serde_json::json!(&plan.domain));
     value.insert("phase".to_string(), serde_json::json!(phase));
     value.insert(
@@ -673,6 +695,10 @@ pub(super) fn setup_guide_content(
     content.push_str(&format!("- 웹앱 접속 주소: `{access_url}`\n"));
     content.push_str(&format!("- 현재 단계: `{phase}`\n"));
     content.push_str(&format!(
+        "- 설치 소요시간: `{}`\n",
+        format_elapsed(unix_timestamp_millis().saturating_sub(summary.install_started_at_unix_ms))
+    ));
+    content.push_str(&format!(
         "- 앱 프로필: `{}` ({})\n",
         plan.app_profile, plan.app_profile_label
     ));
@@ -912,4 +938,21 @@ pub(super) fn install_id(domain: &str) -> String {
     };
 
     format!("g7-{domain}-{seconds}")
+}
+
+pub(super) fn unix_timestamp_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_millis())
+}
+
+fn format_elapsed(elapsed_ms: u128) -> String {
+    let seconds = elapsed_ms / 1_000;
+    let minutes = seconds / 60;
+    let remainder = seconds % 60;
+    if minutes > 0 {
+        format!("{minutes}분 {remainder}초")
+    } else {
+        format!("{remainder}초")
+    }
 }

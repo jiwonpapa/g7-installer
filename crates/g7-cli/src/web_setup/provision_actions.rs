@@ -41,7 +41,7 @@ pub(super) fn run_provision_action(
     }
     .to_string();
     let message = match status.as_str() {
-        "pass" => "재시작/점검이 완료되었습니다.",
+        "pass" => "읽기 전용 구성 점검이 완료되었습니다.",
         "manual" => "자동 실행 대신 후속 수동 확인이 필요합니다.",
         _ => "실패 항목을 확인하세요.",
     }
@@ -60,12 +60,22 @@ pub(super) fn provision_webserver(report: &serde_json::Value) -> Vec<InstallApiC
     if web_server == "apache" {
         vec![
             run_command_check("apache-configtest", "apache2ctl", &["configtest"], None),
-            run_command_check("apache-reload", "systemctl", &["reload", "apache2"], None),
+            run_command_check(
+                "apache-active",
+                "systemctl",
+                &["is-active", "--quiet", "apache2"],
+                None,
+            ),
         ]
     } else if web_server == "frankenphp" {
         vec![
             run_command_check("nginx-configtest", "nginx", &["-t"], None),
-            run_command_check("nginx-reload", "systemctl", &["reload", "nginx"], None),
+            run_command_check(
+                "nginx-active",
+                "systemctl",
+                &["is-active", "--quiet", "nginx"],
+                None,
+            ),
             run_command_check(
                 "frankenphp-active",
                 "systemctl",
@@ -76,32 +86,30 @@ pub(super) fn provision_webserver(report: &serde_json::Value) -> Vec<InstallApiC
     } else {
         vec![
             run_command_check("nginx-configtest", "nginx", &["-t"], None),
-            run_command_check("nginx-reload", "systemctl", &["reload", "nginx"], None),
+            run_command_check(
+                "nginx-active",
+                "systemctl",
+                &["is-active", "--quiet", "nginx"],
+                None,
+            ),
         ]
     }
 }
 
 pub(super) fn provision_php(report: &serde_json::Value) -> Vec<InstallApiCheck> {
     if report_string(report, "web_server").as_deref() == Some("frankenphp") {
-        return vec![
-            run_command_check(
-                "frankenphp-restart",
-                "systemctl",
-                &["restart", "g7-frankenphp"],
-                None,
-            ),
-            run_command_check(
-                "frankenphp-active",
-                "systemctl",
-                &["is-active", "--quiet", "g7-frankenphp"],
-                None,
-            ),
-        ];
+        return vec![run_command_check(
+            "frankenphp-active",
+            "systemctl",
+            &["is-active", "--quiet", "g7-frankenphp"],
+            None,
+        )];
     }
     let version = report_string(report, "php_version").unwrap_or_else(|| "8.5".to_string());
     let service = format!("php{version}-fpm");
+    let binary = format!("php-fpm{version}");
     vec![
-        run_command_check("php-fpm-restart", "systemctl", &["restart", &service], None),
+        run_command_check("php-fpm-configtest", &binary, &["-t"], None),
         run_command_check(
             "php-fpm-active",
             "systemctl",
@@ -114,7 +122,12 @@ pub(super) fn provision_php(report: &serde_json::Value) -> Vec<InstallApiCheck> 
 pub(super) fn provision_database(_report: &serde_json::Value) -> Vec<InstallApiCheck> {
     let service = "mysql";
     vec![
-        run_command_check("database-restart", "systemctl", &["restart", service], None),
+        run_command_check(
+            "database-configtest",
+            "mysqld",
+            &["--validate-config"],
+            None,
+        ),
         run_command_check(
             "database-active",
             "systemctl",
@@ -144,7 +157,7 @@ pub(super) fn provision_ssl(report: &serde_json::Value) -> Vec<InstallApiCheck> 
                 name: "certbot-rate-limit-guard".to_string(),
                 status: "manual".to_string(),
                 message:
-                    "기존 인증서가 없어 7단계 점검에서는 새 발급을 실행하지 않았습니다. 중복 발급 제한을 피하려면 기본 구성/TLS 단계를 한 번만 완료하세요."
+                    "기존 인증서가 없어 설치 안내서 점검에서는 새 발급을 실행하지 않았습니다. 중복 발급 제한을 피하려면 기본 구성/TLS 단계를 한 번만 완료하세요."
                         .to_string(),
             },
         ];
@@ -160,15 +173,9 @@ pub(super) fn provision_ssl(report: &serde_json::Value) -> Vec<InstallApiCheck> 
             None,
         ),
         run_command_check(
-            "certbot-renew-dry-run",
-            "certbot",
-            &[
-                "renew",
-                "--dry-run",
-                "--no-random-sleep-on-renew",
-                "--cert-name",
-                &cert_name,
-            ],
+            "certbot-timer-active",
+            "systemctl",
+            &["is-active", "--quiet", "certbot.timer"],
             None,
         ),
     ]
@@ -179,17 +186,12 @@ pub(super) fn provision_mail(report: &serde_json::Value) -> Vec<InstallApiCheck>
         return vec![InstallApiCheck {
             name: "mail".to_string(),
             status: "manual".to_string(),
-            message: "로컬 Postfix 모드가 아니라 자동 재시작 대상이 없습니다.".to_string(),
+            message: "로컬 Postfix 모드가 아니라 구성 점검 대상이 없습니다.".to_string(),
         }];
     }
 
     vec![
-        run_command_check(
-            "postfix-restart",
-            "systemctl",
-            &["restart", "postfix"],
-            None,
-        ),
+        run_command_check("postfix-configtest", "postfix", &["check"], None),
         run_command_check(
             "postfix-active",
             "systemctl",
@@ -320,19 +322,18 @@ pub(super) fn app_permission_checks(
             message: "리포트에서 사이트 계정을 찾지 못해 소유권을 적용할 수 없습니다.".to_string(),
         });
     } else {
-        let owner_group = format!("{site_user}:www-data");
         checks.push(run_command_check(
-            "app-web-root-owner",
-            "chown",
-            &["-R", &owner_group, web_root],
+            "app-web-root-readable",
+            "runuser",
+            &["-u", site_user, "--", "test", "-r", web_root],
             None,
         ));
     }
 
     checks.push(run_command_check(
         "app-web-root-mode",
-        "chmod",
-        &["0755", web_root],
+        "stat",
+        &["-c", "%a %U:%G", web_root],
         None,
     ));
 
@@ -340,12 +341,6 @@ pub(super) fn app_permission_checks(
         let target = format!("{web_root}/{writable_path}");
         checks.push(dir_check(&format!("app-dir:{writable_path}"), &target));
         if path_is_dir(&target) {
-            checks.push(run_command_check(
-                &format!("app-writable-mode:{writable_path}"),
-                "chmod",
-                &["-R", "0775", &target],
-                None,
-            ));
             if !site_user.is_empty() {
                 checks.push(run_command_check(
                     &format!("app-writable-test:{writable_path}"),
@@ -362,8 +357,8 @@ pub(super) fn app_permission_checks(
     if path_is_file(&env_path) {
         checks.push(run_command_check(
             "app-env-mode",
-            "chmod",
-            &["0600", &env_path],
+            "stat",
+            &["-c", "%a %U:%G", &env_path],
             None,
         ));
     }

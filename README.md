@@ -2,7 +2,7 @@
 
 Ubuntu VPS에 `g7inst`를 설치하고 웹 마법사로 그누보드7용 서버 구성과 사이트 프로비저닝을 진행하는 도구입니다.
 
-> 현재 공개 릴리스는 `v0.3.0-beta.4` Public Beta입니다. 새 Ubuntu 24.04 VPS 전용으로 `g7inst` 설치, 서버 점검, 웹 마법사, apt 패키지 설치, Nginx/Apache 도메인 연결 설정(vhost), PHP/DB 사양 튜닝, DB 앱 계정 생성, Let's Encrypt 인증서 발급/갱신 검증, 그누보드7 브라우저 설치 화면 준비, 7단계 세부 설정 액션 패널과 카드별 재시작/점검, 상세 설정 안내서 저장까지 검증합니다.
+> 현재 공개 릴리스는 `v0.3.0-beta.5` Public Beta입니다. 새 Ubuntu 24.04 VPS 전용으로 `g7inst` 설치, 서버 점검, 웹 마법사, apt 패키지 설치, Nginx/Apache 도메인 연결 설정(vhost), PHP/DB 사양 튜닝, DB 앱 계정 생성, Let's Encrypt 인증서 발급/갱신 검증, 그누보드7 브라우저 설치 화면 준비, 6단계 완료 리포트와 선택형 설치 안내서까지 검증합니다.
 
 `completed`는 **서버 프로비저닝 완료**를 뜻합니다. 그누보드7의 CMS 내부 설정, 테이블 구성, 관리자 계정 생성은 결과 리포트의 앱 링크에서 공식 브라우저 설치기를 한 번 더 진행해야 완료됩니다.
 
@@ -86,13 +86,13 @@ Ubuntu VPS에 `g7inst`를 설치하고 웹 마법사로 그누보드7용 서버 
 Mac 터미널:
 
 ```bash
-ssh -i "$HOME/.ssh/YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.4/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$HOME/.ssh/YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.5/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 Windows PowerShell:
 
 ```powershell
-ssh -i "$env:USERPROFILE\.ssh\YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.4/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$env:USERPROFILE\.ssh\YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.5/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 ### SSH 비밀번호로 접속
@@ -100,7 +100,7 @@ ssh -i "$env:USERPROFILE\.ssh\YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SER
 Mac 터미널과 Windows PowerShell에서 같은 명령을 사용합니다.
 
 ```bash
-ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.4/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.5/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 `SSH_USER`는 VPS 접속 계정으로 바꿉니다. Ubuntu 이미지의 기본 계정은 보통 `ubuntu`입니다. SSH 비밀번호와 sudo 비밀번호는 요청될 때 터미널에 입력하며, 명령어나 웹 화면에 적지 않습니다. Lightsail 기본 Ubuntu는 일반적으로 SSH 비밀번호 대신 `.pem` 개인키를 사용합니다.
@@ -158,7 +158,7 @@ sudo -n /usr/local/bin/g7inst --version
 
 웹 UI에서 `사이트 계정`과 `사이트 계정 비밀번호`를 입력하면 설치기가 `/home/계정/public_html` 웹루트를 만들고 `계정:www-data` 소유권으로 맞춥니다. Nginx/Apache는 PHP-FPM pool을 이 사이트 계정 기준으로 연결합니다.
 
-웹 UI는 `패키지 설치/검증 -> 사이트 계정/웹루트 -> PHP/런타임 튜닝 -> 웹서버 vhost/HTTP 검증 -> DB 튜닝/계정 생성 -> SSL 인증서/HTTPS 검증 -> 웹앱 파일 배치 -> 리포트 생성 -> 세부 설정 액션 패널` 순서로 진행합니다. 사이트 전용 PHP-FPM pool과 socket을 먼저 활성화한 뒤 vhost를 연결하고 HTTP smoke를 실행합니다. 차단 오류가 나면 다음 단계로 넘어가지 않고 실패 단계와 자동복원 결과를 저장합니다. Let's Encrypt 발급 제한처럼 서버 앱 배치와 무관한 항목만 보류 상태로 계속 진행합니다.
+웹 UI는 `패키지 설치/검증 -> 사이트 계정/웹루트 -> PHP/런타임 튜닝 -> 웹서버 vhost/HTTP 검증 -> DB 튜닝/계정 생성 -> SSL 인증서/HTTPS 검증 -> 웹앱 파일 배치 -> 완료 리포트` 순서로 진행합니다. 사이트 전용 PHP-FPM pool과 socket을 먼저 활성화한 뒤 vhost를 연결하고 HTTP smoke를 실행합니다. 완료 후 선택형 설치 안내서에서 표준 설정 경로, 운영 명령, 읽기 전용 구성 점검을 확인할 수 있습니다. 차단 오류가 나면 다음 단계로 넘어가지 않고 실패 단계와 자동복원 결과를 저장합니다.
 
 PHP-FPM과 DB 설정은 `/var/lib/g7-installer/candidates`의 임시 후보 파일을 네이티브 검사기로 먼저 검증합니다. 활성 파일은 원자적으로 교체하고 Nginx/Apache/PHP-FPM/DB 검사를 통과한 뒤에만 서비스를 reload/restart합니다. 실패하거나 프로세스가 중단되면 `/var/lib/g7-installer/transactions`의 단계별 스냅샷으로 installer가 바꾼 파일을 복원합니다. 기존 Let's Encrypt 인증서와 발급 파일은 삭제하지 않습니다.
 
@@ -201,7 +201,7 @@ apt-get update
 apt-get install -y ca-certificates curl
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT HUP INT TERM
-curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.4/bootstrap.sh -o "$tmp"
+curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.5/bootstrap.sh -o "$tmp"
 bash "$tmp"
 g7inst --version
 ```

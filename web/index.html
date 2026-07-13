@@ -56,7 +56,6 @@
             <li class="step" data-progress="plan"><span class="step-copy" data-ui-icon="clipboard-list">검토</span></li>
             <li class="step" data-progress="install"><span class="step-copy" data-ui-icon="package-plus">설치</span></li>
             <li class="step" data-progress="report"><span class="step-copy" data-ui-icon="file-check">완료</span></li>
-            <li class="step" data-progress="provision"><span class="step-copy" data-ui-icon="scan-line">설정</span></li>
           </ul>
           <section id="promo-panel" class="promo-panel" aria-label="추천 도구" hidden></section>
         </nav>
@@ -641,20 +640,12 @@
               <div>
                 <span class="step-eyebrow">6단계</span>
                 <h2>설치 결과</h2>
-                <p>기본 서버 구성 결과를 요약합니다. 세부 적용/점검은 다음 단계에서 항목별로 확인합니다.</p>
+                <p>설치 완료 여부와 바로 해야 할 작업을 먼저 확인합니다. 기술 정보는 필요한 항목만 펼쳐보세요.</p>
               </div>
               <div class="flex flex-wrap gap-2">
                 <button id="report-button" class="btn btn-outline icon-button" type="button" data-icon="refresh-cw">리포트 새로고침</button>
                 <button class="btn btn-primary icon-button" type="button" data-icon="play" data-recovery-action="resume" hidden>이어서 진행</button>
-                <button id="reset-button" class="btn btn-outline icon-button" type="button" data-icon="rotate-ccw" data-recovery-action="reset">전체 초기화</button>
-                <button id="rollback-button" class="btn btn-error icon-button" type="button" data-icon="undo-2" data-recovery-action="rollback">패키지 되돌리기</button>
               </div>
-            </div>
-            <div class="action-help-grid mt-5">
-              <div><strong>리포트 새로고침</strong><span>서버에 저장된 결과만 다시 불러옵니다.</span></div>
-              <div><strong>수정 후 현재 단계 재실행</strong><span>원인을 자동 수정하지 않습니다. 설치기 업데이트나 입력·환경 수정 후 복원된 단계부터 다시 검증합니다.</span></div>
-              <div><strong>재설치 초기화</strong><span>installer가 만든 사이트 계정의 서비스·프로세스·로그인 세션과 DB, 웹루트, 패키지, 메타데이터를 정리합니다. 설치기 세션·SSH 터널·인증서는 보존합니다.</span></div>
-              <div><strong>패키지 되돌리기</strong><span>설치 직후 운영 데이터가 없을 때만 패키지 제거를 시도합니다.</span></div>
             </div>
             <div id="report-status" class="mt-5 hidden"></div>
             <section class="alert alert-info mt-5" data-recovery-summary hidden>
@@ -667,24 +658,34 @@
             <div id="report-output" class="report-panel mt-5">
               <div class="empty-state">아직 리포트가 없습니다.</div>
             </div>
+            <details class="danger-zone mt-6">
+              <summary><span data-ui-icon="triangle-alert">재설치 및 초기화</span><small>필요한 경우에만 여세요</small></summary>
+              <div class="danger-zone-body">
+                <p>설치기가 만든 계정, DB, 서비스, 웹루트와 설정 파일을 정리합니다. SSH 터널과 기존 Let's Encrypt 인증서는 보존합니다.</p>
+                <div class="flex flex-wrap gap-2 mt-4">
+                  <button id="reset-button" class="btn btn-outline icon-button" type="button" data-icon="rotate-ccw" data-recovery-action="reset">전체 초기화</button>
+                  <button id="rollback-button" class="btn btn-error icon-button" type="button" data-icon="undo-2" data-recovery-action="rollback">패키지 되돌리기</button>
+                </div>
+              </div>
+            </details>
             <div class="wizard-actions">
               <button class="btn btn-ghost icon-button" type="button" data-icon="chevron-left" data-next="install">이전</button>
-              <button class="btn btn-primary icon-button" type="button" data-icon="scan-line" data-next="provision">세부 설정으로 이동</button>
+              <button class="btn btn-primary icon-button" type="button" data-icon="book-open" data-next="provision">설치 안내서 보기</button>
             </div>
           </section>
 
           <section class="view-panel" data-view="provision">
             <div class="section-heading">
               <div>
-                <span class="step-eyebrow">7단계</span>
-                <h2>세부 설정 적용/점검</h2>
-                <p>웹서버, PHP 런타임, DB, SSL, 메일, 웹앱을 카드별로 열어 설정값을 확인하고 필요한 적용/재시작/검증을 실행합니다.</p>
+                <span class="step-eyebrow">설치 후 안내</span>
+                <h2>설치 안내서</h2>
+                <p>표준 설정 경로와 운영 명령을 확인하고, 필요할 때만 읽기 전용 구성 점검을 실행합니다. 이 화면은 설치 완료 조건이 아닙니다.</p>
               </div>
-              <button id="provision-refresh-button" class="btn btn-outline icon-button" type="button" data-icon="refresh-cw">리포트 새로고침</button>
+              <button id="provision-refresh-button" class="btn btn-outline icon-button" type="button" data-icon="refresh-cw">안내서 새로고침</button>
             </div>
             <div id="provision-status" class="mt-5 hidden"></div>
             <div id="provision-output" class="provisioning-actions mt-5">
-              <div class="empty-state">6단계 결과 리포트가 생성되면 세부 설정 카드가 표시됩니다.</div>
+              <div class="empty-state">6단계 결과 리포트가 생성되면 설치 안내서가 표시됩니다.</div>
             </div>
             <div class="wizard-actions">
               <button class="btn btn-ghost icon-button" type="button" data-icon="chevron-left" data-next="report">이전</button>
@@ -819,8 +820,8 @@
         <div class="provision-modal-heading">
           <div>
             <span id="provision-action-status" class="badge badge-outline">대기</span>
-            <h3 id="provision-action-title" class="mt-3 text-lg font-semibold">세부 설정</h3>
-            <p id="provision-action-summary" class="mt-2 text-sm text-base-content/60">설정값을 확인한 뒤 적용/점검을 실행합니다.</p>
+            <h3 id="provision-action-title" class="mt-3 text-lg font-semibold">구성 안내</h3>
+            <p id="provision-action-summary" class="mt-2 text-sm text-base-content/60">설정값을 확인한 뒤 읽기 전용 점검을 실행합니다.</p>
           </div>
         </div>
         <div id="provision-action-details" class="provision-detail-grid mt-5"></div>
@@ -828,7 +829,7 @@
         <div class="modal-action">
           <form method="dialog" class="flex flex-wrap gap-2">
             <button class="btn btn-ghost icon-button" value="cancel" data-icon="x">닫기</button>
-            <button id="provision-action-run" class="btn btn-primary icon-button" value="run" data-icon="play">승인하고 적용/점검</button>
+            <button id="provision-action-run" class="btn btn-primary icon-button" value="run" data-icon="scan-line">읽기 전용 점검</button>
           </form>
         </div>
       </div>

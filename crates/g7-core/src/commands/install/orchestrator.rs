@@ -2,6 +2,7 @@ use super::*;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct ApplySummary {
+    pub(super) install_started_at_unix_ms: u128,
     pub(super) safety_checks: Vec<InstallCheck>,
     pub(super) preinstall_package_checks: Vec<InstallCheck>,
     pub(super) package_checks: Vec<InstallCheck>,
@@ -463,10 +464,15 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     )?;
     write_new_file(paths, LOG_PATH, "G7 installer prepared.\n", &mut owned)?;
     write_new_file(paths, ROLLBACK_PATH, &rollback_content(&owned), &mut owned)?;
+    let install_started_at_unix_ms = unix_timestamp_millis();
+    let initial_summary = ApplySummary {
+        install_started_at_unix_ms,
+        ..ApplySummary::default()
+    };
     write_new_file(
         paths,
         REPORT_PATH,
-        &report_content(&install_plan, "prepared", &ApplySummary::default(), None)?,
+        &report_content(&install_plan, "prepared", &initial_summary, None)?,
         &mut owned,
     )?;
     let mut optional_steps = Vec::new();
@@ -558,6 +564,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             let err = failure.error;
             let problem = command_failure_message("패키지 설치 단계 실패", &err);
             let mut failed_summary = failure.summary;
+            failed_summary.install_started_at_unix_ms = install_started_at_unix_ms;
             failed_summary.safety_checks = safety_checks(&install_plan, "package-failed");
             completed_steps.extend(failure.completed_steps);
             state.set_phase(InstallerPhase::PackageFailed);
@@ -575,6 +582,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             return Err(err);
         }
     };
+    apply_summary.install_started_at_unix_ms = install_started_at_unix_ms;
     state.complete_step("packages");
     apply_summary.runtime_checks.extend(early_runtime_checks);
 
@@ -1244,6 +1252,14 @@ fn build_install_report(
 ) -> InstallReport {
     let app_url = app_access_url(&install_plan, &apply_summary);
     InstallReport {
+        install_started_at_unix_ms: apply_summary.install_started_at_unix_ms,
+        install_completed_at_unix_ms: if state.phase == InstallerPhase::Completed.as_str() {
+            Some(unix_timestamp_millis())
+        } else {
+            None
+        },
+        elapsed_ms: unix_timestamp_millis()
+            .saturating_sub(apply_summary.install_started_at_unix_ms),
         domain: state.domain,
         deployment_mode: install_plan.deployment_mode,
         app_profile: install_plan.app_profile,
@@ -1364,6 +1380,11 @@ fn optional_report_string(report: &serde_json::Value, key: &str) -> Option<Strin
 
 fn apply_summary_from_report(report: &serde_json::Value) -> ApplySummary {
     ApplySummary {
+        install_started_at_unix_ms: report
+            .get("install_started_at_unix_ms")
+            .and_then(|value| value.as_u64())
+            .map(u128::from)
+            .unwrap_or_else(unix_timestamp_millis),
         safety_checks: checks_from_report(report, "safety_checks"),
         preinstall_package_checks: checks_from_report(report, "preinstall_package_checks"),
         package_checks: checks_from_report(report, "package_checks"),

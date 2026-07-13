@@ -138,7 +138,7 @@ const nodes = {
   summaryApp: document.querySelector("#summary-app"),
 };
 
-const stepOrder = ["login", "check", "options", "plan", "install", "report", "provision"];
+const stepOrder = ["login", "check", "options", "plan", "install", "report"];
 const stepDisplayLabels = {
   login: "접속",
   check: "진단",
@@ -146,7 +146,7 @@ const stepDisplayLabels = {
   plan: "검토",
   install: "설치",
   report: "완료",
-  provision: "설정",
+  provision: "설치 안내서",
 };
 const stepRoutes = {
   login: "/setup/connect",
@@ -155,9 +155,10 @@ const stepRoutes = {
   plan: "/setup/plan",
   install: "/setup/install",
   report: "/setup/result",
-  provision: "/setup/provision",
+  provision: "/setup/guide",
 };
 const routeToStep = Object.fromEntries(Object.entries(stepRoutes).map(([step, route]) => [route, step]));
+routeToStep["/setup/provision"] = "provision";
 const wizardStorageKey = "g7inst-wizard-state-v2";
 const promoDismissStorageKey = "g7inst-promo-dismissed-v1";
 const installStageOrder = [
@@ -1025,7 +1026,7 @@ function setDoctorPassed(passed) {
 }
 
 function normalizedStep(step) {
-  if (stepOrder.includes(step)) {
+  if (stepOrder.includes(step) || step === "provision") {
     return step;
   }
   const path = String(step || "").split("?")[0];
@@ -1147,7 +1148,7 @@ function showStep(nextStep, options = {}) {
       nodes.installStatus,
       "warning",
       "설치 결과가 아직 없습니다",
-      "기본 서버 구성을 완료해야 결과와 세부 설정을 볼 수 있습니다.",
+      "기본 서버 구성을 완료해야 결과와 설치 안내서를 볼 수 있습니다.",
     );
     step = "install";
   }
@@ -1156,9 +1157,11 @@ function showStep(nextStep, options = {}) {
 
   state.activeStep = step;
   document.body.dataset.activeStep = step;
-  const activeIndex = stepOrder.indexOf(step);
+  const activeIndex = step === "provision" ? stepOrder.length - 1 : stepOrder.indexOf(step);
   if (nodes.stepProgressLabel) {
-    nodes.stepProgressLabel.textContent = `${activeIndex + 1} / ${stepOrder.length} · ${stepDisplayLabels[step]}`;
+    nodes.stepProgressLabel.textContent = step === "provision"
+      ? `설치 완료 · ${stepDisplayLabels[step]}`
+      : `${activeIndex + 1} / ${stepOrder.length} · ${stepDisplayLabels[step]}`;
   }
 
   document.querySelectorAll("[data-view]").forEach((view) => {
@@ -2952,47 +2955,7 @@ function restoreInstallStateFromReport(report) {
 
 function renderInstallReport(report) {
   const completed = isInstallCompleted(report);
-  const link = completed && report.app_url ? urlLink(report.app_url) : accessLink(report.domain, report.phase);
-  const title = completed ? "서버 세팅 및 앱 배치 완료" : "설치 중단 리포트";
-  const note = completed
-    ? link.hint
-    : reportFailureMessage(report);
-  nodes.reportOutput.innerHTML = [
-    reportSummaryCard(title, [
-      ["도메인", report.domain],
-      ["웹앱 링크", link.html],
-      ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / ${phpRuntimeLabel(report.php_version, report.php_source)}`],
-      ["데이터베이스", `${databaseLabel(report.database)} (${databaseVersionLabel(report.database_version)})`],
-      ["DB 이름", report.database_name || "-"],
-      ["DB 계정", report.database_user || "-"],
-      ["DB 비밀번호", report.database_password_policy === "user-provided-store-root-only" ? "사용자 입력값 저장" : "무작위 생성"],
-      ["앱 패키지", appPackageLabel(report.app_package)],
-      ["앱 문서 루트", report.app_document_root || "-"],
-      ["사이트 계정", report.site_user],
-      ["웹루트", report.web_root],
-      ["메일", mailModeLabel(report.mail_mode)],
-      ["SMTP 서버", report.smtp_host || "-"],
-      ["SMTP 계정", report.smtp_username || "-"],
-      ["DNS/IP 확인", report.dns_check ? "수행" : "건너뜀"],
-      ["단계", report.phase],
-      ["상태 파일", report.state_path],
-      ["소유 파일 목록", report.owned_files_path],
-      ["소유 파일 수", ownedFileCountLabel(report)],
-      ["설정 안내서", report.setup_guide_path || "-"],
-      ["복구 매니페스트", report.backup_manifest_path || "-"],
-    ], note),
-    reportFailureCard(report),
-    completionStateCard(report),
-    phpInfoCard(report),
-    reportDownloadCard(report, "방금 생성됨"),
-    operationsGuideCard(report, link),
-    healthChecklistCard(report),
-    listCard("완료된 작업", report.completed_steps),
-    compactListCard("다음 단계", [
-      "7단계 세부 설정에서 웹서버, PHP 런타임, DB, SSL, 메일, 웹앱 카드를 항목별로 열어 확인합니다.",
-      "각 카드는 설정값, 관련 파일, 실행/재시작 명령, 검증 결과를 따로 보여줍니다.",
-    ]),
-  ].join("");
+  renderReportOverview(report, "방금 생성됨");
 
   hydrateIcons(nodes.reportOutput);
   applyPackageChecks(report.package_checks);
@@ -3036,51 +2999,115 @@ function renderSavedReport(payload) {
     return;
   }
 
-  const completed = isInstallCompleted(report);
-  const link = completed && report.app_url ? urlLink(report.app_url) : accessLink(report.domain || "example.com", report.phase);
-  const title = completed ? "저장된 완료 리포트" : "저장된 중단 리포트";
-  const note = completed
-    ? link.hint
-    : reportFailureMessage(report);
-  nodes.reportOutput.innerHTML = [
-    reportSummaryCard(title, [
-      ["리포트 파일", payload.path],
-      ["도메인", report.domain || "-"],
-      ["웹앱 링크", link.html],
-      ["단계", report.phase || "-"],
-      ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / ${phpRuntimeLabel(report.php_version, report.php_source)}`],
-      ["데이터베이스", databaseLabel(report.database)],
-      ["DB 이름", report.database_name || "-"],
-      ["DB 계정", report.database_user || "-"],
-      ["DB 비밀번호", report.database_password_policy === "user-provided-store-root-only" ? "사용자 입력값 저장" : "무작위 생성"],
-      ["앱 패키지", appPackageLabel(report.app_package || report.app_profile)],
-      ["앱 문서 루트", report.app_document_root || "-"],
-      ["사이트 계정", report.site_user || "-"],
-      ["웹루트", report.web_root || "-"],
-      ["메일", mailModeLabel(report.mail_mode)],
-      ["SMTP 서버", report.smtp_host || "-"],
-      ["SMTP 계정", report.smtp_username || "-"],
-      ["DNS/IP 확인", report.dns_check ? "수행" : "건너뜀"],
-      ["설정 안내서", report.setup_guide_path || "-"],
-      ["복구 매니페스트", report.backup_manifest_path || "-"],
-      ["소유 파일 수", ownedFileCountLabel(report)],
-    ], note),
-    reportFailureCard(report),
-    completionStateCard(report),
-    phpInfoCard(report),
-    reportDownloadCard(report, payload.path),
-    operationsGuideCard(report, link),
-    healthChecklistCard(report),
-    compactListCard("다음 단계", [
-      "7단계 세부 설정에서 웹서버, PHP 런타임, DB, SSL, 메일, 웹앱 카드를 항목별로 열어 확인합니다.",
-      "각 카드는 설정값, 관련 파일, 실행/재시작 명령, 검증 결과를 따로 보여줍니다.",
-    ]),
-  ].join("");
-  hydrateIcons(nodes.reportOutput);
+  renderReportOverview(report, payload.path);
   setReportReady(true);
   restoreInstallStateFromReport(report);
   renderProvisionPanel(report);
   saveWizardState();
+}
+
+function renderReportOverview(report = {}, payloadPath = "") {
+  const completed = isInstallCompleted(report);
+  const link = completed && report.app_url
+    ? urlLink(report.app_url)
+    : accessLink(report.domain || "example.com", report.phase);
+  const appInstalled = Boolean(
+    state.recoveryStatus?.g7_install_completed
+      || completedCheckNames(report.app_checks).has("g7-install-lock"),
+  );
+  const nextTitle = completed
+    ? (appInstalled ? "전체 설치 완료" : "서버 구성 완료 · 웹 설치 대기")
+    : "설치가 중단되었습니다";
+  const nextMessage = completed
+    ? (appInstalled
+      ? "그누보드7 설치 완료 신호까지 확인했습니다."
+      : "서버와 DB 준비는 끝났습니다. 웹 설치 화면에서 관리자 설정을 마무리하세요.")
+    : reportFailureMessage(report);
+
+  nodes.reportOutput.innerHTML = [
+    reportHandoffHero(report, link, nextTitle, nextMessage, appInstalled),
+    reportFailureCard(report),
+    criticalServiceCard(report),
+    reportSummaryCard("주요 구성", [
+      ["도메인", report.domain || "-"],
+      ["웹서버 / PHP", `${runtimeLabel(report.web_server)} / ${phpRuntimeLabel(report.php_version, report.php_source)}`],
+      ["데이터베이스", `${databaseLabel(report.database)} ${databaseVersionLabel(report.database_version)}`],
+      ["DB 이름 / 계정", `${report.database_name || "-"} / ${report.database_user || "-"}`],
+      ["사이트 계정", report.site_user || "-"],
+      ["앱 문서 루트", report.app_document_root || "-"],
+    ], "비밀번호 원문은 화면과 리포트에 표시하지 않습니다."),
+    reportDownloadCard(report, payloadPath),
+    reportDisclosure("PHP 및 런타임 상세", phpInfoCard(report)),
+    reportDisclosure("운영 명령과 확인 경로", [operationsGuideCard(report, link), healthChecklistCard(report)].join("")),
+    reportDisclosure("설치 내부 기록", [
+      reportSummaryCard("기술 경로", [
+        ["리포트 파일", payloadPath || "/var/log/g7-installer/report.json"],
+        ["상태 파일", report.state_path || "-"],
+        ["소유 파일 목록", report.owned_files_path || "-"],
+        ["소유 파일 수", ownedFileCountLabel(report)],
+        ["복구 매니페스트", report.backup_manifest_path || "-"],
+      ]),
+      listCard("완료된 작업", report.completed_steps),
+    ].join("")),
+  ].filter(Boolean).join("");
+  hydrateIcons(nodes.reportOutput);
+}
+
+function reportHandoffHero(report, link, title, message, appInstalled) {
+  const completed = isInstallCompleted(report);
+  const elapsed = formatElapsed(report.elapsed_ms);
+  return `
+    <section class="report-handoff" data-status="${completed ? "pass" : "fail"}">
+      <div class="report-handoff-icon" data-ui-icon="${completed ? "circle-check-big" : "circle-alert"}"></div>
+      <div class="report-handoff-copy">
+        <span>${completed ? "설치 결과" : "조치 필요"}</span>
+        <h3>${escapeHtml(title)}</h3>
+        <p>${escapeHtml(message)}</p>
+        <div class="report-handoff-meta">
+          <span data-ui-icon="clock-3">${escapeHtml(elapsed)}</span>
+          <span data-ui-icon="database">${escapeHtml(report.database_name || "DB 확인 필요")}</span>
+          <span data-ui-icon="${appInstalled ? "badge-check" : "monitor-down"}">${appInstalled ? "웹 설치 완료" : "웹 설치 대기"}</span>
+        </div>
+      </div>
+      ${completed ? `<div class="report-handoff-action">${link.html}</div>` : ""}
+    </section>
+  `;
+}
+
+function formatElapsed(value) {
+  const elapsed = Number(value);
+  if (!Number.isFinite(elapsed) || elapsed < 0) return "시간 기록 없음";
+  const seconds = Math.round(elapsed / 1000);
+  const minutes = Math.floor(seconds / 60);
+  return minutes > 0 ? `${minutes}분 ${seconds % 60}초` : `${seconds}초`;
+}
+
+function criticalServiceCard(report = {}) {
+  const groups = [
+    ["웹서버", report.vhost_checks],
+    ["PHP", report.runtime_checks],
+    ["데이터베이스", report.database_checks],
+    ["SSL", report.certbot_checks],
+    ["앱 파일", report.app_checks],
+  ];
+  return `
+    <section class="report-card critical-services">
+      <h3>핵심 구성 상태</h3>
+      <div class="critical-service-grid">
+        ${groups.map(([label, checks]) => {
+          const list = Array.isArray(checks) ? checks : [];
+          const status = list.some((check) => check.status === "fail") ? "fail"
+            : (list.length && list.every((check) => check.status === "pass") ? "pass" : "manual");
+          return `<div data-status="${status}"><span data-ui-icon="${status === "pass" ? "circle-check" : status === "fail" ? "circle-x" : "circle-help"}"></span><strong>${escapeHtml(label)}</strong><small>${escapeHtml(statusLabel[status] || status)}</small></div>`;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function reportDisclosure(title, content) {
+  if (!content) return "";
+  return `<details class="report-disclosure"><summary><span data-ui-icon="chevron-right">${escapeHtml(title)}</span><small>펼쳐보기</small></summary><div class="report-disclosure-body">${content}</div></details>`;
 }
 
 function renderResetReport(report) {
@@ -3199,7 +3226,7 @@ function completionStateRows(report = {}) {
   const completed = isInstallCompleted(report);
   const appProfile = report.app_profile || report.app_package;
   const appInstallVerified = appProfile === "gnuboard7"
-    ? appChecks.has("g7-install-lock")
+    ? Boolean(state.recoveryStatus?.g7_install_completed || appChecks.has("g7-install-lock"))
     : completed;
 
   return [
@@ -3222,7 +3249,7 @@ function completionStateRows(report = {}) {
       status: appInstallVerified ? "pass" : "manual",
       message: appInstallVerified
         ? "앱 설치 완료 신호를 확인했습니다."
-        : "브라우저 설치 화면 완료 후 7단계 웹앱 카드에서 다시 확인하세요.",
+        : "브라우저 설치 화면을 완료한 뒤 리포트를 새로고침해 다시 확인하세요.",
     },
   ];
 }
@@ -3281,33 +3308,6 @@ function reportSummaryText(report = {}) {
   ].join("\n");
 }
 
-function setupGuideMarkdown(report = {}) {
-  const webService = webServiceName(report.web_server);
-  const runtimeRows = report.web_server === "frankenphp"
-    ? ["- FrankenPHP: sudo systemctl restart g7-frankenphp"]
-    : [`- PHP-FPM: sudo systemctl restart php${report.php_version || "8.5"}-fpm`];
-  return [
-    `# G7 Installer 설치 요약 - ${report.domain || "unknown"}`,
-    "",
-    "## 완료 상태",
-    ...completionStateRows(report).map((row) => `- ${row.label}: ${statusLabel[row.status] || row.status} - ${row.message}`),
-    "",
-    "## 주요 경로",
-    `- 웹루트: ${report.web_root || "-"}`,
-    `- 앱 문서 루트: ${report.app_document_root || "-"}`,
-    `- 설정 안내서: ${report.setup_guide_path || "-"}`,
-    `- 리포트 JSON: ${report.state_path ? "/var/log/g7-installer/report.json" : "-"}`,
-    `- 복구 매니페스트: ${report.backup_manifest_path || "-"}`,
-    "",
-    "## 서비스 명령",
-    `- 웹서버: sudo systemctl reload ${webService}`,
-    ...runtimeRows,
-    "- DB: sudo systemctl restart mysql",
-    "- SSL 갱신 확인: sudo certbot renew --dry-run --no-random-sleep-on-renew",
-    "",
-  ].join("\n");
-}
-
 function safeFilenamePart(value) {
   return String(value || "g7-installer").replace(/[^a-zA-Z0-9._-]/g, "-");
 }
@@ -3324,7 +3324,7 @@ function downloadTextFile(filename, mime, content) {
   URL.revokeObjectURL(url);
 }
 
-function downloadReport(format) {
+async function downloadReport(format) {
   const report = currentReport();
   if (!report || typeof report !== "object") {
     setAlert(nodes.reportStatus, "warning", "저장할 리포트 없음", "먼저 리포트를 새로고침하세요.");
@@ -3333,7 +3333,14 @@ function downloadReport(format) {
 
   const domain = safeFilenamePart(report.domain);
   if (format === "md") {
-    downloadTextFile(`${domain}-setup-guide.md`, "text/markdown;charset=utf-8", setupGuideMarkdown(report));
+    try {
+      const response = await fetch("/api/artifacts/setup-guide", { credentials: "same-origin" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      downloadTextFile(`${domain}-setup-guide.md`, "text/markdown;charset=utf-8", await response.text());
+    } catch (error) {
+      setAlert(nodes.reportStatus, "error", "안내서 저장 실패", formatError(error));
+      return;
+    }
   } else if (format === "summary") {
     downloadTextFile(`${domain}-install-summary.txt`, "text/plain;charset=utf-8", reportSummaryText(report));
   } else {
@@ -3359,7 +3366,7 @@ function operationsGuideCard(report = {}, link = null) {
     ["SSL 갱신 점검", `sudo certbot renew --dry-run --cert-name ${report.domain || "도메인"}`],
     ["설정 안내서", report.setup_guide_path || "-"],
     ["복구 매니페스트", report.backup_manifest_path || "-"],
-  ], "7단계 세부 설정에서 항목별 실행/검증 결과를 다시 확인합니다.");
+  ], "설치 안내서에서 표준 설정 경로와 읽기 전용 점검 결과를 확인할 수 있습니다.");
 }
 
 function healthChecklistCard(report = {}) {
@@ -3460,7 +3467,7 @@ function renderProvisionPanel(report = currentReport()) {
     return;
   }
   if (!report || typeof report !== "object") {
-    nodes.provisionOutput.innerHTML = `<div class="empty-state">6단계 결과 리포트가 생성되면 세부 설정 카드가 표시됩니다.</div>`;
+    nodes.provisionOutput.innerHTML = `<div class="empty-state">6단계 결과 리포트가 생성되면 설치 안내서가 표시됩니다.</div>`;
     return;
   }
 
@@ -3469,8 +3476,8 @@ function renderProvisionPanel(report = currentReport()) {
     <section class="report-card provisioning-actions">
       <div class="provisioning-actions-heading">
         <div>
-          <h3>세부 설정 카드</h3>
-          <p>설정값을 항목별로 확인하고 승인 후 적용/재시작/검증을 실행합니다.</p>
+          <h3>구성 항목</h3>
+          <p>설정 경로와 운영 명령을 확인합니다. 점검은 서비스를 변경하거나 재시작하지 않습니다.</p>
         </div>
         <strong data-status="${escapeHtml(overallProvisioningStatus(actions))}">${escapeHtml(overallProvisioningLabel(actions))}</strong>
       </div>
@@ -3484,7 +3491,7 @@ function renderProvisionPanel(report = currentReport()) {
             <p>${escapeHtml(action.summary)}</p>
             <code>${escapeHtml(action.command)}</code>
             <div class="provisioning-action-buttons">
-              <button class="btn btn-sm btn-primary icon-button" type="button" data-icon="scan-line" data-provision-open="${escapeHtml(action.key)}">설정 파일/값 확인</button>
+              <button class="btn btn-sm btn-primary icon-button" type="button" data-icon="file-search" data-provision-open="${escapeHtml(action.key)}">설정 파일/값 확인</button>
             </div>
           </article>
         `).join("")}
@@ -3521,7 +3528,7 @@ function provisioningActions(report = {}) {
       summary: isFranken
         ? "도메인 요청을 Nginx edge에서 FrankenPHP 로컬 앱서버로 연결합니다."
         : "도메인 요청을 앱 문서 루트와 PHP-FPM으로 연결합니다.",
-      command: `${webCheck} && sudo systemctl reload ${webService}`,
+      command: `${webCheck} && sudo systemctl is-active ${webService}`,
       settings: [
         ["도메인", report.domain || "-"],
         ["문서 루트", report.app_document_root || "-"],
@@ -3547,8 +3554,8 @@ function provisioningActions(report = {}) {
         ? "FrankenPHP 서비스, CLI ini 기준 PHP 정보, 필수 확장과 업로드 한도를 앱 설치 전에 확인합니다."
         : "사이트 계정 PHP 풀, FPM ini 기준 PHP 정보, 필수 확장과 업로드 한도를 앱 설치 전에 확인합니다.",
       command: isFranken
-        ? `sudo systemctl restart g7-frankenphp && env PHP_INI_SCAN_DIR=/etc/php/${phpVersion}/cli/conf.d php${phpVersion} -c ${phpIniPath} -i`
-        : `sudo systemctl restart ${fpmService} && env PHP_INI_SCAN_DIR=/etc/php/${phpVersion}/fpm/conf.d php${phpVersion} -c ${phpIniPath} -i`,
+        ? "sudo systemctl is-active g7-frankenphp"
+        : `sudo php-fpm${phpVersion} -t && sudo systemctl is-active ${fpmService}`,
       settings: [
         ["PHP", phpRuntimeLabel(report.php_version, report.php_source)],
         [isFranken ? "서비스 사용자" : "Pool 사용자", report.site_user || "-"],
@@ -3575,7 +3582,7 @@ function provisioningActions(report = {}) {
     }),
     provisioningAction("database", "데이터베이스", report.database_checks, {
       summary: "앱 전용 DB와 DB 계정을 만들고 root 전용 비밀 파일에 저장합니다.",
-      command: `sudo systemctl restart ${dbService}`,
+      command: `sudo mysqld --validate-config && sudo systemctl is-active ${dbService}`,
       settings: [
         ["DB 엔진", databaseLabel(report.database)],
         ["DB 버전", databaseVersionLabel(report.database_version)],
@@ -3599,8 +3606,8 @@ function provisioningActions(report = {}) {
       ],
     }),
     provisioningAction("ssl", "SSL/Certbot", report.certbot_checks, {
-      summary: "기존 인증서를 확인하고 자동 갱신만 테스트합니다. 반복 발급은 하지 않습니다.",
-      command: `sudo certbot renew --dry-run --no-random-sleep-on-renew --cert-name ${certName}`,
+      summary: "기존 인증서와 자동 갱신 타이머 상태를 확인합니다. 발급과 갱신 테스트는 실행하지 않습니다.",
+      command: `sudo certbot certificates --cert-name ${certName} && sudo systemctl is-active certbot.timer`,
       settings: [
         ["인증서 이름", certName],
         ["인증서 경로", `/etc/letsencrypt/live/${certName}/fullchain.pem`],
@@ -3622,7 +3629,7 @@ function provisioningActions(report = {}) {
     }),
     provisioningAction("mail", "메일 발송", report.mail_checks, {
       summary: mailSkipped ? "메일 발송 설정을 선택하지 않아 건너뛰었습니다." : "Postfix 또는 SMTP 릴레이 발송 설정을 확인합니다.",
-      command: mailSkipped ? "설정 안 함" : "sudo systemctl restart postfix",
+      command: mailSkipped ? "설정 안 함" : "sudo postfix check && sudo systemctl is-active postfix",
       forceStatus: mailSkipped ? "info" : null,
       forceLabel: mailSkipped ? "건너뜀" : null,
       settings: [
@@ -3792,7 +3799,7 @@ function provisionActionByKey(key, report = currentReport()) {
 }
 
 function checkRowsHtml(checks) {
-  const rows = Array.isArray(checks) && checks.length ? checks : [{ name: "아직 점검 전", status: "pending", message: "승인하고 적용/점검을 누르면 결과가 표시됩니다." }];
+  const rows = Array.isArray(checks) && checks.length ? checks : [{ name: "아직 점검 전", status: "pending", message: "읽기 전용 점검을 누르면 결과가 표시됩니다." }];
   return rows.map((check) => {
     const normalizedStatus = checkStatus(check.status);
     return `
@@ -3844,7 +3851,7 @@ function openProvisionActionDialog(action) {
       ${configPreviewHtml(action.preview)}
     </section>
     <section>
-      <h4>실행/재시작 명령</h4>
+      <h4>운영 명령</h4>
       <code>${escapeHtml(action.command)}</code>
     </section>
     <section class="md:col-span-2">
@@ -3862,7 +3869,7 @@ function openProvisionActionDialog(action) {
     nodes.provisionActionResult.classList.add("hidden");
     nodes.provisionActionResult.textContent = "";
   }
-  setButtonLabel(nodes.provisionActionRun, action.actionLabel);
+  setButtonLabel(nodes.provisionActionRun, "읽기 전용 점검");
   nodes.provisionActionDialog.returnValue = "cancel";
   nodes.provisionActionDialog.showModal();
 }
@@ -3870,7 +3877,7 @@ function openProvisionActionDialog(action) {
 async function runProvisionAction(actionKey, button) {
   const action = provisionActionByKey(actionKey);
   if (!action) {
-    setAlert(nodes.provisionStatus, "error", "세부 설정 실패", "실행할 설정 항목을 찾지 못했습니다.");
+    setAlert(nodes.provisionStatus, "error", "구성 점검 실패", "점검할 구성 항목을 찾지 못했습니다.");
     return;
   }
 
@@ -3891,7 +3898,7 @@ async function runProvisionAction(actionKey, button) {
         failed ? `${action.title} 점검 실패` : `${action.title} 점검 완료`,
         result.message,
       );
-      log(`세부 설정 점검: ${result.action} ${result.status}`);
+      log(`구성 점검: ${result.action} ${result.status}`);
       const reportPayload = await apiFetch("/api/report").catch(() => null);
       if (reportPayload?.exists) {
         state.savedReportPayload = reportPayload;
@@ -3899,7 +3906,7 @@ async function runProvisionAction(actionKey, button) {
       }
       saveWizardState();
     } catch (error) {
-      setAlert(nodes.provisionStatus, "error", "세부 설정 점검 실패", formatError(error));
+      setAlert(nodes.provisionStatus, "error", "구성 점검 실패", formatError(error));
       nodes.provisionActionResult.hidden = false;
       nodes.provisionActionResult.classList.remove("hidden");
       nodes.provisionActionResult.textContent = formatError(error);
@@ -4361,7 +4368,7 @@ function resetWizardForRetry(options = {}) {
   renderPackageProgress([]);
   nodes.reportOutput.innerHTML = `<div class="empty-state">아직 리포트가 없습니다.</div>`;
   if (nodes.provisionOutput) {
-    nodes.provisionOutput.innerHTML = `<div class="empty-state">6단계 결과 리포트가 생성되면 세부 설정 카드가 표시됩니다.</div>`;
+    nodes.provisionOutput.innerHTML = `<div class="empty-state">6단계 결과 리포트가 생성되면 설치 안내서가 표시됩니다.</div>`;
   }
   refreshInstallButtonState();
   renderRecoveryStatus(null);
@@ -4745,7 +4752,7 @@ function bindEvents() {
     if (!button) {
       return;
     }
-    downloadReport(button.dataset.downloadReport || "json");
+    void downloadReport(button.dataset.downloadReport || "json");
   });
 
   document.addEventListener("click", (event) => {
@@ -4872,8 +4879,8 @@ function bindEvents() {
       try {
         hideAlert(nodes.reportStatus);
         const report = await apiFetch("/api/report");
-        renderSavedReport(report);
         await refreshRecoveryStatus();
+        renderSavedReport(report);
         setAlert(
           nodes.reportStatus,
           report.exists ? "success" : "warning",
@@ -4894,18 +4901,19 @@ function bindEvents() {
       try {
         hideAlert(nodes.provisionStatus);
         const report = await apiFetch("/api/report");
+        await refreshRecoveryStatus();
         state.savedReportPayload = report;
         if (report.exists) {
           renderSavedReport(report);
           renderProvisionPanel(parseSavedReport(report));
-          setAlert(nodes.provisionStatus, "success", "세부 설정 새로고침 완료", "서버에 저장된 리포트를 기준으로 카드를 다시 그렸습니다.");
+          setAlert(nodes.provisionStatus, "success", "안내서 새로고침 완료", "서버에 저장된 리포트와 현재 설치 상태를 다시 확인했습니다.");
         } else {
           renderProvisionPanel(null);
           setAlert(nodes.provisionStatus, "warning", "리포트 없음", "아직 생성된 리포트가 없습니다.");
         }
-        log(`세부 설정 리포트 불러오기: ${report.exists ? "있음" : "없음"}`);
+        log(`설치 안내서 리포트 불러오기: ${report.exists ? "있음" : "없음"}`);
       } catch (error) {
-        setAlert(nodes.provisionStatus, "error", "세부 설정 새로고침 실패", formatError(error));
+        setAlert(nodes.provisionStatus, "error", "설치 안내서 새로고침 실패", formatError(error));
         log(formatError(error));
       }
     });

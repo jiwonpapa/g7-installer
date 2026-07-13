@@ -173,7 +173,7 @@ sudo g7inst reset --yes
 26. 내부 실험 프로필에서만 queue worker, scheduler, reverb systemd unit 준비
 27. HTTP/HTTPS/Redis/DB/app smoke 결과 수집
 28. 설치 결과 JSON과 표준 설정 경로·검증 명령을 포함한 Markdown 안내서 출력
-29. 웹 UI 7단계 세부 설정 액션 패널에서 후속 설정 확인
+29. 웹 UI 6단계 완료 리포트와 선택형 설치 안내서에서 후속 설정 확인
 
 ## 6. fresh server 검사
 

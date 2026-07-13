@@ -47,6 +47,7 @@ pub(super) fn build_router(state: WebState) -> Router {
         .route("/setup/plan", get(index))
         .route("/setup/install", get(index))
         .route("/setup/result", get(index))
+        .route("/setup/guide", get(index))
         .route("/setup/provision", get(index))
         .route("/app.js", get(app_js))
         .route("/modules/event-stream.js", get(event_stream_js))
@@ -65,6 +66,7 @@ pub(super) fn build_router(state: WebState) -> Router {
         .route("/api/status", get(api_status))
         .route("/api/recovery", get(api_recovery))
         .route("/api/report", get(api_report))
+        .route("/api/artifacts/setup-guide", get(api_setup_guide))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

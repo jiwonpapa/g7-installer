@@ -24,6 +24,9 @@ function mockReport() {
     version: 1,
     domain: "g7devops.com",
     phase: "completed",
+    install_started_at_unix_ms: 1_000,
+    install_completed_at_unix_ms: 111_900,
+    elapsed_ms: 110_900,
     deployment_mode: "public",
     app_package: "gnuboard7",
     app_profile: "gnuboard7",
@@ -229,6 +232,11 @@ async function startServer(options = {}) {
       });
       return;
     }
+    if (pathname === "/api/artifacts/setup-guide") {
+      response.writeHead(200, { "content-type": "text/markdown; charset=utf-8" });
+      response.end("# G7 Installer Setup Guide\n\n- 설정 안내서 테스트\n");
+      return;
+    }
     if (pathname === "/api/doctor") {
       json(response, options.doctor || {
         install_allowed: true,
@@ -308,7 +316,7 @@ async function startServer(options = {}) {
   };
 }
 
-test("wizard routes render report, downloads, and provision cards", async ({ page }) => {
+test("wizard routes render concise result and optional setup guide", async ({ page }) => {
   const { server, baseUrl } = await startServer();
   try {
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -318,16 +326,19 @@ test("wizard routes render report, downloads, and provision cards", async ({ pag
     await expect(page.getByRole("heading", { name: "설치 결과" })).toBeVisible();
     await expect(page.locator("#live-log")).toHaveCount(1);
     await expect(page.locator("#install-live-log")).toHaveCount(0);
-    await expect(page.getByText("설치 완료 상태")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "서버 구성 완료 · 웹 설치 대기" })).toBeVisible();
+    await expect(page.getByText("1분 51초", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "핵심 구성 상태" })).toBeVisible();
+    await page.getByText("PHP 및 런타임 상세", { exact: true }).click();
     await expect(page.getByRole("heading", { name: "PHP 환경 요약" })).toBeVisible();
     await expect(page.getByText("/etc/php/8.5/fpm/php.ini", { exact: true })).toBeVisible();
     await expect(page.getByText("mbstring, redis", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: /리포트 JSON/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /설정 안내서 MD/ })).toBeVisible();
 
-    await page.getByRole("button", { name: "세부 설정으로 이동" }).click();
-    await expect(page).toHaveURL(/\/setup\/provision/);
-    await expect(page.getByRole("heading", { name: "세부 설정 적용/점검" })).toBeVisible();
+    await page.getByRole("button", { name: "설치 안내서 보기" }).click();
+    await expect(page).toHaveURL(/\/setup\/guide/);
+    await expect(page.getByRole("heading", { name: "설치 안내서" })).toBeVisible();
     await expect(page.getByText("보안 경계 안내")).toBeVisible();
     await page.getByRole("button", { name: "설정 파일/값 확인" }).first().click();
     await expect(page.getByRole("heading", { name: "웹서버/vhost" })).toBeVisible();
@@ -475,7 +486,7 @@ test("stack profiles synchronize runtime versions and render desktop/mobile prod
     await page.setViewportSize({ width: 390, height: 844 });
     await page.evaluate(() => window.scrollTo(0, 0));
     await expect(page.locator(".product-mark")).toBeVisible();
-    await expect(page.locator(".wizard-progress .step")).toHaveCount(7);
+    await expect(page.locator(".wizard-progress .step")).toHaveCount(6);
     expect(await page.locator(".wizard-progress .step").first().evaluate((element) => element.getBoundingClientRect().height)).toBeLessThanOrEqual(5);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
     await page.screenshot({
@@ -654,7 +665,7 @@ test("install uses one modal graph and groups PHP packages", async ({ page }, te
     await expect(page).toHaveURL(/\/setup\/result/, { timeout: 5000 });
     await expect(page.locator("#install-progress-dialog[open]")).toHaveCount(0);
     await expect(page.locator("#log-dock-home #live-log")).toHaveCount(1);
-    await expect(page.getByRole("button", { name: "전체 초기화" })).toBeEnabled();
+    await expect(page.locator("#reset-button")).toBeEnabled();
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -715,6 +726,7 @@ test("reset overlay shows the shared live log expanded", async ({ page }, testIn
   try {
     await page.setViewportSize({ width: 610, height: 476 });
     await page.goto(`${baseUrl}/setup/result?token=e2e`);
+    await page.getByText("재설치 및 초기화", { exact: true }).click();
     await page.locator("#reset-button").click();
     await expect(page.locator("#recovery-confirm-yes")).toBeDisabled();
     await page.fill("#recovery-confirm-input", "초기화");
@@ -765,6 +777,7 @@ test("reset confirmation warns when a completed G7 install is detected", async (
   });
   try {
     await page.goto(`${baseUrl}/setup/result?token=e2e`);
+    await page.getByText("재설치 및 초기화", { exact: true }).click();
     await page.locator("#reset-button").click();
     await expect(page.getByText(/이미 설치가 완료된 사이트/)).toBeVisible();
     await expect(page.getByText(/웹파일 전체, DB\/DB 계정/)).toBeVisible();

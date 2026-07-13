@@ -614,6 +614,9 @@ fn doctor_conversion_preserves_status_labels() {
 #[test]
 fn install_and_rollback_reports_map_to_api_shapes() {
     let install_api = install_to_api(install::InstallReport {
+        install_started_at_unix_ms: 1_000,
+        install_completed_at_unix_ms: Some(3_500),
+        elapsed_ms: 2_500,
         domain: "g7-test.local".to_string(),
         deployment_mode: "local-test".to_string(),
         app_profile: "gnuboard7".to_string(),

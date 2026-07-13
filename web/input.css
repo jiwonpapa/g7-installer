@@ -1033,6 +1033,147 @@
     @apply shadow-none;
   }
 
+  .report-panel {
+    @apply grid gap-4;
+  }
+
+  .report-handoff {
+    @apply grid items-start gap-4 border px-5 py-5 md:grid-cols-[auto_minmax(0,1fr)_auto] md:px-6;
+    border-radius: 8px;
+  }
+
+  .report-handoff[data-status="pass"] {
+    @apply border-success/30 bg-success/[0.045];
+  }
+
+  .report-handoff[data-status="fail"] {
+    @apply border-error/30 bg-error/[0.045];
+  }
+
+  .report-handoff-icon {
+    @apply grid h-10 w-10 place-items-center rounded-md bg-base-200 text-base-content/50;
+  }
+
+  .report-handoff[data-status="pass"] .report-handoff-icon {
+    @apply bg-success/10 text-success;
+  }
+
+  .report-handoff[data-status="fail"] .report-handoff-icon {
+    @apply bg-error/10 text-error;
+  }
+
+  .report-handoff-icon .icon {
+    @apply h-5 w-5;
+  }
+
+  .report-handoff-copy > span {
+    @apply text-xs font-semibold text-base-content/45;
+  }
+
+  .report-handoff-copy h3 {
+    @apply mt-1 text-xl font-bold;
+  }
+
+  .report-handoff-copy > p {
+    @apply mt-2 text-sm text-base-content/65;
+  }
+
+  .report-handoff-meta {
+    @apply mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs text-base-content/55;
+  }
+
+  .report-handoff-meta > span {
+    @apply inline-flex items-center gap-1.5;
+  }
+
+  .report-handoff-meta .icon {
+    @apply h-3.5 w-3.5;
+  }
+
+  .report-handoff-action {
+    @apply md:self-center;
+  }
+
+  .report-handoff-action a {
+    @apply btn btn-primary btn-sm whitespace-nowrap;
+  }
+
+  .critical-service-grid {
+    @apply mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5;
+  }
+
+  .critical-service-grid > div {
+    @apply grid min-h-20 grid-cols-[auto_1fr] items-center gap-x-2 border border-base-300 px-3 py-3;
+    border-radius: 6px;
+  }
+
+  .critical-service-grid > div > span {
+    @apply row-span-2 text-base-content/40;
+  }
+
+  .critical-service-grid > div[data-status="pass"] > span {
+    @apply text-success;
+  }
+
+  .critical-service-grid > div[data-status="fail"] > span {
+    @apply text-error;
+  }
+
+  .critical-service-grid strong {
+    @apply text-sm;
+  }
+
+  .critical-service-grid small {
+    @apply text-xs text-base-content/45;
+  }
+
+  .report-disclosure,
+  .danger-zone {
+    @apply border border-base-300 bg-base-100;
+    border-radius: 6px;
+  }
+
+  .report-disclosure > summary,
+  .danger-zone > summary {
+    @apply flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-4 text-sm font-semibold;
+  }
+
+  .report-disclosure > summary::-webkit-details-marker,
+  .danger-zone > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .report-disclosure > summary span,
+  .danger-zone > summary span {
+    @apply inline-flex items-center gap-2;
+  }
+
+  .report-disclosure > summary .icon,
+  .danger-zone > summary .icon {
+    @apply h-4 w-4;
+  }
+
+  .report-disclosure[open] > summary .icon {
+    transform: rotate(90deg);
+  }
+
+  .report-disclosure > summary small,
+  .danger-zone > summary small {
+    @apply text-xs font-normal text-base-content/45;
+  }
+
+  .report-disclosure-body {
+    @apply grid gap-4 border-t border-base-300 p-4;
+  }
+
+  .danger-zone {
+    @apply border-warning/35 bg-warning/[0.035];
+  }
+
+  .danger-zone-body {
+    @apply border-t border-warning/25 p-4 text-sm text-base-content/65;
+  }
+
   .plan-review > .report-card:first-child,
   .report-panel > .report-card:first-child {
     @apply border-l-2 border-l-primary bg-base-200/25;
@@ -1108,7 +1249,7 @@
     }
 
     .wizard-progress .steps-horizontal {
-      @apply grid w-full grid-cols-7 gap-1;
+      @apply grid w-full grid-cols-6 gap-1;
     }
 
     .wizard-progress .steps-horizontal .step {

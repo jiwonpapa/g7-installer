@@ -71,7 +71,7 @@ apt-get update
 apt-get install -y ca-certificates curl
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT HUP INT TERM
-curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.4/bootstrap.sh -o "$tmp"
+curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.5/bootstrap.sh -o "$tmp"
 bash "$tmp"
 g7inst --version
 ```
@@ -187,7 +187,7 @@ sudo tail -120 /var/log/g7-lightsail-bootstrap.log
 sudo apt-get update
 sudo apt-get install -y ca-certificates curl
 tmp="$(mktemp)"
-curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.4/bootstrap.sh -o "$tmp"
+curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.5/bootstrap.sh -o "$tmp"
 sudo bash "$tmp"
 rm -f "$tmp"
 g7inst --version
@@ -243,13 +243,13 @@ SSH 접속 방식에 맞는 명령 하나만 실행합니다. SSH 연결, 터널
 Mac 터미널:
 
 ```bash
-ssh -i "$HOME/.ssh/lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.4/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$HOME/.ssh/lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.5/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 Windows PowerShell:
 
 ```powershell
-ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.4/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.5/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 ### SSH 비밀번호 방식
@@ -257,7 +257,7 @@ ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ub
 Mac 터미널과 Windows PowerShell에서 같은 명령을 사용합니다.
 
 ```bash
-ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.4/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.5/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 SSH 비밀번호와 sudo 비밀번호를 물으면 터미널에 입력합니다. 비밀번호는 명령어나 웹 화면에 넣지 않습니다.
@@ -280,7 +280,7 @@ http://127.0.0.1:7717/?token=...
 
 - 브라우저에 `G7 Installer` 화면이 뜹니다.
 - 서버 점검 단계가 보입니다.
-- 서버 세팅은 `패키지 설치/검증 -> 사이트 계정/웹루트 -> PHP/런타임 튜닝 -> 웹서버 vhost/HTTP 검증 -> DB 튜닝/계정 생성 -> SSL 인증서/HTTPS 검증 -> 웹앱 파일 배치 -> 리포트 생성 -> 세부 설정 액션 패널` 순서로 진행됩니다. 사이트 전용 PHP-FPM socket이 활성화된 뒤 vhost와 HTTP 접속을 검증합니다.
+- 서버 세팅은 `패키지 설치/검증 -> 사이트 계정/웹루트 -> PHP/런타임 튜닝 -> 웹서버 vhost/HTTP 검증 -> DB 튜닝/계정 생성 -> SSL 인증서/HTTPS 검증 -> 웹앱 파일 배치 -> 완료 리포트` 순서로 진행됩니다. 완료 후 선택형 설치 안내서에서 설정 경로와 읽기 전용 구성 점검을 확인합니다.
 - 리포트에 `completed`가 보이면 서버 프로비저닝이 끝난 것입니다. 패키지, Nginx/Apache 도메인 연결, PHP/DB 튜닝, DB 계정, 앱 파일 배치, 설정 안내서 저장까지 완료된 상태입니다. CMS 관리자 설치 완료를 뜻하지는 않습니다.
 - 그누보드7은 GitHub 공식 최신 안정 Release와 필수 빌드 파일을 검증하고 `.env.example`에서 사이트 계정 전용 `0600` 권한의 `.env`를 준비한 뒤 공식 `/install`로 넘깁니다. 결과 리포트의 `앱 링크`를 열어 Composer/Vendor, 관리자 계정, 확장과 마이그레이션을 진행합니다.
 - 중간 단계가 실패하면 `completed`로 표시하지 않습니다. 자동 문제 해결 기능은 없으며, 설치기가 변경 파일만 복원합니다. stderr와 실패 원인을 확인하고 설치기 업데이트나 입력·환경 수정 후 `수정 후 현재 단계 재실행`을 누릅니다. 완료된 단계는 다시 실행하지 않습니다.

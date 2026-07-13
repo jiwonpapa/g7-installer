@@ -221,6 +221,9 @@ pub(super) fn plan_to_api(
 
 pub(super) fn install_to_api(report: install::InstallReport) -> InstallApiReport {
     InstallApiReport {
+        install_started_at_unix_ms: report.install_started_at_unix_ms,
+        install_completed_at_unix_ms: report.install_completed_at_unix_ms,
+        elapsed_ms: report.elapsed_ms,
         domain: report.domain,
         deployment_mode: report.deployment_mode,
         app_profile: report.app_profile.clone(),
