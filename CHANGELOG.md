@@ -4,6 +4,24 @@
 
 ## Unreleased
 
+## 0.3.0-beta.10 - 2026-07-13
+
+### Added
+
+- G7 Queue에 임시 Job을 넣어 실제 worker 처리까지 확인하는 Redis round-trip 검증 추가
+- Laravel broadcasting backend에서 Reverb 이벤트 송신을 확인하는 publish 검증 추가
+- 메인 화면이 참조하는 같은 도메인 JS/CSS를 HTTP로 조회하는 공개 자산 smoke 추가
+
+### Changed
+
+- G7 공식 Release의 Vite manifest와 동봉 자산 이름 불일치는 코어를 수정하거나 재빌드하지 않고 upstream 경고로 보고
+- 공식 설치 절차대로 Git clone 결과를 유지하고 설치기가 `npm run build`를 실행하지 않는 정책을 회귀 테스트로 고정
+
+### Fixed
+
+- finalize가 공식 Release의 stale Vite manifest만으로 정상 G7 웹 설치를 차단하던 문제 수정
+- 초기화가 G7 드라이버·메일 settings JSON, storage 링크, Queue·Scheduler·Reverb unit을 모두 제거하는 계약을 실제 VPS와 회귀 테스트로 재검증
+
 ## 0.3.0-beta.9 - 2026-07-13
 
 ### Added

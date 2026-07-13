@@ -75,6 +75,14 @@ impl FinalizeCheck {
         }
     }
 
+    fn warn(name: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            status: "warn".to_string(),
+            message: message.into(),
+        }
+    }
+
     fn fail(name: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -349,6 +357,8 @@ fn finalize_inner<R: CommandRunner>(
             "queue-restart",
             "큐 워커에 안전한 재시작 신호를 전달했습니다.",
         ));
+        checks.push(verify_queue_roundtrip(probe, paths, context)?);
+        checks.push(verify_broadcast_publish(probe, context)?);
         let handshake = verify_websocket_handshake_with_grace(probe, context)?;
         checks.push(FinalizeCheck::pass(
             "reverb-listener",
@@ -373,39 +383,21 @@ fn finalize_inner<R: CommandRunner>(
     ));
 
     let asset_checks = validate_vite_manifest(paths, context)?;
-    let asset_failed = asset_checks.iter().any(|check| check.status == "fail");
     checks.extend(asset_checks);
+    checks.push(verify_public_assets(probe, context)?);
     checks.push(FinalizeCheck::manual(
         "external-integrations",
         "S3, GeoIP, 외부 SMTP 계정은 사용자 자격증명이 있을 때만 별도 설정합니다.",
     ));
 
     let finalized = FinalizeReport {
-        status: if asset_failed { "fail" } else { "pass" }.to_string(),
-        message: if asset_failed {
-            "런타임 설정은 적용됐지만 G7 배포 자산 무결성 오류가 있습니다."
-        } else {
-            "GnuBoard7 후속 런타임 설정과 검증이 완료되었습니다."
-        }
-        .to_string(),
+        status: "pass".to_string(),
+        message: "GnuBoard7 후속 런타임 설정과 검증이 완료되었습니다.".to_string(),
         checks,
         services,
         owned_files: owned.files.clone(),
     };
     update_setup_guide(paths, context, &finalized)?;
-
-    if asset_failed {
-        let mut report_json = read_json(paths, REPORT_PATH)?;
-        merge_finalize_report(
-            &mut report_json,
-            &finalized,
-            Some("G7 Vite manifest asset is missing"),
-        );
-        write_json(paths, REPORT_PATH, &report_json)?;
-        return Err(Error::InstallVerificationFailed {
-            checks: "G7 Vite manifest references missing build assets".to_string(),
-        });
-    }
 
     Ok(finalized)
 }
@@ -767,6 +759,110 @@ echo json_encode($result, JSON_THROW_ON_ERROR) . PHP_EOL;
     ))
 }
 
+fn verify_queue_roundtrip<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    paths: &FinalizePaths,
+    context: &FinalizeContext,
+) -> Result<FinalizeCheck> {
+    let probe_path = format!(
+        "{}/storage/app/.g7inst-queue-probe-{}.php",
+        context.web_root,
+        random_hex(8)?
+    );
+    let root = php_string(&context.web_root);
+    let script = format!(
+        r#"<?php
+chdir('{root}');
+require 'vendor/autoload.php';
+$app = require 'bootstrap/app.php';
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+$key = 'g7inst:queue-probe:' . bin2hex(random_bytes(8));
+cache()->forget($key);
+dispatch(function () use ($key): void {{ cache()->put($key, 'processed', 60); }});
+for ($attempt = 0; $attempt < 40; $attempt++) {{
+    if (cache()->get($key) === 'processed') {{ cache()->forget($key); echo "processed\n"; exit(0); }}
+    usleep(250000);
+}}
+cache()->forget($key);
+fwrite(STDERR, "queue probe timed out\n");
+exit(3);
+"#
+    );
+    write_runtime_file(paths, &probe_path, &script)?;
+    let output = probe.runner().run(&CommandSpec::new("runuser").args([
+        "-u",
+        context.site_user.as_str(),
+        "--",
+        "/usr/bin/php",
+        probe_path.as_str(),
+    ]));
+    let _ = fs::remove_file(paths.resolve(&probe_path));
+    let output = output
+        .map_err(|error| command_error("queue-roundtrip", "runuser -- php queue probe", error))?;
+    require_success(
+        "queue-roundtrip",
+        "runuser -- php queue probe",
+        output.clone(),
+    )?;
+    if output.stdout.trim() != "processed" {
+        return Err(Error::InstallVerificationFailed {
+            checks: "GnuBoard7 queue worker did not process the transient Redis cache probe"
+                .to_string(),
+        });
+    }
+    Ok(FinalizeCheck::pass(
+        "queue-roundtrip",
+        "임시 Queue Job을 Redis에 넣고 워커가 처리한 결과를 확인한 뒤 테스트 키를 삭제했습니다.",
+    ))
+}
+
+fn verify_broadcast_publish<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    context: &FinalizeContext,
+) -> Result<FinalizeCheck> {
+    let root = php_string(&context.web_root);
+    let script = format!(
+        r#"<?php
+chdir('{root}');
+require 'vendor/autoload.php';
+$app = require 'bootstrap/app.php';
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+app(Illuminate\Contracts\Broadcasting\Factory::class)
+    ->connection('reverb')
+    ->broadcast(['g7inst-runtime-probe'], 'runtime-probe', ['ok' => true]);
+echo "published\n";
+"#
+    );
+    let output = probe
+        .runner()
+        .run(
+            &CommandSpec::new("runuser")
+                .args(["-u", context.site_user.as_str(), "--", "/usr/bin/php"])
+                .stdin_bytes(script.into_bytes()),
+        )
+        .map_err(|error| {
+            command_error(
+                "broadcast-publish",
+                "runuser -- php [broadcast probe]",
+                error,
+            )
+        })?;
+    require_success(
+        "broadcast-publish",
+        "runuser -- php [broadcast probe]",
+        output.clone(),
+    )?;
+    if output.stdout.trim() != "published" {
+        return Err(Error::InstallVerificationFailed {
+            checks: "GnuBoard7 backend broadcast probe returned an unexpected response".to_string(),
+        });
+    }
+    Ok(FinalizeCheck::pass(
+        "broadcast-publish",
+        "Laravel broadcasting 연결을 통해 Reverb 이벤트 송신을 확인했습니다.",
+    ))
+}
+
 const REVERB_HANDSHAKE_ATTEMPTS: usize = 5;
 
 fn verify_websocket_handshake_with_grace<R: CommandRunner>(
@@ -889,11 +985,123 @@ fn validate_vite_manifest(
             "Vite manifest가 참조하는 모든 배포 자산을 확인했습니다.",
         )])
     } else {
-        Ok(vec![FinalizeCheck::fail(
+        Ok(vec![FinalizeCheck::warn(
             "vite-manifest",
-            format!("G7 manifest 참조 파일 누락: {}", audit.missing.join(", ")),
+            format!(
+                "G7 공식 릴리스의 Vite manifest 참조와 동봉 자산 이름이 일치하지 않습니다: {}. G7 코어와 동봉 자산은 수정하지 않았습니다.",
+                audit.missing.join(", ")
+            ),
         )])
     }
+}
+
+fn verify_public_assets<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    context: &FinalizeContext,
+) -> Result<FinalizeCheck> {
+    let scheme = if context.https_enabled {
+        "https"
+    } else {
+        "http"
+    };
+    let base_url = format!("{scheme}://{}", context.public_host);
+    let homepage = probe
+        .runner()
+        .run(
+            &CommandSpec::new("curl")
+                .args(["-fsSL", "--max-time", "15"])
+                .arg(format!("{base_url}/")),
+        )
+        .map_err(|error| command_error("public-assets", "curl homepage", error))?;
+    require_success("public-assets", "curl homepage", homepage.clone())?;
+
+    let assets = public_asset_paths(&homepage.stdout, &context.public_host);
+    if assets.is_empty() {
+        return Ok(FinalizeCheck::warn(
+            "public-assets",
+            "메인 화면 HTML에서 같은 도메인의 JS/CSS 자산을 찾지 못했습니다.",
+        ));
+    }
+
+    let mut missing = Vec::new();
+    for asset in &assets {
+        let output = probe
+            .runner()
+            .run(
+                &CommandSpec::new("curl")
+                    .args(["-fsSL", "--max-time", "15"])
+                    .arg(format!("{base_url}{asset}"))
+                    .arg("-o")
+                    .arg("/dev/null"),
+            )
+            .map_err(|error| command_error("public-assets", "curl public asset", error))?;
+        if output.status != 0 {
+            missing.push(asset.clone());
+        }
+    }
+
+    if missing.is_empty() {
+        Ok(FinalizeCheck::pass(
+            "public-assets",
+            format!(
+                "메인 화면이 참조하는 같은 도메인 JS/CSS 자산 {}개를 확인했습니다.",
+                assets.len()
+            ),
+        ))
+    } else {
+        Ok(FinalizeCheck::warn(
+            "public-assets",
+            format!(
+                "메인 화면이 참조하지만 HTTP로 제공되지 않는 자산이 있습니다: {}. G7 코어와 동봉 자산은 수정하지 않았습니다.",
+                missing.join(", ")
+            ),
+        ))
+    }
+}
+
+fn public_asset_paths(html: &str, public_host: &str) -> Vec<String> {
+    let mut assets = Vec::new();
+    for (attribute, quote) in [
+        ("src=\"", '"'),
+        ("href=\"", '"'),
+        ("src='", '\''),
+        ("href='", '\''),
+    ] {
+        let mut remaining = html;
+        while let Some(start) = remaining.find(attribute) {
+            remaining = &remaining[start + attribute.len()..];
+            let Some(end) = remaining.find(quote) else {
+                break;
+            };
+            let value = &remaining[..end];
+            remaining = &remaining[end + quote.len_utf8()..];
+
+            let same_origin = [
+                format!("https://{public_host}"),
+                format!("http://{public_host}"),
+            ]
+            .into_iter()
+            .find_map(|origin| value.strip_prefix(&origin));
+            let path = same_origin
+                .or_else(|| (value.starts_with('/') && !value.starts_with("//")).then_some(value));
+            let Some(path) = path else {
+                continue;
+            };
+            let file_path = path
+                .split('#')
+                .next()
+                .unwrap_or(path)
+                .split('?')
+                .next()
+                .unwrap_or(path);
+            if file_path.ends_with(".js") || file_path.ends_with(".css") {
+                assets.push(path.to_string());
+            }
+        }
+    }
+    assets.sort();
+    assets.dedup();
+    assets
 }
 
 fn register_site_settings(owned: &mut OwnedFiles, context: &FinalizeContext) {
@@ -1170,8 +1378,12 @@ mod tests {
             "enabled\n",
             "active\n",
             "queue restart\n",
+            "processed\n",
+            "published\n",
             "{\"internal\":101,\"external\":101}\n",
             "sitemap ok\n",
+            "<link rel=\"stylesheet\" href=\"/build/assets/app.css\">\n",
+            "asset ok\n",
         ] {
             runner.push_output(CommandOutput::success(output));
         }
@@ -1201,6 +1413,42 @@ mod tests {
                 .iter()
                 .all(|(path, _, _)| !path.contains("queue") && !path.contains("reverb"))
         );
+    }
+
+    #[test]
+    fn public_asset_paths_keep_only_same_origin_css_and_js() {
+        let html = r#"
+            <link rel="stylesheet" href="/build/assets/app.css?v=1">
+            <script src='https://example.com/build/app.js'></script>
+            <script src="https://cdn.example.net/vendor.js"></script>
+            <img src="/logo.png">
+        "#;
+
+        assert_eq!(
+            public_asset_paths(html, "example.com"),
+            vec![
+                "/build/app.js".to_string(),
+                "/build/assets/app.css?v=1".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn public_asset_http_failure_is_reported_as_upstream_warning()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success(
+            "<link rel=\"stylesheet\" href=\"/build/assets/app.css\">",
+        ));
+        runner.push_output(CommandOutput::failure(22, "404"));
+        let probe = SystemProbe::new(runner);
+
+        let check = verify_public_assets(&probe, &context(true))?;
+
+        assert_eq!(check.name, "public-assets");
+        assert_eq!(check.status, "warn");
+        assert!(check.message.contains("/build/assets/app.css"));
+        Ok(())
     }
 
     #[test]
@@ -1255,7 +1503,14 @@ mod tests {
         let result = run_with_probe_and_paths(&probe, &FinalizePaths::with_root(&root))?;
 
         assert_eq!(result.status, "pass");
-        for check in ["effective-config", "redis-ping", "reverb-listener"] {
+        for check in [
+            "effective-config",
+            "redis-ping",
+            "queue-roundtrip",
+            "broadcast-publish",
+            "reverb-listener",
+            "public-assets",
+        ] {
             assert!(
                 result
                     .checks
@@ -1278,6 +1533,12 @@ mod tests {
         assert!(guide.contains("GnuBoard7 런타임 마무리"));
         assert!(guide.contains("g7-reverb.service"));
         assert!(guide.contains("Redis가 PONG으로 응답했습니다."));
+        assert!(fs::read_dir(app.join("storage/app"))?.all(|entry| {
+            !entry
+                .ok()
+                .and_then(|entry| entry.file_name().into_string().ok())
+                .is_some_and(|name| name.starts_with(".g7inst-queue-probe-"))
+        }));
         let state = read_state_file(&root.join("var/lib/g7-installer/state.json"))?;
         assert!(state.step_is_completed("gnuboard7-finalize"));
         assert!(
@@ -1291,7 +1552,7 @@ mod tests {
     }
 
     #[test]
-    fn finalize_preserves_manifest_failure_details_in_report()
+    fn finalize_preserves_upstream_manifest_warning_without_blocking_runtime()
     -> std::result::Result<(), Box<dyn std::error::Error>> {
         let root = std::env::temp_dir().join(format!(
             "g7-finalize-failure-test-{}-{}",
@@ -1337,18 +1598,17 @@ mod tests {
         let runner = FakeCommandRunner::default();
         push_successful_finalize_outputs(&runner);
         let probe = SystemProbe::new(runner);
-        let error = run_with_probe_and_paths(&probe, &FinalizePaths::with_root(&root))
-            .expect_err("missing Vite asset should fail finalization");
-        assert!(error.to_string().contains("missing build assets"));
+        let finalized = run_with_probe_and_paths(&probe, &FinalizePaths::with_root(&root))?;
+        assert_eq!(finalized.status, "pass");
 
         let report = read_json(&FinalizePaths::with_root(&root), REPORT_PATH)?;
-        assert_eq!(report["finalize_phase"], "fail");
+        assert_eq!(report["finalize_phase"], "pass");
         let checks = report["finalize_checks"]
             .as_array()
             .expect("finalize checks should be preserved");
         assert!(checks.iter().any(|check| {
             check["name"] == "vite-manifest"
-                && check["status"] == "fail"
+                && check["status"] == "warn"
                 && check["message"]
                     .as_str()
                     .is_some_and(|message| message.contains("assets/missing.js"))

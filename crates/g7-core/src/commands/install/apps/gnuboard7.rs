@@ -188,12 +188,13 @@ fn verify_gnuboard7_release_assets(
         });
     }
     if !audit.missing.is_empty() {
-        return Err(Error::InstallVerificationFailed {
-            checks: format!(
-                "G7 공식 릴리스 {release_ref}의 manifest 참조 파일이 누락됐습니다: {}. 설치기가 파일을 빌드하거나 수정하지 않습니다.",
+        return Ok(InstallCheck::warn(
+            "gnuboard7-vite-manifest",
+            format!(
+                "G7 공식 릴리스 {release_ref}의 Vite manifest 참조와 동봉 자산 이름이 일치하지 않습니다: {}. 공식 설치 문서대로 소스와 필수 코어 번들은 수정하지 않고 설치를 계속하며, 결과 리포트에 상류 패키징 경고를 남깁니다.",
                 audit.missing.join(", ")
             ),
-        });
+        ));
     }
     Ok(InstallCheck::pass(
         "gnuboard7-vite-manifest",
@@ -243,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn broken_release_manifest_is_rejected_before_deployment()
+    fn stale_release_manifest_is_reported_without_rebuilding_official_core()
     -> std::result::Result<(), Box<dyn std::error::Error>> {
         let suffix = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let root = std::env::temp_dir().join(format!("g7-release-assets-{suffix}"));
@@ -254,14 +255,15 @@ mod tests {
             r#"{"app":{"file":"assets/missing.js"}}"#,
         )?;
 
-        let error = verify_gnuboard7_release_assets(
+        let check = verify_gnuboard7_release_assets(
             &InstallPaths::with_root(&root),
             GNUBOARD7_SOURCE_DIR,
             "7.0.3",
-        )
-        .expect_err("broken upstream release must be rejected");
+        )?;
 
-        assert!(error.to_string().contains("assets/missing.js"));
+        assert_eq!(check.status, "warn");
+        assert!(check.message.contains("assets/missing.js"));
+        assert!(check.message.contains("필수 코어 번들은 수정하지 않고"));
         fs::remove_dir_all(root)?;
         Ok(())
     }
