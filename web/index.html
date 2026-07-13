@@ -47,7 +47,7 @@
         <nav class="wizard-progress" aria-label="설치 단계">
           <div class="wizard-progress-head">
             <span>설치 진행</span>
-            <strong id="step-progress-label">1 / 7 · 접속</strong>
+            <strong id="step-progress-label">1 / 6 · 접속</strong>
           </div>
           <ul class="steps steps-horizontal w-full lg:steps-vertical">
             <li class="step step-primary" data-progress="login"><span class="step-copy" data-ui-icon="log-in">접속</span></li>
@@ -62,44 +62,49 @@
 
         <section class="workspace-grid">
         <div class="min-w-0">
-          <section class="view-panel is-visible" data-view="login">
-            <div class="section-heading">
-              <div>
-                <span class="step-eyebrow">1단계</span>
-                <h2>
-                  접속 확인
-                  <span class="help-wrap">
-                    <button class="help-circle" type="button" aria-label="접속 확인 도움말">?</button>
-                    <span class="help-text">터미널에 나온 접속 확인 주소로 들어오면 이 브라우저만 설치 화면을 사용할 수 있습니다.</span>
-                  </span>
-                </h2>
-                <p>터미널에 출력된 접속 확인 주소로 접속하면 설치 권한 확인이 끝납니다.</p>
+          <section class="view-panel connect-view is-visible" data-view="login">
+            <section class="connect-intro" aria-labelledby="connect-intro-title">
+              <img
+                class="connect-intro-media"
+                src="/assets/setup-orbit-light.webp?v=__G7INST_ASSET_VERSION__"
+                alt="서버를 중심으로 웹 서비스 구성이 연결되는 궤도"
+              />
+
+              <div class="connect-orbit-logos" aria-hidden="true">
+                <span class="hero-logo-node hero-node-ubuntu"><svg><use href="#brand-ubuntu" /></svg></span>
+                <span class="hero-logo-node hero-node-nginx"><svg><use href="#brand-nginx" /></svg></span>
+                <span class="hero-logo-node hero-node-php"><svg><use href="#brand-php" /></svg></span>
+                <span class="hero-logo-node hero-node-mysql"><svg><use href="#brand-mysql" /></svg></span>
+                <span class="hero-logo-node hero-node-redis"><svg><use href="#brand-redis" /></svg></span>
+                <span class="hero-logo-node hero-node-ssl"><svg><use href="#brand-letsencrypt" /></svg></span>
               </div>
-              <span class="badge badge-outline">접속 확인됨</span>
-            </div>
 
-            <div id="login-status" class="mt-5 hidden"></div>
+              <div class="connect-intro-content">
+                <div class="connect-intro-copy">
+                  <span class="connect-kicker"><i aria-hidden="true"></i>Fresh Ubuntu Provisioner</span>
+                  <h2 id="connect-intro-title">새 Ubuntu VPS를<br />그누보드7 서버로</h2>
+                  <p>Nginx 또는 Apache, PHP-FPM, MySQL, Redis와 HTTPS를 서버 사양에 맞춰 구성하고 웹 설치 화면까지 준비합니다.</p>
 
-            <div class="result-list mt-5">
-              <div class="result-row" data-status="pass">
-                <div class="result-copy">
-                  <span>서버 비밀번호 입력 없음</span>
-                  <p><code>sudo g7inst setup</code>으로 이미 설치 컨트롤러가 실행 중입니다.</p>
+                  <div id="login-status" class="hidden"></div>
+
+                  <div class="connect-readiness" aria-label="접속 준비 상태">
+                    <div>
+                      <span data-ui-icon="shield-check">설치 권한</span>
+                      <strong>서버 비밀번호 입력 없음</strong>
+                    </div>
+                    <div>
+                      <span data-ui-icon="lock-keyhole">접속 방식</span>
+                      <strong>SSH 터널 전용</strong>
+                    </div>
+                  </div>
+
+                  <div class="connect-intro-actions">
+                    <button class="btn btn-primary icon-button" type="button" data-icon="chevron-right" data-next="check">서버 점검 시작</button>
+                    <span><code>7717</code> 포트는 외부에 공개하지 않습니다.</span>
+                  </div>
                 </div>
-                <strong>확인</strong>
               </div>
-              <div class="result-row" data-status="pass">
-                <div class="result-copy">
-                  <span>외부 포트 미개방</span>
-                  <p>7717 포트는 SSH 터널로만 접근합니다. 방화벽에는 열지 않습니다.</p>
-                </div>
-                <strong>확인</strong>
-              </div>
-            </div>
-
-            <div class="wizard-actions">
-              <button class="btn btn-primary icon-button" type="button" data-icon="chevron-right" data-next="check">서버 점검으로 이동</button>
-            </div>
+            </section>
           </section>
 
           <section class="view-panel" data-view="check">

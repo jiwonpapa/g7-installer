@@ -133,6 +133,9 @@ async function asset(pathname) {
   if (pathname === "/app.css") {
     return readFile(path.join(root, "web/dist/app.css"));
   }
+  if (pathname === "/assets/setup-orbit-light.webp") {
+    return readFile(path.join(root, "web/assets/setup-orbit-light.webp"));
+  }
   if (pathname === "/promo.sample.json" || pathname === "/promo.json") {
     return readFile(path.join(root, "web/promo.sample.json"));
   }
@@ -296,6 +299,8 @@ async function startServer(options = {}) {
     if (file) {
       const contentType = pathname.endsWith(".css")
         ? "text/css; charset=utf-8"
+        : pathname.endsWith(".webp")
+          ? "image/webp"
         : pathname.endsWith(".json")
           ? "application/json; charset=utf-8"
           : "application/javascript; charset=utf-8";
@@ -320,9 +325,22 @@ test("wizard routes render concise result and optional setup guide", async ({ pa
   const { server, baseUrl } = await startServer();
   try {
     await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${baseUrl}/setup/connect?token=e2e`);
+    await expect(page.getByRole("heading", { name: "새 Ubuntu VPS를 그누보드7 서버로" })).toBeVisible();
+    await expect(page.locator(".connect-intro-media")).toHaveAttribute("src", "/assets/setup-orbit-light.webp?v=e2e");
+    await expect(page.locator(".hero-logo-node")).toHaveCount(6);
+    await expect(page.getByRole("button", { name: "서버 점검 시작" })).toBeVisible();
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "새 Ubuntu VPS를 그누보드7 서버로" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "서버 점검 시작" })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${baseUrl}/setup/result?token=e2e`);
     const shellBox = await page.locator(".app-shell").boundingBox();
-    expect(shellBox?.y).toBe(0);
+    expect(shellBox?.y).toBe(20);
     await expect(page.getByRole("heading", { name: "설치 결과" })).toBeVisible();
     await expect(page.locator("#live-log")).toHaveCount(1);
     await expect(page.locator("#install-live-log")).toHaveCount(0);

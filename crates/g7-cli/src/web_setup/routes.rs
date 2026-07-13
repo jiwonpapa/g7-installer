@@ -52,6 +52,7 @@ pub(super) fn build_router(state: WebState) -> Router {
         .route("/app.js", get(app_js))
         .route("/modules/event-stream.js", get(event_stream_js))
         .route("/app.css", get(app_css))
+        .route("/assets/setup-orbit-light.webp", get(intro_image))
         .route("/promo.json", get(promo_json))
         .route("/api/bootstrap", get(bootstrap))
         .route("/api/auth/logout", post(api_logout))
@@ -324,6 +325,21 @@ pub(super) async fn app_css(
             (header::CACHE_CONTROL, "no-store, no-cache, max-age=0"),
         ],
         APP_CSS,
+    ))
+}
+
+pub(super) async fn intro_image(
+    axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+) -> std::result::Result<impl IntoResponse, ApiError> {
+    require_allowed_client_ip(&state, peer.ip())?;
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, "image/webp"),
+            (header::CACHE_CONTROL, "no-store, no-cache, max-age=0"),
+        ],
+        INTRO_IMAGE,
     ))
 }
 

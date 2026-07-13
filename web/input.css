@@ -132,6 +132,178 @@
     animation: g7inst-view-enter 160ms ease-out;
   }
 
+  .connect-view {
+    @apply max-w-none p-0;
+  }
+
+  .connect-intro {
+    position: relative;
+    isolation: isolate;
+    height: clamp(38rem, calc(100vh - 11rem), 46rem);
+    min-height: 38rem;
+    overflow: hidden;
+    background: #f5f5f3;
+    color: #172033;
+  }
+
+  .connect-intro-media {
+    position: absolute;
+    inset: 0;
+    z-index: -2;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+    animation: g7inst-intro-media 720ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .connect-intro-content {
+    @apply mx-auto flex h-full w-full max-w-[78rem] items-center px-8 lg:px-12;
+    position: relative;
+    z-index: 2;
+  }
+
+  .connect-intro-copy {
+    width: min(29rem, 42%);
+  }
+
+  .connect-kicker {
+    @apply inline-flex items-center gap-2 text-xs font-bold uppercase;
+    color: #596274;
+    letter-spacing: 0;
+  }
+
+  .connect-kicker i {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 999px;
+    background: #5b21ff;
+    box-shadow: 0 0 0 5px rgb(91 33 255 / 0.1);
+  }
+
+  .connect-intro-copy h2 {
+    margin-top: 1.25rem;
+    font-size: 3rem;
+    font-weight: 800;
+    line-height: 1.15;
+    letter-spacing: 0;
+  }
+
+  .connect-intro-copy > p {
+    margin-top: 1.25rem;
+    max-width: 28rem;
+    color: #596274;
+    font-size: 0.95rem;
+    line-height: 1.75;
+  }
+
+  .connect-view #login-status.alert {
+    margin-top: 1.5rem;
+    max-width: 28rem;
+    gap: 0.75rem;
+    border: 1px solid rgb(17 145 103 / 0.2);
+    border-radius: 7px;
+    background: rgb(237 249 244 / 0.88);
+    padding: 0.8rem 1rem;
+    color: #164e3c;
+    box-shadow: none;
+    backdrop-filter: blur(10px);
+  }
+
+  .connect-view #login-status.alert p {
+    color: #3f6559;
+    font-size: 0.78rem;
+    line-height: 1.45;
+  }
+
+  .connect-readiness {
+    @apply mt-6 grid grid-cols-2;
+    max-width: 28rem;
+    border-block: 1px solid rgb(23 32 51 / 0.14);
+  }
+
+  .connect-readiness > div {
+    @apply grid gap-1 py-3;
+  }
+
+  .connect-readiness > div + div {
+    border-left: 1px solid rgb(23 32 51 / 0.14);
+    padding-left: 1rem;
+  }
+
+  .connect-readiness span {
+    @apply inline-flex items-center gap-1.5 text-[0.68rem] font-semibold;
+    color: #747d8d;
+  }
+
+  .connect-readiness span .icon {
+    width: 0.85rem;
+    height: 0.85rem;
+  }
+
+  .connect-readiness strong {
+    font-size: 0.82rem;
+    color: #172033;
+  }
+
+  .connect-intro-actions {
+    @apply mt-7 flex flex-wrap items-center gap-4;
+  }
+
+  .connect-intro-actions > span {
+    color: #747d8d;
+    font-size: 0.72rem;
+  }
+
+  .connect-intro-actions code {
+    color: #4c5567;
+  }
+
+  .connect-orbit-logos {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  .hero-logo-node {
+    position: absolute;
+    display: grid;
+    width: 3.25rem;
+    height: 3.25rem;
+    place-items: center;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    background: rgb(255 255 255 / 0.9);
+    box-shadow: 0 10px 28px rgb(15 23 42 / 0.16), inset 0 0 0 4px rgb(255 255 255 / 0.58);
+    transform: translate(-50%, -50%);
+    animation: g7inst-orbit-node 3.6s ease-in-out infinite;
+    backdrop-filter: blur(10px);
+  }
+
+  .hero-logo-node svg {
+    width: 1.7rem;
+    height: 1.7rem;
+    fill: currentColor;
+  }
+
+  .hero-node-ubuntu { left: 67%; top: 19%; color: #e95420; }
+  .hero-node-nginx { left: 87%; top: 24%; color: #009639; animation-delay: -0.6s; }
+  .hero-node-php { left: 92%; top: 54%; color: #777bb4; animation-delay: -1.2s; }
+  .hero-node-mysql { left: 77%; top: 78%; color: #4479a1; animation-delay: -1.8s; }
+  .hero-node-redis { left: 51%; top: 74%; color: #d82c20; animation-delay: -2.4s; }
+  .hero-node-ssl { left: 45%; top: 45%; color: #2c3c69; animation-delay: -3s; }
+
+  @keyframes g7inst-intro-media {
+    from { opacity: 0; transform: scale(1.025); }
+    to { opacity: 1; transform: scale(1); }
+  }
+
+  @keyframes g7inst-orbit-node {
+    0%, 100% { margin-top: 0; box-shadow: 0 10px 28px rgb(15 23 42 / 0.16), inset 0 0 0 4px rgb(255 255 255 / 0.58); }
+    50% { margin-top: -5px; box-shadow: 0 16px 34px rgb(15 23 42 / 0.2), inset 0 0 0 4px rgb(255 255 255 / 0.68); }
+  }
+
   .section-heading {
     @apply gap-4 pb-5;
   }
@@ -1270,6 +1442,10 @@
       @apply px-4 py-5;
     }
 
+    .connect-view {
+      @apply p-0;
+    }
+
     .section-heading {
       @apply flex-col items-stretch;
     }
@@ -1394,10 +1570,69 @@
     .log-dock .collapse-content {
       @apply px-3 pb-3;
     }
+
+    .connect-intro {
+      height: auto;
+      min-height: calc(100svh - 7.5rem);
+    }
+
+    .connect-intro-content {
+      @apply items-center px-5 py-8;
+    }
+
+    .connect-intro-copy {
+      width: min(30rem, 100%);
+    }
+
+    .connect-intro-copy h2 {
+      margin-top: 0.85rem;
+      font-size: 2.25rem;
+      line-height: 1.2;
+    }
+
+    .connect-intro-copy > p {
+      margin-top: 1rem;
+      font-size: 0.85rem;
+      line-height: 1.65;
+    }
+
+    .connect-view #login-status.alert {
+      display: flex;
+      margin-top: 1rem;
+      padding: 0.7rem 0.8rem;
+      text-align: left;
+    }
+
+    .connect-view #login-status.alert p {
+      display: none;
+    }
+
+    .connect-readiness {
+      @apply mt-4;
+    }
+
+    .connect-intro-actions {
+      @apply mt-5 grid gap-2;
+    }
+
+    .connect-intro-actions .btn {
+      width: 100%;
+    }
+
+    .connect-intro-media {
+      opacity: 0.3;
+      object-position: 68% center;
+    }
+
+    .connect-orbit-logos {
+      display: none;
+    }
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .connect-intro-media,
+  .hero-logo-node,
   .install-progress-shell,
   .install-progress-dialog[data-outcome="complete"] .install-progress-shell,
   .install-graph-node[data-status="진행"],
@@ -1415,7 +1650,7 @@
 
 @layer components {
   .app-shell {
-    @apply mx-auto flex min-h-screen w-full max-w-7xl flex-col overflow-hidden border-base-300 bg-base-100 shadow-xl sm:mb-4 sm:mt-0 sm:min-h-[calc(100vh-1rem)] sm:rounded-b-xl sm:border sm:border-t-0;
+    @apply mx-auto flex min-h-screen w-full max-w-7xl flex-col overflow-hidden border-base-300 bg-base-100 shadow-xl sm:mb-4 sm:mt-5 sm:min-h-[calc(100vh-2.25rem)] sm:rounded-xl sm:border;
   }
 
   .app-header {

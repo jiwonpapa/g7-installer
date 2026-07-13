@@ -6,6 +6,8 @@ pub(super) const INDEX_HTML: &str = include_str!("../../../../web/index.html");
 pub(super) const APP_JS: &str = include_str!("../../../../web/app.js");
 pub(super) const EVENT_STREAM_JS: &str = include_str!("../../../../web/modules/event-stream.js");
 pub(super) const APP_CSS: &str = include_str!("../../../../web/dist/app.css");
+pub(super) const INTRO_IMAGE: &[u8] =
+    include_bytes!("../../../../web/assets/setup-orbit-light.webp");
 pub(super) const PROMO_JSON: &str = include_str!("../../../../web/promo.sample.json");
 pub(super) const DEFAULT_PROMO_MANIFEST_URL: &str = "/promo.json";
 pub(super) const ASSET_VERSION: &str = match option_env!("G7_ASSET_VERSION") {
