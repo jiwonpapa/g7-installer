@@ -9,6 +9,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -36,6 +37,7 @@ use tokio::sync::broadcast;
 use tower_http::trace::TraceLayer;
 
 mod api;
+mod artifacts;
 mod defaults;
 mod provision_actions;
 mod recovery;
@@ -48,6 +50,7 @@ pub use defaults::DEFAULT_BIND;
 pub use routes::run;
 
 use api::*;
+use artifacts::*;
 use defaults::*;
 use provision_actions::*;
 use recovery::*;

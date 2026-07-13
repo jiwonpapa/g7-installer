@@ -71,7 +71,7 @@ apt-get update
 apt-get install -y ca-certificates curl
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT HUP INT TERM
-curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.6/bootstrap.sh -o "$tmp"
+curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.7/bootstrap.sh -o "$tmp"
 bash "$tmp"
 g7inst --version
 ```
@@ -187,7 +187,7 @@ sudo tail -120 /var/log/g7-lightsail-bootstrap.log
 sudo apt-get update
 sudo apt-get install -y ca-certificates curl
 tmp="$(mktemp)"
-curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.6/bootstrap.sh -o "$tmp"
+curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.7/bootstrap.sh -o "$tmp"
 sudo bash "$tmp"
 rm -f "$tmp"
 g7inst --version
@@ -243,13 +243,13 @@ SSH 접속 방식에 맞는 명령 하나만 실행합니다. SSH 연결, 터널
 Mac 터미널:
 
 ```bash
-ssh -i "$HOME/.ssh/lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.6/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$HOME/.ssh/lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.7/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 Windows PowerShell:
 
 ```powershell
-ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.6/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.7/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 ### SSH 비밀번호 방식
@@ -257,7 +257,7 @@ ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ub
 Mac 터미널과 Windows PowerShell에서 같은 명령을 사용합니다.
 
 ```bash
-ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.6/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.7/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 SSH 비밀번호와 sudo 비밀번호를 물으면 터미널에 입력합니다. 비밀번호는 명령어나 웹 화면에 넣지 않습니다.

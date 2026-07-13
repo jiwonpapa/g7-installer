@@ -894,29 +894,6 @@ pub(super) async fn api_report(
     }
 }
 
-pub(super) async fn api_setup_guide(
-    axum::extract::State(state): axum::extract::State<WebState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
-) -> std::result::Result<impl IntoResponse, ApiError> {
-    require_authenticated_session(&state, &headers, peer.ip())?;
-    let content = fs::read_to_string(SETUP_GUIDE_PATH).map_err(|error| {
-        ApiError::bad_request(format!("설정 안내서를 읽지 못했습니다: {error}"))
-            .with_hint("설치 완료 후 다시 시도하세요.")
-    })?;
-
-    Ok((
-        [
-            (header::CONTENT_TYPE, "text/markdown; charset=utf-8"),
-            (
-                header::CONTENT_DISPOSITION,
-                "attachment; filename=\"g7-installer-setup-guide.md\"",
-            ),
-        ],
-        content,
-    ))
-}
-
 pub(super) fn options_from_request(request: SetupRequest) -> plan::PlanOptions {
     crate::plan_options(
         request.local_test,
