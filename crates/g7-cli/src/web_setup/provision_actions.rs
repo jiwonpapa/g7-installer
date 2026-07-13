@@ -24,10 +24,11 @@ pub(super) fn run_provision_action(
         "mail" => provision_mail(report),
         "security" => provision_security(report),
         "app" => provision_app(report),
+        "g7-runtime" => provision_g7_runtime(report),
         _ => {
             return Err(
                 ApiError::bad_request(format!("unsupported provision action: {action}")).with_hint(
-                    "지원 작업은 webserver, php, database, ssl, mail, security, app 입니다.",
+                    "지원 작업은 webserver, php, database, ssl, mail, security, app, g7-runtime 입니다.",
                 ),
             );
         }
@@ -299,6 +300,111 @@ pub(super) fn provision_app(report: &serde_json::Value) -> Vec<InstallApiCheck> 
         Some(&web_root),
     ));
     checks
+}
+
+pub(super) fn provision_g7_runtime(report: &serde_json::Value) -> Vec<InstallApiCheck> {
+    if report_string(report, "app_profile").as_deref() != Some("gnuboard7") {
+        return vec![InstallApiCheck {
+            name: "g7-runtime".to_string(),
+            status: "manual".to_string(),
+            message: "GnuBoard7 설치가 아니므로 G7 런타임 점검 대상이 아닙니다.".to_string(),
+        }];
+    }
+    if report_string(report, "finalize_phase").as_deref() != Some("pass") {
+        return vec![InstallApiCheck {
+            name: "g7-runtime-finalize".to_string(),
+            status: "manual".to_string(),
+            message: "공식 웹 설치 후 `G7 런타임 설정 적용`을 먼저 실행하세요.".to_string(),
+        }];
+    }
+
+    let web_root = report_string(report, "web_root").unwrap_or_default();
+    let redis_enabled = report_string(report, "redis").as_deref() == Some("enable");
+    let drivers_path = format!("{web_root}/storage/app/settings/drivers.json");
+    let mut checks = vec![
+        file_check("g7-drivers-settings", &drivers_path),
+        file_check(
+            "g7-scheduler-service-unit",
+            g7_core::runtime_resources::G7_SCHEDULER_SERVICE_PATH,
+        ),
+        file_check(
+            "g7-scheduler-timer-unit",
+            g7_core::runtime_resources::G7_SCHEDULER_TIMER_PATH,
+        ),
+        run_command_check(
+            "g7-scheduler-timer-active",
+            "systemctl",
+            &[
+                "is-active",
+                "--quiet",
+                g7_core::runtime_resources::G7_SCHEDULER_TIMER,
+            ],
+            None,
+        ),
+    ];
+    checks.push(g7_driver_value_check(
+        &drivers_path,
+        "queue_driver",
+        if redis_enabled { "redis" } else { "sync" },
+    ));
+    checks.push(g7_driver_value_check(
+        &drivers_path,
+        "session_driver",
+        if redis_enabled { "redis" } else { "file" },
+    ));
+
+    if redis_enabled {
+        for (name, path, service) in [
+            (
+                "g7-queue",
+                g7_core::runtime_resources::G7_QUEUE_SERVICE_PATH,
+                g7_core::runtime_resources::G7_QUEUE_SERVICE,
+            ),
+            (
+                "g7-reverb",
+                g7_core::runtime_resources::G7_REVERB_SERVICE_PATH,
+                g7_core::runtime_resources::G7_REVERB_SERVICE,
+            ),
+        ] {
+            checks.push(file_check(&format!("{name}-unit"), path));
+            checks.push(run_command_check(
+                &format!("{name}-active"),
+                "systemctl",
+                &["is-active", "--quiet", service],
+                None,
+            ));
+        }
+        checks.push(g7_driver_value_check(
+            &drivers_path,
+            "websocket_enabled",
+            "true",
+        ));
+    }
+    checks
+}
+
+fn g7_driver_value_check(path: &str, key: &str, expected: &str) -> InstallApiCheck {
+    let value = fs::read_to_string(path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+        .and_then(|json| json.get(key).cloned())
+        .map(|value| match value {
+            serde_json::Value::String(value) => value,
+            other => other.to_string(),
+        });
+    let matches = value.as_deref() == Some(expected);
+    InstallApiCheck {
+        name: format!("g7-driver:{key}"),
+        status: if matches { "pass" } else { "fail" }.to_string(),
+        message: if matches {
+            format!("{key}={expected} 적용을 확인했습니다.")
+        } else {
+            format!(
+                "{key} 값이 예상과 다릅니다. expected={expected}, actual={}",
+                value.as_deref().unwrap_or("missing")
+            )
+        },
+    }
 }
 
 pub(super) fn app_permission_checks(
@@ -614,6 +720,124 @@ mod tests {
         );
         assert_eq!(report_string(&report, "port"), None);
         assert_eq!(report_string(&report, "missing"), None);
+    }
+
+    #[test]
+    fn g7_runtime_before_finalize_is_reported_as_manual() {
+        let report = serde_json::json!({
+            "app_profile": "gnuboard7",
+            "finalize_phase": null
+        });
+
+        let result = run_provision_action("g7-runtime", &report)
+            .expect("G7 runtime action should return a follow-up check");
+
+        assert_eq!(result.status, "manual");
+        assert_eq!(result.checks[0].name, "g7-runtime-finalize");
+    }
+
+    #[test]
+    fn g7_driver_value_check_validates_effective_json() {
+        let root = temp_path("g7-drivers");
+        fs::create_dir_all(&root).expect("temp dir should be created");
+        let drivers = root.join("drivers.json");
+        fs::write(
+            &drivers,
+            r#"{"queue_driver":"redis","websocket_enabled":true}"#,
+        )
+        .expect("driver settings should be written");
+
+        let queue = g7_driver_value_check(
+            drivers.to_str().expect("utf8 path"),
+            "queue_driver",
+            "redis",
+        );
+        let websocket = g7_driver_value_check(
+            drivers.to_str().expect("utf8 path"),
+            "websocket_enabled",
+            "true",
+        );
+
+        assert_eq!(queue.status, "pass");
+        assert_eq!(websocket.status, "pass");
+        let missing = g7_driver_value_check(
+            drivers.to_str().expect("utf8 path"),
+            "session_driver",
+            "redis",
+        );
+        assert_eq!(missing.status, "fail");
+        assert!(missing.message.contains("actual=missing"));
+        fs::remove_dir_all(root).expect("temp dir should be removed");
+    }
+
+    #[test]
+    fn g7_runtime_checks_cover_non_g7_file_and_redis_profiles() {
+        let other =
+            run_provision_action("g7-runtime", &serde_json::json!({"app_profile": "laravel"}))
+                .expect("non-G7 report should remain a manual check");
+        assert_eq!(other.status, "manual");
+        assert_eq!(other.checks[0].name, "g7-runtime");
+
+        let root = temp_path("g7-runtime-profile");
+        let root_text = root.to_string_lossy().to_string();
+        let settings = root.join("storage/app/settings");
+        fs::create_dir_all(&settings).expect("settings dir should be created");
+        fs::write(
+            settings.join("drivers.json"),
+            r#"{"queue_driver":"sync","session_driver":"file","websocket_enabled":false}"#,
+        )
+        .expect("file driver settings should be written");
+        let file_profile = run_provision_action(
+            "g7-runtime",
+            &serde_json::json!({
+                "app_profile": "gnuboard7",
+                "finalize_phase": "pass",
+                "web_root": root_text,
+                "redis": "disable"
+            }),
+        )
+        .expect("file profile should produce concrete checks");
+        assert!(
+            file_profile
+                .checks
+                .iter()
+                .any(|check| check.name == "g7-driver:queue_driver" && check.status == "pass")
+        );
+        assert!(
+            !file_profile
+                .checks
+                .iter()
+                .any(|check| check.name == "g7-queue-unit")
+        );
+
+        fs::write(
+            settings.join("drivers.json"),
+            r#"{"queue_driver":"redis","session_driver":"redis","websocket_enabled":true}"#,
+        )
+        .expect("Redis driver settings should be written");
+        let redis_profile = run_provision_action(
+            "g7-runtime",
+            &serde_json::json!({
+                "app_profile": "gnuboard7",
+                "finalize_phase": "pass",
+                "web_root": root_text,
+                "redis": "enable"
+            }),
+        )
+        .expect("Redis profile should produce concrete checks");
+        assert!(
+            redis_profile
+                .checks
+                .iter()
+                .any(|check| check.name == "g7-driver:websocket_enabled" && check.status == "pass")
+        );
+        assert!(
+            redis_profile
+                .checks
+                .iter()
+                .any(|check| check.name == "g7-queue-unit")
+        );
+        fs::remove_dir_all(root).expect("temp dir should be removed");
     }
 
     #[test]

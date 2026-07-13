@@ -37,10 +37,10 @@ use crate::port::{PortStatus, tcp_port_status};
 use crate::privilege::{Privilege, current_privilege};
 use crate::redis::{
     config_get as redis_config_get, config_rewrite as redis_config_rewrite,
-    config_set as redis_config_set,
+    config_set as redis_config_set, ping as redis_ping,
 };
 use crate::service::{ServiceActivity, disable_now, enable_now, is_active, reload, restart, start};
-use crate::systemd::{daemon_reload, verify_units};
+use crate::systemd::{daemon_reload, reset_failed, verify_units};
 use std::net::IpAddr;
 
 #[derive(Debug)]
@@ -265,6 +265,10 @@ impl<R: CommandRunner> SystemProbe<R> {
         redis_config_get(&self.runner, pattern).map_err(SystemProbeError::Command)
     }
 
+    pub fn redis_ping(&self) -> Result<CommandOutput, SystemProbeError> {
+        redis_ping(&self.runner).map_err(SystemProbeError::Command)
+    }
+
     pub fn current_privilege(&self) -> Result<Privilege, SystemProbeError> {
         current_privilege(&self.runner).map_err(SystemProbeError::Command)
     }
@@ -282,6 +286,13 @@ impl<R: CommandRunner> SystemProbe<R> {
         units: &[PathBuf],
     ) -> Result<CommandOutput, SystemProbeError> {
         verify_units(&self.runner, units).map_err(SystemProbeError::Command)
+    }
+
+    pub fn systemd_reset_failed(
+        &self,
+        units: &[String],
+    ) -> Result<CommandOutput, SystemProbeError> {
+        reset_failed(&self.runner, units).map_err(SystemProbeError::Command)
     }
 
     pub fn disable_service_now(&self, service: &str) -> Result<CommandOutput, SystemProbeError> {

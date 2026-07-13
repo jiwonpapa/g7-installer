@@ -112,7 +112,8 @@ fn install_writes_prepared_state_and_owned_files()
     assert!(!nginx_vhost.contains("location ~*"));
     assert!(!nginx_vhost.contains("location /app"));
     assert!(!nginx_vhost.contains("location /apps"));
-    assert!(!nginx_vhost.contains("proxy_pass http://127.0.0.1:8080;"));
+    assert!(nginx_vhost.contains("location ~ ^/apps?(/|$)"));
+    assert!(nginx_vhost.contains("proxy_pass http://127.0.0.1:8080;"));
     assert!(
         !fs_root
             .join("etc/nginx/conf.d/g7-runtime-tuning.conf")
@@ -692,6 +693,31 @@ fn apache_www_none_does_not_add_unrequested_alias()
 }
 
 #[test]
+fn apache_g7_websocket_routes_api_before_socket_prefix()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let plan = super::plan::build_with_options(
+        "example.com".to_string(),
+        super::plan::PlanOptions {
+            app_profile: "gnuboard7".to_string(),
+            web_server: "apache".to_string(),
+            redis_mode: "enable".to_string(),
+            ..super::plan::PlanOptions::default()
+        },
+    )?;
+    let vhost = super::apache_vhost_content_with_socket(&plan, "/run/php/g7.sock");
+    let api = vhost
+        .find("ProxyPass \"/apps\"")
+        .expect("Reverb HTTP API proxy should exist");
+    let socket = vhost
+        .find("ProxyPass \"/app\"")
+        .expect("Reverb WebSocket proxy should exist");
+    assert!(api < socket, "/apps must be matched before the /app prefix");
+    assert!(vhost.contains("ws://127.0.0.1:8080/app"));
+    assert!(vhost.contains("http://127.0.0.1:8080/apps"));
+    Ok(())
+}
+
+#[test]
 fn install_adopts_existing_g7_managed_swap_files()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     let os_release_path = write_temp_os_release()?;
@@ -805,7 +831,8 @@ fn install_configures_frankenphp_edge_runtime()
     assert!(!vhost.contains("location ~*"));
     assert!(!vhost.contains("location /app"));
     assert!(!vhost.contains("location /apps"));
-    assert!(!vhost.contains("proxy_pass http://127.0.0.1:8080;"));
+    assert!(vhost.contains("location ~ ^/apps?(/|$)"));
+    assert!(vhost.contains("proxy_pass http://127.0.0.1:8080;"));
     assert!(
         report
             .app_checks
@@ -1404,6 +1431,7 @@ fn runtime_policy_keeps_upload_headroom_and_safe_opcache_refresh() {
     let ini = super::php_ini_override_content(&sizing);
     assert!(ini.contains("upload_max_filesize = 64M"));
     assert!(ini.contains("post_max_size = 80M"));
+    assert!(ini.contains("max_input_vars = 5000"));
     assert!(ini.contains("opcache.validate_timestamps = 1"));
     assert!(ini.contains("opcache.enable_file_override = 0"));
     assert!(!ini.contains("open_basedir"));
@@ -2275,7 +2303,7 @@ fn successful_php_runtime_probe_output(install_plan: &super::plan::InstallPlan) 
              upload_max_filesize={}\n\
              post_max_size={}\n\
              max_execution_time=120\n\
-             max_input_vars=3000\n\
+             max_input_vars=5000\n\
              date.timezone=UTC\n\
              realpath_cache_size=4096K\n\
              realpath_cache_ttl=600\n\
@@ -2306,7 +2334,7 @@ fn successful_php_fpm_info_output(install_plan: &super::plan::InstallPlan) -> St
          upload_max_filesize => {} => {}\n\
          post_max_size => {} => {}\n\
          max_execution_time => 120 => 120\n\
-         max_input_vars => 3000 => 3000\n\
+         max_input_vars => 5000 => 5000\n\
          date.timezone => UTC => UTC\n\
          realpath_cache_size => 4096K => 4096K\n\
          realpath_cache_ttl => 600 => 600\n\

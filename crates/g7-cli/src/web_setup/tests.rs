@@ -1,7 +1,7 @@
 use super::{
     CSRF_HEADER, DoctorCheckStatus, REPORT_PATH, SESSION_COOKIE, SESSION_TTL, Session,
-    SetupRequest, WebState, api_install_prepare, api_logout, api_plan, api_recovery, api_report,
-    api_reset, api_rollback, api_status, app_css, app_js, bootstrap, browser_addr_for,
+    SetupRequest, WebState, api_finalize, api_install_prepare, api_logout, api_plan, api_recovery,
+    api_report, api_reset, api_rollback, api_status, app_css, app_js, bootstrap, browser_addr_for,
     build_router, create_session, current_user_is_root, doctor_status_label, doctor_to_api,
     emit_log, ensure_remote_binding_is_explicit, event_history_snapshot, event_stream_js,
     failed_doctor_details, html_attr_escape, index, index_html, install_checks_to_api,
@@ -1039,6 +1039,31 @@ async fn install_prepare_rejects_concurrent_actions()
 
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert_eq!(error.message, "install is already running");
+    Ok(())
+}
+
+#[tokio::test]
+async fn finalize_rejects_concurrency_and_reports_runtime_failure()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let busy_state = test_state();
+    busy_state.install_running.store(true, Ordering::SeqCst);
+    let busy_headers = authenticated_headers(&busy_state)?;
+    let busy_error =
+        match api_finalize(axum::extract::State(busy_state), peer(), busy_headers).await {
+            Ok(_) => panic!("busy finalize should be rejected"),
+            Err(error) => error,
+        };
+    assert_eq!(busy_error.status, StatusCode::CONFLICT);
+
+    let state = test_state();
+    let headers = authenticated_headers(&state)?;
+    let error = match api_finalize(axum::extract::State(state.clone()), peer(), headers).await {
+        Ok(_) => panic!("test host without an installer state must reject finalize"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.hint.expect("finalize hint").contains("공식 웹 설치"));
+    assert!(!state.install_running.load(Ordering::SeqCst));
     Ok(())
 }
 

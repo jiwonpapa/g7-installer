@@ -71,7 +71,7 @@ apt-get update
 apt-get install -y ca-certificates curl
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT HUP INT TERM
-curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.8/bootstrap.sh -o "$tmp"
+curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.9/bootstrap.sh -o "$tmp"
 bash "$tmp"
 g7inst --version
 ```
@@ -187,7 +187,7 @@ sudo tail -120 /var/log/g7-lightsail-bootstrap.log
 sudo apt-get update
 sudo apt-get install -y ca-certificates curl
 tmp="$(mktemp)"
-curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.8/bootstrap.sh -o "$tmp"
+curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.9/bootstrap.sh -o "$tmp"
 sudo bash "$tmp"
 rm -f "$tmp"
 g7inst --version
@@ -243,13 +243,13 @@ SSH 접속 방식에 맞는 명령 하나만 실행합니다. SSH 연결, 터널
 Mac 터미널:
 
 ```bash
-ssh -i "$HOME/.ssh/lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.8/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$HOME/.ssh/lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.9/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 Windows PowerShell:
 
 ```powershell
-ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.8/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.9/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 ### SSH 비밀번호 방식
@@ -257,7 +257,7 @@ ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ub
 Mac 터미널과 Windows PowerShell에서 같은 명령을 사용합니다.
 
 ```bash
-ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.8/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.9/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 SSH 비밀번호와 sudo 비밀번호를 물으면 터미널에 입력합니다. 비밀번호는 명령어나 웹 화면에 넣지 않습니다.
@@ -281,15 +281,15 @@ http://127.0.0.1:7717/?token=...
 - 브라우저에 `G7 Installer` 화면이 뜹니다.
 - 서버 점검 단계가 보입니다.
 - 서버 세팅은 `패키지 설치/검증 -> 사이트 계정/웹루트 -> PHP/런타임 튜닝 -> 웹서버 vhost/HTTP 검증 -> DB 튜닝/계정 생성 -> SSL 인증서/HTTPS 검증 -> 웹앱 파일 배치 -> 완료 리포트` 순서로 진행됩니다. 완료 후 선택형 설치 안내서에서 설정 경로와 읽기 전용 구성 점검을 확인합니다.
-- 리포트에 `completed`가 보이면 서버 프로비저닝이 끝난 것입니다. 패키지, Nginx/Apache 도메인 연결, PHP/DB 튜닝, DB 계정, 앱 파일 배치, 설정 안내서 저장까지 완료된 상태입니다. CMS 관리자 설치 완료를 뜻하지는 않습니다.
-- 그누보드7은 GitHub 공식 최신 안정 Release와 필수 빌드 파일을 검증하고 `.env.example`에서 사이트 계정 전용 `0600` 권한의 `.env`를 준비한 뒤 공식 `/install`로 넘깁니다. 결과 리포트의 `앱 링크`를 열어 Composer/Vendor, 관리자 계정, 확장과 마이그레이션을 진행합니다.
+- 리포트에 `completed`가 보이면 서버 프로비저닝이 끝난 것입니다. CMS 관리자 설치와 G7 런타임 마무리 완료를 뜻하지는 않습니다.
+- 그누보드7은 GitHub 공식 최신 안정 Release와 Vite manifest 전체 참조 파일을 검증하고 `.env.example`에서 사이트 계정 전용 `0600` 권한의 `.env`를 준비한 뒤 공식 `/install`로 넘깁니다. 공식 설치 후 설치 안내서에서 `G7 런타임 설정 적용`을 실행하면 Redis 캐시·세션·큐, 스케줄러, Reverb, storage link와 Laravel 실효 설정을 검증합니다.
 - 중간 단계가 실패하면 `completed`로 표시하지 않습니다. 자동 문제 해결 기능은 없으며, 설치기가 변경 파일만 복원합니다. stderr와 실패 원인을 확인하고 설치기 업데이트나 입력·환경 수정 후 `수정 후 현재 단계 재실행`을 누릅니다. 완료된 단계는 다시 실행하지 않습니다.
 - 설치 완료 리포트의 `PHP 환경 요약`에서 PHP 버전, ini 경로, 시간대, 메모리/업로드/POST 한도, OPcache, PHP-FPM pool과 필수 확장을 확인합니다. 전체 `phpinfo()` 페이지는 공개하지 않습니다.
 - PHP-FPM과 DB 설정은 후보 파일 문법검사를 먼저 통과해야 활성 경로에 반영됩니다. 적용 후 검증이 실패해도 해당 단계에서 바꾼 설정 파일을 자동복원하며 기존 서비스 설정을 다시 불러옵니다.
-- `전체 초기화`는 현재 단계 재시도가 반복 실패하고 설치를 처음부터 포기할 때만 사용합니다. 확인창에 `초기화`를 입력해야 실행되며, G7 DB와 설치 잠금 파일이 있으면 이미 설치 완료된 사이트라고 경고합니다. 사이트 계정, 웹파일, DB/DB 계정, 서비스, 설정과 설치 패키지는 삭제되고 Let's Encrypt 인증서만 보존합니다.
+- `전체 초기화`는 현재 단계 재시도가 반복 실패하고 설치를 처음부터 포기할 때만 사용합니다. 확인창에 `초기화`를 입력해야 실행되며, G7 DB와 설치 잠금 파일이 있으면 이미 설치 완료된 사이트라고 경고합니다. 사이트 계정, 웹파일, DB/DB 계정, G7 설정 JSON, queue/scheduler/Reverb unit, 서비스와 설치 패키지는 삭제되고 Let's Encrypt 인증서만 보존합니다.
 - 사이트 계정과 `/home/계정/public_html` 웹루트가 만들어집니다.
 - DNS/IP와 SSL 발급이 통과하면 `https://도메인` 접속이 됩니다.
-- 서버에 `/var/log/g7-installer/setup-guide.md` 설정 안내서가 저장됩니다. 웹루트, DB, 인증서, PHP 런타임, 앱 systemd unit, 재시작 명령을 여기서 확인합니다.
+- 서버에 `/var/log/g7-installer/setup-guide.md` 설정 안내서가 저장됩니다. finalize 실행 결과, 웹루트, DB, 인증서, PHP 런타임, 앱 systemd unit, 재시작 명령을 여기서 확인합니다.
 - 설치 중에는 SSH 터널 창을 닫지 않습니다.
 
 ## 막히면 확인

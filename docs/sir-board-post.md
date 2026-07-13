@@ -25,12 +25,13 @@ GitHub: https://github.com/jiwonpapa/g7-installer
 - 도메인과 `www` DNS/IP 확인, vhost 생성, Let's Encrypt 인증서 발급 또는 기존 인증서 재사용·갱신 점검
 - 사이트 Linux 계정, 웹루트, DB와 DB 계정 생성
 - 그누보드7은 GitHub 공식 최신 안정 Release를 매번 받아 Git 무결성·필수 빌드 파일을 검증하고, `.env.example` 기반 `.env`를 사이트 계정 전용 `0600` 권한으로 준비
+- 공식 웹 설치 후 Redis 캐시·세션·큐, scheduler, Reverb, storage link와 Laravel 실효 설정을 후속 검증
 - 설치 중 실시간 로그, 중단 리포트, 안전한 이어서 진행, 상세 설정 안내서 제공
 
 ### 먼저 알아둘 범위
 
-- `completed`는 서버 프로비저닝 완료입니다. CMS 관리자 설치까지 끝났다는 뜻은 아닙니다.
-- 그누보드7은 결과 리포트의 `/install` 링크에서 공식 설치 화면을 한 번 더 진행합니다. Composer/Vendor, 관리자 계정, 확장, 마이그레이션은 그누보드7 공식 설치기가 담당합니다.
+- `completed`는 서버 프로비저닝 완료입니다. CMS 관리자 설치와 G7 런타임 마무리까지 끝났다는 뜻은 아닙니다.
+- 그누보드7은 결과 리포트의 `/install` 링크에서 공식 설치 화면을 진행한 뒤 설치 안내서의 `G7 런타임 설정 적용`으로 마무리합니다.
 - UFW, fail2ban, 기존 운영 서버 이전, 운영 데이터 백업은 범위 밖입니다. VPS 제공자 방화벽과 별도 유지보수 도구로 관리합니다.
 - 재설치 초기화는 신규 VPS 테스트용입니다. 운영 데이터가 있으면 먼저 VPS 스냅샷 또는 별도 백업을 만드세요. 기존 Let's Encrypt 인증서는 중복 발급 제한을 피하기 위해 보존 우선입니다.
 
@@ -46,19 +47,19 @@ GitHub: https://github.com/jiwonpapa/g7-installer
 `.pem` 개인키를 사용하는 Mac은 아래 한 줄을 실행합니다.
 
 ```bash
-ssh -i "$HOME/.ssh/YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.8/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$HOME/.ssh/YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.9/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 Windows PowerShell:
 
 ```powershell
-ssh -i "$env:USERPROFILE\.ssh\YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.8/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$env:USERPROFILE\.ssh\YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.9/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 SSH 비밀번호 로그인을 허용하는 VPS는 Mac과 Windows에서 아래 명령을 사용합니다.
 
 ```bash
-ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.8/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.9/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 SSH 비밀번호와 sudo 비밀번호는 터미널에만 입력합니다. 터미널에 출력된 아래 형태의 정확한 주소를 같은 PC 브라우저에서 엽니다. 설치가 끝날 때까지 터미널을 닫지 않습니다.

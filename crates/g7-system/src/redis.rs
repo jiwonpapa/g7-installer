@@ -33,9 +33,13 @@ pub fn config_get<R: CommandRunner>(
     )
 }
 
+pub fn ping<R: CommandRunner>(runner: &R) -> Result<CommandOutput, CommandError> {
+    runner.run(&CommandSpec::new("redis-cli").arg("--raw").arg("PING"))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{config_get, config_rewrite, config_set};
+    use super::{config_get, config_rewrite, config_set, ping};
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
 
@@ -46,10 +50,12 @@ mod tests {
         runner.push_output(CommandOutput::success("OK\n"));
         runner.push_output(CommandOutput::success("OK\n"));
         runner.push_output(CommandOutput::success("maxmemory\n134217728\n"));
+        runner.push_output(CommandOutput::success("PONG\n"));
 
         config_set(&runner, "maxmemory", "128mb")?;
         config_rewrite(&runner)?;
         config_get(&runner, "maxmemory")?;
+        ping(&runner)?;
         let recorded = runner.recorded();
 
         assert_eq!(recorded[0].program, OsString::from("redis-cli"));
@@ -59,6 +65,10 @@ mod tests {
             vec![OsString::from("CONFIG"), OsString::from("REWRITE")]
         );
         assert!(recorded[2].args.contains(&OsString::from("--raw")));
+        assert_eq!(
+            recorded[3].args,
+            vec![OsString::from("--raw"), OsString::from("PING")]
+        );
         Ok(())
     }
 }

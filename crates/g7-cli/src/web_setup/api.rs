@@ -686,6 +686,59 @@ pub(super) async fn api_provision_action(
     Ok(Json(action_report))
 }
 
+pub(super) async fn api_finalize(
+    axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> std::result::Result<impl IntoResponse, ApiError> {
+    let session = require_authenticated_session(&state, &headers, peer.ip())?;
+    require_csrf(&headers, &session)?;
+    if state.install_running.swap(true, Ordering::SeqCst) {
+        return Err(ApiError::conflict("another installer operation is running"));
+    }
+
+    emit_log(&state, "GnuBoard7 런타임 후속 설정 시작");
+    emit_progress(&state, "finalize", 5, "G7 후속 설정 준비");
+    let operation_id = format!(
+        "finalize-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_millis())
+    );
+    let worker_state = state.clone();
+    let running = state.install_running.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let _running_guard = InstallRunningGuard(running);
+        let observer = Arc::new(WebCommandObserver::new(
+            worker_state,
+            "finalize",
+            operation_id,
+        ));
+        let probe = SystemProbe::new(RealCommandRunner::with_observer(observer));
+        finalize::run_with_probe_and_paths(&probe, &finalize::FinalizePaths::system())
+    })
+    .await
+    .map_err(|error| {
+        state.install_running.store(false, Ordering::SeqCst);
+        ApiError::bad_request(format!("G7 후속 설정 작업이 중단되었습니다: {error}"))
+    })?;
+
+    match result {
+        Ok(report) => {
+            emit_progress(&state, "finalize", 100, "G7 후속 설정 완료");
+            emit_log(&state, "GnuBoard7 런타임 후속 설정 완료");
+            Ok(Json(report))
+        }
+        Err(error) => {
+            emit_progress(&state, "finalize", 100, "G7 후속 설정 실패");
+            emit_log(&state, format!("GnuBoard7 런타임 후속 설정 실패: {error}"));
+            Err(ApiError::bad_request(error).with_hint(
+                "GnuBoard7 공식 웹 설치가 완료됐는지와 실시간 로그의 실패 항목을 확인하세요.",
+            ))
+        }
+    }
+}
+
 pub(super) async fn api_reset(
     axum::extract::State(state): axum::extract::State<WebState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,

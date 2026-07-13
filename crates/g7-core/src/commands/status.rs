@@ -70,6 +70,17 @@ pub fn read() -> InstallerStatus {
         components.push(service_component(&probe, database_service));
         components.push(check_component(report, "tls", "certbot_checks"));
         components.push(check_component(report, "app", "app_checks"));
+        if report.get("app_profile").and_then(|value| value.as_str()) == Some("gnuboard7") {
+            components.push(check_component(report, "g7-finalize", "finalize_checks"));
+            if let Some(services) = report
+                .get("g7_runtime_services")
+                .and_then(|value| value.as_array())
+            {
+                for service in services.iter().filter_map(|value| value.as_str()) {
+                    components.push(service_component(&probe, service));
+                }
+            }
+        }
     }
 
     let problems = report.as_ref().map(report_problems).unwrap_or_default();
@@ -145,6 +156,7 @@ fn report_problems(report: &serde_json::Value) -> Vec<String> {
         "certbot_checks",
         "vhost_checks",
         "app_checks",
+        "finalize_checks",
     ];
     let mut problems = Vec::new();
     if let Some(problem) = report.get("problem").and_then(|value| value.as_str()) {
@@ -195,6 +207,9 @@ mod tests {
             ],
             "app_checks": [
                 {"name": "app-source", "status": "manual", "message": "finish in browser"}
+            ],
+            "finalize_checks": [
+                {"name": "vite-manifest", "status": "fail", "message": "asset missing"}
             ]
         });
 
@@ -208,7 +223,10 @@ mod tests {
         );
         assert_eq!(
             report_problems(&report),
-            vec!["certbot_checks.tls-config: certbot failed"]
+            vec![
+                "certbot_checks.tls-config: certbot failed",
+                "finalize_checks.vite-manifest: asset missing"
+            ]
         );
     }
 }

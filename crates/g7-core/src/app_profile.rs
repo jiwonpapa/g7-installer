@@ -155,7 +155,12 @@ const GNUBOARD7_PROFILE: AppProfile = AppProfile {
     document_root: DocumentRootStrategy::PublicSubdir,
     php_extensions: GNUBOARD7_EXTENSIONS,
     system_packages: &["git", "composer"],
-    services: &[],
+    services: &[
+        "g7-queue.service",
+        "g7-scheduler.service",
+        "g7-scheduler.timer",
+        "g7-reverb.service",
+    ],
     writable_paths: &["storage", "bootstrap/cache"],
     post_install_steps: &[
         "resolve and download the latest stable G7 release",
@@ -163,8 +168,13 @@ const GNUBOARD7_PROFILE: AppProfile = AppProfile {
         "copy .env.example to a site-owner-only .env file",
         "open the official browser installer at /install",
         "let the official installer configure Vendor, admin, extensions, and migrations",
+        "run g7inst finalize to apply G7 drivers and managed runtime services",
     ],
-    health_checks: &["GET /install", "official installer requirements pass"],
+    health_checks: &[
+        "GET /install",
+        "official installer requirements pass",
+        "G7 effective drivers and managed services pass after finalize",
+    ],
 };
 
 const GNUBOARD7_OCTANE_PROFILE: AppProfile = AppProfile {
@@ -176,14 +186,19 @@ const GNUBOARD7_OCTANE_PROFILE: AppProfile = AppProfile {
     document_root: DocumentRootStrategy::PublicSubdir,
     php_extensions: GNUBOARD7_EXTENSIONS,
     system_packages: &["git", "composer"],
-    services: &[],
+    services: &[
+        "g7-queue.service",
+        "g7-scheduler.service",
+        "g7-scheduler.timer",
+        "g7-reverb.service",
+    ],
     writable_paths: &["storage", "bootstrap/cache"],
     post_install_steps: &[
         "resolve and download the latest stable G7 release",
         "verify the Git checkout and bundled public assets",
         "copy .env.example to a site-owner-only .env file",
         "open the official browser installer at /install",
-        "configure optional long-running services only after app installation",
+        "run g7inst finalize to configure long-running services after app installation",
     ],
     health_checks: &["GET /install", "official installer requirements pass"],
 };
@@ -375,7 +390,8 @@ mod tests {
             "/home/g7/public_html/public"
         );
         assert!(profile.php_extensions.contains(&"pcntl"));
-        assert!(profile.services.is_empty());
+        assert!(profile.services.contains(&"g7-queue.service"));
+        assert!(profile.services.contains(&"g7-reverb.service"));
         assert!(!profile.system_packages.contains(&"npm"));
         assert!(
             profile

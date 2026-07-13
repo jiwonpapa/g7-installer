@@ -12,5 +12,7 @@ pub mod defaults;
 pub mod error;
 pub mod installer_paths;
 pub mod resource_policy;
+pub mod runtime_resources;
+mod vite_manifest;
 
 pub use error::{Error, Result};

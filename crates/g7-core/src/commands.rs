@@ -5,6 +5,7 @@
 //! only perform tracked changes that can be reported and reset safely.
 
 pub mod doctor;
+pub mod finalize;
 pub mod install;
 pub mod logs;
 pub mod plan;

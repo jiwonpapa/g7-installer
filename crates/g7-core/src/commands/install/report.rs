@@ -789,6 +789,19 @@ pub(super) fn setup_guide_content(
     if plan.mail_mode == "local-postfix" {
         content.push_str("- Postfix config: `/etc/postfix/main.cf`\n");
     }
+    if plan.app_profile == "gnuboard7" {
+        content.push_str(&format!(
+            "- G7 드라이버 설정: `{}/storage/app/settings/drivers.json`\n",
+            plan.web_root
+        ));
+        content.push_str(&format!(
+            "- G7 메일 설정: `{}/storage/app/settings/mail.json`\n",
+            plan.web_root
+        ));
+        for path in crate::runtime_resources::G7_RUNTIME_FILES {
+            content.push_str(&format!("- G7 runtime systemd unit: `{path}`\n"));
+        }
+    }
     for unit in app_runtime_unit_names(plan) {
         content.push_str(&format!(
             "- 앱 systemd unit: `{}`\n",
@@ -873,6 +886,15 @@ pub(super) fn setup_guide_content(
     if plan.mail_mode == "local-postfix" {
         content.push_str("- Postfix 상태: `sudo systemctl status postfix`\n");
         content.push_str("- Postfix 재시작: `sudo systemctl restart postfix`\n");
+    }
+    if plan.app_profile == "gnuboard7" {
+        content.push_str("- G7 공식 웹 설치 후 런타임 적용: `sudo g7inst finalize`\n");
+        content.push_str("- G7 큐 상태: `sudo systemctl status g7-queue.service`\n");
+        content.push_str("- G7 큐 재시작: `sudo systemctl restart g7-queue.service`\n");
+        content.push_str("- G7 스케줄 타이머 상태: `sudo systemctl status g7-scheduler.timer`\n");
+        content.push_str("- G7 스케줄 수동 실행: `sudo systemctl start g7-scheduler.service`\n");
+        content.push_str("- G7 Reverb 상태: `sudo systemctl status g7-reverb.service`\n");
+        content.push_str("- G7 Reverb 재시작: `sudo systemctl restart g7-reverb.service`\n");
     }
     for unit in app_runtime_unit_names(plan) {
         if unit.ends_with(".timer") {

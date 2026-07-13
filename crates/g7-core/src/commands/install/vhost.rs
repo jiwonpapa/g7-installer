@@ -425,6 +425,7 @@ pub(super) fn apache_http_modules() -> &'static [&'static str] {
         "mpm_event",
         "proxy",
         "proxy_fcgi",
+        "proxy_wstunnel",
         "setenvif",
         "rewrite",
         "headers",
@@ -438,6 +439,7 @@ pub(super) fn apache_tls_modules() -> &'static [&'static str] {
         "http2",
         "proxy",
         "proxy_fcgi",
+        "proxy_wstunnel",
         "setenvif",
         "rewrite",
         "headers",
@@ -465,8 +467,9 @@ pub(super) fn apache_vhost_content_with_socket(
     let redirect_blocks = apache_http_redirect_blocks(plan);
     let (server_name, aliases) = apache_app_hosts(plan);
     let server_alias = apache_server_alias_line(&aliases);
+    let websocket_proxy = apache_g7_websocket_proxy(plan);
     format!(
-        "{redirect_blocks}<VirtualHost *:80>\n    ServerName {server_name}\n{server_alias}    DocumentRoot {root}\n\n    ErrorLog ${{APACHE_LOG_DIR}}/g7-error.log\n    CustomLog ${{APACHE_LOG_DIR}}/g7-access.log combined\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n\n    <FilesMatch \\.php$>\n        SetHandler \"proxy:unix:{php_socket}|fcgi://localhost/\"\n    </FilesMatch>\n\n    <FilesMatch \"^\\.\">\n        Require all denied\n    </FilesMatch>\n</VirtualHost>\n",
+        "{redirect_blocks}<VirtualHost *:80>\n    ServerName {server_name}\n{server_alias}    DocumentRoot {root}\n\n    ErrorLog ${{APACHE_LOG_DIR}}/g7-error.log\n    CustomLog ${{APACHE_LOG_DIR}}/g7-access.log combined\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n\n{websocket_proxy}    <FilesMatch \\.php$>\n        SetHandler \"proxy:unix:{php_socket}|fcgi://localhost/\"\n    </FilesMatch>\n\n    <FilesMatch \"^\\.\">\n        Require all denied\n    </FilesMatch>\n</VirtualHost>\n",
         root = plan.app_document_root,
     )
 }
@@ -476,9 +479,10 @@ pub(super) fn nginx_frankenphp_vhost_content(plan: &plan::InstallPlan) -> String
     let redirect_blocks = nginx_redirect_blocks(plan);
     let certbot_http01_location = nginx_certbot_http01_challenge_location();
     let proxy = nginx_frankenphp_proxy_location();
+    let websocket_proxy = nginx_g7_websocket_proxy(plan);
 
     format!(
-        "{redirect_blocks}server {{\n    listen 80;\n    listen [::]:80;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n{certbot_http01_location}{proxy}\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
+        "{redirect_blocks}server {{\n    listen 80;\n    listen [::]:80;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n{certbot_http01_location}{websocket_proxy}{proxy}\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
         root = plan.app_document_root,
     )
 }
@@ -492,9 +496,10 @@ pub(super) fn nginx_vhost_content_with_socket_and_sizing(
     let redirect_blocks = nginx_redirect_blocks(plan);
     let certbot_http01_location = nginx_certbot_http01_challenge_location();
     let runtime_directives = nginx_server_runtime_directives(sizing);
+    let websocket_proxy = nginx_g7_websocket_proxy(plan);
 
     format!(
-        "{redirect_blocks}server {{\n    listen 80;\n    listen [::]:80;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n{runtime_directives}{certbot_http01_location}\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
+        "{redirect_blocks}server {{\n    listen 80;\n    listen [::]:80;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n{runtime_directives}{certbot_http01_location}{websocket_proxy}\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
         root = plan.app_document_root,
     )
 }
@@ -520,6 +525,20 @@ pub(super) fn nginx_certbot_http01_challenge_location() -> &'static str {
 
 pub(super) fn nginx_frankenphp_proxy_location() -> &'static str {
     "    location / {\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_set_header X-Forwarded-Host $host;\n        proxy_set_header X-Forwarded-Port $server_port;\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection \"upgrade\";\n        proxy_read_timeout 120s;\n        proxy_send_timeout 120s;\n        proxy_pass http://127.0.0.1:7080;\n    }\n"
+}
+
+pub(super) fn nginx_g7_websocket_proxy(plan: &plan::InstallPlan) -> &'static str {
+    if plan.app_profile != "gnuboard7" || plan.redis_mode != "enable" {
+        return "";
+    }
+    "    location ~ ^/apps?(/|$) {\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection \"upgrade\";\n        proxy_read_timeout 60s;\n        proxy_send_timeout 60s;\n        proxy_pass http://127.0.0.1:8080;\n    }\n\n"
+}
+
+pub(super) fn apache_g7_websocket_proxy(plan: &plan::InstallPlan) -> &'static str {
+    if plan.app_profile != "gnuboard7" || plan.redis_mode != "enable" {
+        return "";
+    }
+    "    ProxyPass \"/apps\" \"http://127.0.0.1:8080/apps\" nocanon\n    ProxyPassReverse \"/apps\" \"http://127.0.0.1:8080/apps\"\n    ProxyPass \"/app\" \"ws://127.0.0.1:8080/app\" nocanon\n    ProxyPassReverse \"/app\" \"ws://127.0.0.1:8080/app\"\n\n"
 }
 
 pub(super) fn nginx_app_hosts(plan: &plan::InstallPlan) -> String {
@@ -646,9 +665,10 @@ pub(super) fn nginx_tls_vhost_content(
     let canonical_redirect = nginx_https_canonical_redirect(plan);
     let certbot_http01_location = nginx_certbot_http01_challenge_location();
     let runtime_directives = nginx_server_runtime_directives(sizing);
+    let websocket_proxy = nginx_g7_websocket_proxy(plan);
 
     format!(
-        "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {http_hosts};\n    root {root};\n\n{certbot_http01_location}\n    location / {{\n        return 301 https://{https_host}$request_uri;\n    }}\n}}\n\n{canonical_redirect}server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    ssl_certificate /etc/letsencrypt/live/{cert_name}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{cert_name}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_prefer_server_ciphers off;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    add_header X-Content-Type-Options nosniff always;\n    add_header X-Frame-Options SAMEORIGIN always;\n    add_header Referrer-Policy strict-origin-when-cross-origin always;\n\n{runtime_directives}{certbot_http01_location}\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
+        "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {http_hosts};\n    root {root};\n\n{certbot_http01_location}\n    location / {{\n        return 301 https://{https_host}$request_uri;\n    }}\n}}\n\n{canonical_redirect}server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    ssl_certificate /etc/letsencrypt/live/{cert_name}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{cert_name}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_prefer_server_ciphers off;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    add_header X-Content-Type-Options nosniff always;\n    add_header X-Frame-Options SAMEORIGIN always;\n    add_header Referrer-Policy strict-origin-when-cross-origin always;\n\n{runtime_directives}{certbot_http01_location}{websocket_proxy}\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
         root = plan.app_document_root,
     )
 }
@@ -661,9 +681,10 @@ pub(super) fn nginx_frankenphp_tls_vhost_content(plan: &plan::InstallPlan) -> St
     let canonical_redirect = nginx_https_canonical_redirect(plan);
     let certbot_http01_location = nginx_certbot_http01_challenge_location();
     let proxy = nginx_frankenphp_proxy_location();
+    let websocket_proxy = nginx_g7_websocket_proxy(plan);
 
     format!(
-        "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {http_hosts};\n    root {root};\n\n{certbot_http01_location}\n    location / {{\n        return 301 https://{https_host}$request_uri;\n    }}\n}}\n\n{canonical_redirect}server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    ssl_certificate /etc/letsencrypt/live/{cert_name}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{cert_name}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_prefer_server_ciphers off;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    add_header X-Content-Type-Options nosniff always;\n    add_header X-Frame-Options SAMEORIGIN always;\n    add_header Referrer-Policy strict-origin-when-cross-origin always;\n\n{certbot_http01_location}{proxy}\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
+        "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {http_hosts};\n    root {root};\n\n{certbot_http01_location}\n    location / {{\n        return 301 https://{https_host}$request_uri;\n    }}\n}}\n\n{canonical_redirect}server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    ssl_certificate /etc/letsencrypt/live/{cert_name}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{cert_name}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_prefer_server_ciphers off;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    add_header X-Content-Type-Options nosniff always;\n    add_header X-Frame-Options SAMEORIGIN always;\n    add_header Referrer-Policy strict-origin-when-cross-origin always;\n\n{certbot_http01_location}{websocket_proxy}{proxy}\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
         root = plan.app_document_root,
     )
 }
@@ -674,8 +695,9 @@ pub(super) fn apache_tls_vhost_content(plan: &plan::InstallPlan, php_socket: &st
     let canonical_redirect = apache_https_canonical_redirect(plan);
     let (server_name, aliases) = apache_app_hosts(plan);
     let server_alias = apache_server_alias_line(&aliases);
+    let websocket_proxy = apache_g7_websocket_proxy(plan);
     format!(
-        "<VirtualHost *:80>\n    ServerName {primary_host}\n    ServerAlias {http_hosts}\n    DocumentRoot {root}\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride None\n        Require all granted\n    </Directory>\n\n    RewriteEngine On\n    RewriteCond %{{REQUEST_URI}} !^/\\.well-known/acme-challenge/\n    RewriteRule ^ https://%{{HTTP_HOST}}%{{REQUEST_URI}} [R=301,L]\n</VirtualHost>\n\n{canonical_redirect}<VirtualHost *:443>\n    ServerName {server_name}\n{server_alias}    DocumentRoot {root}\n\n    ErrorLog ${{APACHE_LOG_DIR}}/g7-error.log\n    CustomLog ${{APACHE_LOG_DIR}}/g7-access.log combined\n\n    SSLEngine on\n    SSLCertificateFile /etc/letsencrypt/live/{cert_name}/fullchain.pem\n    SSLCertificateKeyFile /etc/letsencrypt/live/{cert_name}/privkey.pem\n    Protocols h2 http/1.1\n\n    Header always set X-Content-Type-Options \"nosniff\"\n    Header always set X-Frame-Options \"SAMEORIGIN\"\n    Header always set Referrer-Policy \"strict-origin-when-cross-origin\"\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n\n    <FilesMatch \\.php$>\n        SetHandler \"proxy:unix:{php_socket}|fcgi://localhost/\"\n    </FilesMatch>\n\n    <FilesMatch \"^\\.\">\n        Require all denied\n    </FilesMatch>\n</VirtualHost>\n",
+        "<VirtualHost *:80>\n    ServerName {primary_host}\n    ServerAlias {http_hosts}\n    DocumentRoot {root}\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride None\n        Require all granted\n    </Directory>\n\n    RewriteEngine On\n    RewriteCond %{{REQUEST_URI}} !^/\\.well-known/acme-challenge/\n    RewriteRule ^ https://%{{HTTP_HOST}}%{{REQUEST_URI}} [R=301,L]\n</VirtualHost>\n\n{canonical_redirect}<VirtualHost *:443>\n    ServerName {server_name}\n{server_alias}    DocumentRoot {root}\n\n    ErrorLog ${{APACHE_LOG_DIR}}/g7-error.log\n    CustomLog ${{APACHE_LOG_DIR}}/g7-access.log combined\n\n    SSLEngine on\n    SSLCertificateFile /etc/letsencrypt/live/{cert_name}/fullchain.pem\n    SSLCertificateKeyFile /etc/letsencrypt/live/{cert_name}/privkey.pem\n    Protocols h2 http/1.1\n\n    Header always set X-Content-Type-Options \"nosniff\"\n    Header always set X-Frame-Options \"SAMEORIGIN\"\n    Header always set Referrer-Policy \"strict-origin-when-cross-origin\"\n\n    <Directory {root}>\n        Options FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n\n{websocket_proxy}    <FilesMatch \\.php$>\n        SetHandler \"proxy:unix:{php_socket}|fcgi://localhost/\"\n    </FilesMatch>\n\n    <FilesMatch \"^\\.\">\n        Require all denied\n    </FilesMatch>\n</VirtualHost>\n",
         primary_host = primary_http_host(plan),
         root = plan.app_document_root,
     )

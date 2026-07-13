@@ -470,6 +470,10 @@ pub(super) fn provisioning_sections(input: ProvisioningInput<'_>) -> Vec<Provisi
                 ),
                 ProvisioningSetting::new("max_execution_time", "120초 기본 후보"),
                 ProvisioningSetting::new(
+                    "max_input_vars",
+                    "5000 - G7 공식 권장 복합 입력 한도",
+                ),
+                ProvisioningSetting::new(
                     "opcache_memory_by_ram",
                     preset_matrix(|preset| preset.opcache_memory),
                 ),

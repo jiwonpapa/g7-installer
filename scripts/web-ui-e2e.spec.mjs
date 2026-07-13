@@ -65,7 +65,7 @@ function mockReport() {
     network_checks: [],
     runtime_checks: [
       { name: "phpinfo-summary", status: "pass", message: "FPM ini 기준 PHP 정보를 파싱했습니다: PHP 8.5.8, SAPI=cli, ini=/etc/php/8.5/fpm/php.ini, scan_dir=/etc/php/8.5/fpm/conf.d, timezone=Asia/Seoul." },
-      { name: "php-runtime-limits", status: "pass", message: "PHP 한도 적용 확인: memory_limit=256M, upload_max_filesize=64M, post_max_size=72M, max_execution_time=120, max_input_vars=3000, opcache.memory_consumption=128." },
+      { name: "php-runtime-limits", status: "pass", message: "PHP 한도 적용 확인: memory_limit=256M, upload_max_filesize=64M, post_max_size=72M, max_execution_time=120, max_input_vars=5000, opcache.memory_consumption=128." },
       { name: "php-fpm-pool-values", status: "pass", message: "PHP-FPM pool 확인: user=g7devops, group=www-data, pm=ondemand, max_children=8, max_requests=500." },
       { name: "php-extension:mbstring", status: "pass", message: "PHP 확장 mbstring 로드 확인." },
       { name: "php-extension:redis", status: "pass", message: "PHP 확장 redis 로드 확인." },
@@ -145,6 +145,7 @@ async function asset(pathname) {
 async function startServer(options = {}) {
   let installPrepared = false;
   let installFailed = false;
+  let activeReport = structuredClone(options.report || mockReport());
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     const pathname = url.pathname;
@@ -231,7 +232,7 @@ async function startServer(options = {}) {
       json(response, {
         exists: true,
         path: "/var/log/g7-installer/report.json",
-        content: JSON.stringify(options.report || mockReport()),
+        content: JSON.stringify(activeReport),
       });
       return;
     }
@@ -272,7 +273,7 @@ async function startServer(options = {}) {
         return;
       }
       installPrepared = true;
-      json(response, mockReport());
+      json(response, activeReport);
       return;
     }
     if (pathname === "/api/reset") {
@@ -291,6 +292,28 @@ async function startServer(options = {}) {
         status: "manual",
         message: "보안 경계는 현재 안내 모드입니다.",
         checks: [{ name: "security-policy", status: "manual", message: "SSH와 VPS 제공자 포트 정책을 확인하세요." }],
+      });
+      return;
+    }
+    if (pathname === "/api/finalize") {
+      const checks = [
+        { name: "browser-install", status: "pass", message: "GnuBoard7 공식 웹 설치 완료 표식을 확인했습니다." },
+        { name: "g7-settings", status: "pass", message: "Redis, 세션, 큐, 웹소켓, 메일 설정을 저장했습니다." },
+        { name: "runtime-services", status: "pass", message: "Queue, Scheduler, Reverb 서비스를 확인했습니다." },
+      ];
+      activeReport = {
+        ...activeReport,
+        finalize_phase: "pass",
+        finalize_message: "GnuBoard7 후속 런타임 설정과 검증이 완료되었습니다.",
+        finalize_checks: checks,
+        g7_runtime_services: ["g7-scheduler.timer", "g7-queue.service", "g7-reverb.service"],
+      };
+      json(response, {
+        status: "pass",
+        message: activeReport.finalize_message,
+        checks,
+        services: activeReport.g7_runtime_services,
+        owned_files: activeReport.owned_files,
       });
       return;
     }
@@ -370,6 +393,13 @@ test("wizard routes render concise result and optional setup guide", async ({ pa
 
     await page.getByRole("button", { name: "설정 파일/값 확인" }).nth(2).click();
     await expect(page.locator("#provision-action-details code").filter({ hasText: "/etc/mysql/conf.d/g7-installer.cnf" })).toBeVisible();
+    await page.locator("#provision-action-dialog").getByRole("button", { name: "닫기" }).click();
+
+    await expect(page.getByRole("heading", { name: "G7 런타임 마무리" })).toBeVisible();
+    await page.getByRole("button", { name: "G7 런타임 설정 적용" }).click();
+    await expect(page.getByText("G7 런타임 설정 완료", { exact: true })).toBeVisible();
+    await expect(page.getByText("적용 완료", { exact: true })).toBeVisible();
+    await expect(page.getByText("Queue, Scheduler, Reverb 서비스를 확인했습니다.", { exact: true })).toBeVisible();
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -561,6 +591,32 @@ test("legacy saved database options migrate to MySQL 8.0", async ({ page }) => {
 
     await expect(page.locator('input[name="database"]')).toHaveValue("mysql");
     await expect(page.locator('select[name="database_version"]')).toHaveValue("8.0");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("fresh server report clears a stale completed app badge", async ({ page }) => {
+  const { server, baseUrl } = await startServer({ reportExists: false });
+  try {
+    await page.goto(`${baseUrl}/setup/install?token=e2e`);
+    await page.evaluate(() => {
+      sessionStorage.setItem("g7inst-wizard-state-v2", JSON.stringify({
+        activeStep: "install",
+        flags: {
+          doctorPassed: true,
+          planReady: true,
+          reportReady: true,
+          installRunning: false,
+          installCompleted: true,
+          currentOperation: null,
+        },
+      }));
+    });
+    await page.reload();
+
+    await expect(page.locator("#install-app-state")).toHaveText("대기");
+    await expect(page.locator("#install-app-summary")).toHaveAttribute("data-status", "pending");
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

@@ -4,6 +4,27 @@
 
 ## Unreleased
 
+## 0.3.0-beta.9 - 2026-07-13
+
+### Added
+
+- G7 공식 웹 설치 후 SettingsService를 통한 Redis 캐시·세션·큐, scheduler, Reverb, storage link 후속 설정 명령과 웹 액션 추가
+- Redis PING, Reverb 내부 포트, Laravel 실효 설정값, Vite manifest 전체 참조 파일 검증 추가
+
+### Changed
+
+- G7 queue/scheduler/Reverb systemd unit과 앱 settings JSON을 초기화 소유 자원으로 등록하고 설정 안내서에 상태·경로·운영 명령 기록
+- Nginx/Apache에 G7 Reverb `/app`, `/apps` 프록시를 웹서버별 문법으로 적용
+
+### Fixed
+
+- 초기화에서 `g7-scheduler.service`와 후속 런타임 설정이 남을 수 있던 누락 수정
+- 초기화 후 제거된 systemd 서비스의 과거 실패 상태까지 `reset-failed`로 정리
+- 초기화가 이미 제거된 systemd unit의 `not loaded` 응답을 실제 실패로 오인하던 문제 수정
+- G7 공식 권장값에 맞춰 PHP `max_input_vars`를 5000으로 상향하고 설치 계획과 실효값 검증을 통일
+- 공식 Release clone의 Vite manifest 참조 파일 누락을 앱 인계 전에 정확한 파일명으로 차단
+- 서버 리포트가 없는 fresh 상태에서 이전 브라우저 세션의 앱 완료 표시가 남던 문제 수정
+
 ## 0.3.0-beta.8 - 2026-07-13
 
 ### Added

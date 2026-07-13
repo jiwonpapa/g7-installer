@@ -61,6 +61,7 @@ pub(super) fn build_router(state: WebState) -> Router {
         .route("/api/plan", post(api_plan))
         .route("/api/install/prepare", post(api_install_prepare))
         .route("/api/install/resume", post(api_resume))
+        .route("/api/finalize", post(api_finalize))
         .route("/api/provision/action", post(api_provision_action))
         .route("/api/reset", post(api_reset))
         .route("/api/rollback", post(api_rollback))

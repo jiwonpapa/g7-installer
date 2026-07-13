@@ -9,7 +9,8 @@
 
 use clap::{Parser, Subcommand};
 use g7_core::commands::{
-    DoctorCheckStatus, doctor, install, logs, plan, reset, rollback, self_update, status, update,
+    DoctorCheckStatus, doctor, finalize, install, logs, plan, reset, rollback, self_update, status,
+    update,
 };
 use miette::Result;
 
@@ -205,6 +206,8 @@ enum Command {
     Resume,
     /// Show installer log location.
     Logs,
+    /// Apply GnuBoard7 runtime settings after its official browser installer completes.
+    Finalize,
     /// Remove installer-created app, DB, account, services, packages, and metadata for reinstall.
     Reset {
         /// Confirm removal of installer-created resources.
@@ -380,6 +383,7 @@ async fn main() -> Result<()> {
             print_install(install::resume().map_err(miette::Report::new)?);
         }
         Command::Logs => print_logs(logs::location()),
+        Command::Finalize => print_finalize(finalize::run().map_err(miette::Report::new)?),
         Command::Reset { yes, dry_run } => {
             print_reset(reset::run(yes, dry_run).map_err(miette::Report::new)?);
         }
@@ -395,6 +399,14 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn print_finalize(report: finalize::FinalizeReport) {
+    println!("G7 Installer Finalize: {}", report.status);
+    println!("{}", report.message);
+    for check in report.checks {
+        println!("[{}] {} - {}", check.status, check.name, check.message);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

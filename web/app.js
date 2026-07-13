@@ -3472,7 +3472,31 @@ function renderProvisionPanel(report = currentReport()) {
   }
 
   const actions = provisioningActions(report);
+  const finalized = report.finalize_phase === "pass";
+  const finalizeFailed = report.finalize_phase === "fail";
+  const finalizeStatus = finalized ? "pass" : finalizeFailed ? "fail" : "manual";
   nodes.provisionOutput.innerHTML = `
+    <section class="report-card runtime-finalize-card" data-status="${finalizeStatus}">
+      <div class="provisioning-actions-heading">
+        <div>
+          <h3>${iconMarkup(finalized ? "circle-check-big" : "workflow")} G7 런타임 마무리</h3>
+          <p>${finalized
+            ? "Redis·Queue·Scheduler·Reverb·메일·저장소 설정과 서비스 검증이 완료됐습니다."
+            : finalizeFailed
+              ? "후속 설정 검증에 실패했습니다. 아래 실패 항목을 확인한 뒤 다시 검증하세요."
+            : "GnuBoard7 공식 웹 설치를 마친 뒤 서버 런타임 설정과 서비스를 적용합니다."}</p>
+        </div>
+        <strong data-status="${finalizeStatus}">${finalized ? "적용 완료" : finalizeFailed ? "검증 실패" : "적용 필요"}</strong>
+      </div>
+      <div class="provisioning-action-buttons">
+        <button class="btn btn-primary icon-button" type="button" data-icon="${finalized ? "refresh-cw" : "play"}" data-finalize-run>
+          ${finalized ? "설정 재검증" : "G7 런타임 설정 적용"}
+        </button>
+      </div>
+      ${Array.isArray(report.finalize_checks) && report.finalize_checks.length
+        ? `<div class="result-list mt-3">${checkRowsHtml(report.finalize_checks)}</div>`
+        : ""}
+    </section>
     <section class="report-card provisioning-actions">
       <div class="provisioning-actions-heading">
         <div>
@@ -3499,6 +3523,33 @@ function renderProvisionPanel(report = currentReport()) {
     </section>
   `;
   hydrateIcons(nodes.provisionOutput);
+}
+
+async function runG7Finalize(button) {
+  await withBusy(button, "적용 중", async () => {
+    try {
+      const result = await apiFetch("/api/finalize", { method: "POST" });
+      const reportPayload = await apiFetch("/api/report");
+      state.savedReportPayload = reportPayload;
+      renderProvisionPanel(parseSavedReport(reportPayload));
+      setAlert(
+        nodes.provisionStatus,
+        result.status === "pass" ? "success" : "error",
+        result.status === "pass" ? "G7 런타임 설정 완료" : "G7 런타임 설정 확인 필요",
+        result.message,
+      );
+      log(`G7 런타임 설정: ${result.status}`);
+      saveWizardState();
+    } catch (error) {
+      setAlert(nodes.provisionStatus, "error", "G7 런타임 설정 실패", formatError(error));
+      log(formatError(error));
+      const reportPayload = await apiFetch("/api/report").catch(() => null);
+      if (reportPayload?.exists) {
+        state.savedReportPayload = reportPayload;
+        renderProvisionPanel(parseSavedReport(reportPayload));
+      }
+    }
+  });
 }
 
 function provisioningActions(report = {}) {
@@ -3605,6 +3656,34 @@ function provisioningActions(report = {}) {
         "grants = 앱 DB에 대한 최소 권한",
       ],
     }),
+    ...(selectedApp === "gnuboard7" ? [provisioningAction("g7-runtime", "G7 런타임", report.finalize_checks, {
+      summary: "G7 드라이버 설정과 Queue, Scheduler, Reverb 서비스의 실효 상태를 확인합니다.",
+      command: "sudo systemctl is-active g7-scheduler.timer g7-queue.service g7-reverb.service",
+      settings: [
+        ["후속 설정", report.finalize_phase === "pass" ? "완료" : "적용 필요"],
+        ["캐시/세션/큐", report.redis === "enable" ? "Redis" : "File/File/Sync"],
+        ["스케줄러", "g7-scheduler.timer"],
+        ["큐 워커", report.redis === "enable" ? "g7-queue.service" : "사용 안 함"],
+        ["웹소켓", report.redis === "enable" ? "g7-reverb.service / 127.0.0.1:8080" : "사용 안 함"],
+      ],
+      files: [
+        configFile(`${appRoot}/storage/app/settings/drivers.json`, "G7 캐시, 세션, 큐, Redis, Reverb 설정", true),
+        configFile(`${appRoot}/storage/app/settings/mail.json`, "G7 메일 발송 설정", true),
+        configFile("/etc/systemd/system/g7-scheduler.service", "G7 스케줄 단발 실행 unit"),
+        configFile("/etc/systemd/system/g7-scheduler.timer", "G7 매분 스케줄 timer"),
+        ...(report.redis === "enable" ? [
+          configFile("/etc/systemd/system/g7-queue.service", "G7 Redis 큐 워커 unit"),
+          configFile("/etc/systemd/system/g7-reverb.service", "G7 Reverb 웹소켓 unit"),
+        ] : []),
+      ],
+      preview: [
+        `cache_driver = ${report.redis === "enable" ? "redis" : "file"}`,
+        `session_driver = ${report.redis === "enable" ? "redis" : "file"}`,
+        `queue_driver = ${report.redis === "enable" ? "redis" : "sync"}`,
+        `websocket_enabled = ${report.redis === "enable"}`,
+        "secrets = ******",
+      ],
+    })] : []),
     provisioningAction("ssl", "SSL/Certbot", report.certbot_checks, {
       summary: "기존 인증서와 자동 갱신 타이머 상태를 확인합니다. 발급과 갱신 테스트는 실행하지 않습니다.",
       command: `sudo certbot certificates --cert-name ${certName} && sudo systemctl is-active certbot.timer`,
@@ -4462,11 +4541,10 @@ async function syncServerState() {
     } else {
       state.savedReportPayload = reportPayload;
       if (!state.installRunning) {
+        state.installCompleted = false;
+        setInstallSummaryStatus("pending", "대기");
         setReportReady(false);
-        if (!state.planReady) {
-          state.installCompleted = false;
-          refreshInstallButtonState();
-        }
+        refreshInstallButtonState();
       }
     }
     saveWizardState();
@@ -4766,6 +4844,11 @@ function bindEvents() {
   });
 
   document.addEventListener("click", async (event) => {
+    const finalizeButton = event.target.closest("[data-finalize-run]");
+    if (finalizeButton) {
+      void runG7Finalize(finalizeButton);
+      return;
+    }
     const button = event.target.closest("[data-provision-open]");
     if (!button) {
       return;

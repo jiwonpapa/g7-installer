@@ -14,6 +14,7 @@ use crate::installer_paths::{
     NGINX_MAIN_BACKUP_PATH, NGINX_MAIN_CONFIG_PATH, REPORT_PATH,
 };
 use crate::resource_policy::{preserve_package_on_reset, preserve_service_on_reset};
+use crate::runtime_resources::G7_RUNTIME_SERVICES;
 use crate::{Error, Result};
 use g7_state::owned_files::{OWNED_FILES_PATH, read_owned_files};
 use g7_system::SystemProbe;
@@ -38,11 +39,12 @@ const ONDREJ_PHP_SOURCE_PATHS: [&str; 3] = [
     "/etc/apt/sources.list.d/ondrej-ubuntu-php-noble.list",
     "/etc/apt/sources.list.d/ondrej-php.list",
 ];
-const APP_SYSTEMD_UNITS: [&str; 6] = [
+const APP_SYSTEMD_UNITS: [&str; 7] = [
     "g7-frankenphp.service",
-    "g7-queue.service",
-    "g7-scheduler.timer",
-    "g7-reverb.service",
+    G7_RUNTIME_SERVICES[0],
+    G7_RUNTIME_SERVICES[1],
+    G7_RUNTIME_SERVICES[2],
+    G7_RUNTIME_SERVICES[3],
     "laravel-queue.service",
     "laravel-scheduler.timer",
 ];
@@ -240,6 +242,19 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             "reloaded",
             "systemd unit cache reloaded after service file removal",
         ));
+        if !services.is_empty() {
+            let output = probe
+                .systemd_reset_failed(&services)
+                .map_err(command_error)?;
+            if output.status != 0 && !systemd_reset_failed_reports_only_missing(&output) {
+                require_success("systemd-reset-failed", "systemctl reset-failed", output)?;
+            }
+            actions.push(ResetAction::new(
+                "systemd:reset-failed",
+                "cleared",
+                "설치기가 제거한 서비스의 과거 실패 상태를 정리했습니다. 이미 제거된 unit은 건너뛰었습니다.",
+            ));
+        }
     } else if dry_run && files_contain_systemd_units(&removed) {
         actions.push(ResetAction::new(
             "systemd:daemon-reload",
@@ -766,6 +781,21 @@ fn service_disable_reports_missing(output: &CommandOutput) -> bool {
         || text.contains("could not be found")
 }
 
+fn systemd_reset_failed_reports_only_missing(output: &CommandOutput) -> bool {
+    let text = format!("{}\n{}", output.stdout, output.stderr);
+    let mut lines = text.lines().map(str::trim).filter(|line| !line.is_empty());
+    let Some(first) = lines.next() else {
+        return false;
+    };
+    std::iter::once(first).chain(lines).all(|line| {
+        let line = line.to_ascii_lowercase();
+        line.contains("failed to reset failed state of unit")
+            && (line.contains("not loaded")
+                || line.contains("not found")
+                || line.contains("could not be found"))
+    })
+}
+
 fn reset_packages<R: CommandRunner>(
     probe: &SystemProbe<R>,
     packages: &[String],
@@ -1199,10 +1229,12 @@ fn files_contain_systemd_units(files: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        ResetMetadata, ResetPaths, delete_site_user_account, reset_database, reset_mysql_data_dir,
-        reset_packages, run_with_probe_and_paths, validate_reset_path,
+        APP_SYSTEMD_UNITS, ResetMetadata, ResetPaths, delete_site_user_account, reset_database,
+        reset_mysql_data_dir, reset_packages, run_with_probe_and_paths,
+        systemd_reset_failed_reports_only_missing, validate_reset_path,
     };
     use crate::installer_paths::MYSQL_CONFIG_CANDIDATE_PATH;
+    use crate::runtime_resources::{G7_RUNTIME_FILES, G7_RUNTIME_SERVICES};
     use g7_state::owned_files::{OWNED_FILES_PATH, OwnedFiles, write_owned_files};
     use g7_system::SystemProbe;
     use g7_system::command::{CommandError, CommandOutput, FakeCommandRunner};
@@ -1211,6 +1243,21 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[test]
+    fn systemd_reset_failed_accepts_only_absent_installer_units() {
+        let absent = CommandOutput::failure(
+            1,
+            "Failed to reset failed state of unit g7-queue.service: Unit g7-queue.service not loaded.\nFailed to reset failed state of unit g7-reverb.service: Unit g7-reverb.service not loaded.",
+        );
+        assert!(systemd_reset_failed_reports_only_missing(&absent));
+
+        let mixed = CommandOutput::failure(
+            1,
+            "Failed to reset failed state of unit g7-queue.service: Unit g7-queue.service not loaded.\nAccess denied",
+        );
+        assert!(!systemd_reset_failed_reports_only_missing(&mixed));
+    }
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -1315,6 +1362,23 @@ mod tests {
 
         validate_reset_path("/etc/mysql/operator.cnf")
             .expect_err("operator MySQL config must stay outside reset allowlist");
+    }
+
+    #[test]
+    fn reset_contract_covers_all_g7_finalize_resources() {
+        for service in G7_RUNTIME_SERVICES {
+            assert!(APP_SYSTEMD_UNITS.contains(&service));
+        }
+        for path in G7_RUNTIME_FILES {
+            validate_reset_path(path).expect("G7 finalize unit must be resettable");
+        }
+        for path in [
+            "/home/g7devops/public_html/storage/app/settings/drivers.json",
+            "/home/g7devops/public_html/storage/app/settings/mail.json",
+            "/home/g7devops/public_html/public/storage",
+        ] {
+            validate_reset_path(path).expect("G7 finalize site setting must be resettable");
+        }
     }
 
     #[test]
@@ -1606,7 +1670,8 @@ mod tests {
         fs::create_dir_all(fs_root.join("etc/nginx/conf.d"))?;
         fs::create_dir_all(fs_root.join("etc/php/8.3/fpm/pool.d"))?;
         fs::create_dir_all(fs_root.join("etc/mysql/conf.d"))?;
-        fs::create_dir_all(fs_root.join("home/g7/public_html"))?;
+        fs::create_dir_all(fs_root.join("home/g7/public_html/storage/app/settings"))?;
+        fs::create_dir_all(fs_root.join("home/g7/public_html/public"))?;
         fs::write(
             fs_root.join("var/log/g7-installer/report.json"),
             r#"{
@@ -1633,7 +1698,22 @@ mod tests {
                 ]
             }"#,
         )?;
-        fs::write(fs_root.join("etc/systemd/system/g7-queue.service"), "unit")?;
+        for path in G7_RUNTIME_FILES {
+            fs::write(fs_root.join(path.trim_start_matches('/')), "unit")?;
+        }
+        fs::write(
+            fs_root.join("home/g7/public_html/storage/app/settings/drivers.json"),
+            r#"{"queue_driver":"redis"}"#,
+        )?;
+        fs::write(
+            fs_root.join("home/g7/public_html/storage/app/settings/mail.json"),
+            r#"{"host":"127.0.0.1"}"#,
+        )?;
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(
+            fs_root.join("home/g7/public_html/storage/app/public"),
+            fs_root.join("home/g7/public_html/public/storage"),
+        )?;
         fs::write(
             fs_root.join("etc/systemd/system/swapfile.swap"),
             "[Unit]\nDescription=G7 Installer managed swapfile\n",
@@ -1659,11 +1739,17 @@ mod tests {
         let owned = OwnedFiles {
             version: 1,
             files: vec![
-                "/etc/systemd/system/g7-queue.service".to_string(),
+                G7_RUNTIME_FILES[0].to_string(),
+                G7_RUNTIME_FILES[1].to_string(),
+                G7_RUNTIME_FILES[2].to_string(),
+                G7_RUNTIME_FILES[3].to_string(),
                 "/etc/apt/sources.list.d/ondrej-ubuntu-php-noble.sources".to_string(),
                 "/etc/nginx/conf.d/g7-runtime-tuning.conf".to_string(),
                 "/etc/php/8.3/fpm/pool.d/g7-g7.conf".to_string(),
                 "/etc/mysql/conf.d/g7-installer.cnf".to_string(),
+                "/home/g7/public_html/storage/app/settings/drivers.json".to_string(),
+                "/home/g7/public_html/storage/app/settings/mail.json".to_string(),
+                "/home/g7/public_html/public/storage".to_string(),
                 "/home/g7/public_html".to_string(),
                 "/var/log/g7-installer/report.json".to_string(),
                 OWNED_FILES_PATH.to_string(),
@@ -1673,7 +1759,7 @@ mod tests {
 
         let runner = FakeCommandRunner::default();
         runner.push_output(CommandOutput::success("0\n"));
-        for _service in 0..4 {
+        for _service in 0..7 {
             runner.push_output(CommandOutput::success("active\n"));
             runner.push_output(CommandOutput::success(""));
         }
@@ -1689,6 +1775,7 @@ mod tests {
         runner.push_output(CommandOutput::success("install ok installed"));
         runner.push_output(CommandOutput::success("install ok installed"));
         runner.push_output(CommandOutput::success("marked manual"));
+        runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         runner.push_output(CommandOutput::success(""));
         let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
@@ -1737,6 +1824,20 @@ mod tests {
                 .exists()
         );
         assert!(!fs_root.join("home/g7/public_html").exists());
+        assert!(
+            !fs_root
+                .join("home/g7/public_html/storage/app/settings/drivers.json")
+                .exists()
+        );
+        assert!(
+            !fs_root
+                .join("home/g7/public_html/storage/app/settings/mail.json")
+                .exists()
+        );
+        assert!(!fs_root.join("home/g7/public_html/public/storage").exists());
+        for path in G7_RUNTIME_FILES {
+            assert!(!fs_root.join(path.trim_start_matches('/')).exists());
+        }
         assert!(!fs_root.join("etc/systemd/system/swapfile.swap").exists());
         assert!(
             !fs_root
@@ -1757,6 +1858,11 @@ mod tests {
         assert_ne!(recorded[1].program, OsString::from("mysql"));
         assert!(!recorded.iter().any(|spec| { spec.program == "certbot" }));
         assert!(!recorded.iter().any(|spec| spec.program == "mysql"));
+        assert!(recorded.iter().any(|spec| {
+            spec.program == "systemctl"
+                && spec.args.first() == Some(&OsString::from("reset-failed"))
+                && spec.args.contains(&OsString::from("g7-scheduler.service"))
+        }));
         assert!(recorded.iter().any(|spec| {
             spec.program == "pkill"
                 && spec.args

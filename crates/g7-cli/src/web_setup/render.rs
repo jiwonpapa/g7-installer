@@ -84,6 +84,7 @@ pub(super) fn failed_report_details() -> Vec<String> {
         "database_checks",
         "certbot_checks",
         "app_checks",
+        "finalize_checks",
     ] {
         let Some(checks) = value.get(section).and_then(serde_json::Value::as_array) else {
             continue;

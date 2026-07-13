@@ -27,12 +27,17 @@ pub(super) fn install_gnuboard7_app<R: CommandRunner>(
         ),
         output,
     )?;
-    let source_checks = verify_git_checkout(
+    let mut source_checks = verify_git_checkout(
         probe,
         "gnuboard7",
         GNUBOARD7_SOURCE_DIR,
         GNUBOARD7_REQUIRED_FILES,
     )?;
+    source_checks.push(verify_gnuboard7_release_assets(
+        paths,
+        GNUBOARD7_SOURCE_DIR,
+        &release_ref,
+    )?);
 
     let output = probe
         .copy_dir_contents(GNUBOARD7_SOURCE_DIR, &plan.web_root)
@@ -158,6 +163,47 @@ fn stable_release_tag(tag: &str) -> bool {
             .all(|segment| !segment.is_empty() && segment.chars().all(|ch| ch.is_ascii_digit()))
 }
 
+fn verify_gnuboard7_release_assets(
+    paths: &InstallPaths,
+    source_dir: &str,
+    release_ref: &str,
+) -> Result<InstallCheck> {
+    let build_dir = paths.resolve(&format!("{source_dir}/public/build"));
+    #[cfg(test)]
+    if !build_dir.join("manifest.json").is_file() {
+        // Fake command-runner tests do not materialize a checkout. Focused
+        // manifest tests below cover the integrity decision itself.
+        return Ok(InstallCheck::pass(
+            "gnuboard7-vite-manifest",
+            "fake checkout manifest validation handled by focused tests",
+        ));
+    }
+    let audit =
+        crate::vite_manifest::audit_vite_manifest(&build_dir.join("manifest.json"), &build_dir)?;
+    if audit.referenced.is_empty() {
+        return Err(Error::InstallVerificationFailed {
+            checks: format!(
+                "G7 {release_ref} public/build/manifest.json에 배포 자산 참조가 없습니다. 공식 릴리스를 확인하세요."
+            ),
+        });
+    }
+    if !audit.missing.is_empty() {
+        return Err(Error::InstallVerificationFailed {
+            checks: format!(
+                "G7 공식 릴리스 {release_ref}의 manifest 참조 파일이 누락됐습니다: {}. 설치기가 파일을 빌드하거나 수정하지 않습니다.",
+                audit.missing.join(", ")
+            ),
+        });
+    }
+    Ok(InstallCheck::pass(
+        "gnuboard7-vite-manifest",
+        format!(
+            "G7 {release_ref} Vite manifest의 배포 자산 {}개를 확인했습니다.",
+            audit.referenced.len()
+        ),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,6 +238,30 @@ mod tests {
         assert_eq!(check.name, "app-env-preserved");
         assert_eq!(fs::read_to_string(&env_path)?, "APP_KEY=keep-me\n");
         assert!(probe.runner().recorded().is_empty());
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn broken_release_manifest_is_rejected_before_deployment()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let suffix = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let root = std::env::temp_dir().join(format!("g7-release-assets-{suffix}"));
+        let build = root.join("var/lib/g7-installer/app-source/gnuboard7/public/build");
+        fs::create_dir_all(&build)?;
+        fs::write(
+            build.join("manifest.json"),
+            r#"{"app":{"file":"assets/missing.js"}}"#,
+        )?;
+
+        let error = verify_gnuboard7_release_assets(
+            &InstallPaths::with_root(&root),
+            GNUBOARD7_SOURCE_DIR,
+            "7.0.3",
+        )
+        .expect_err("broken upstream release must be rejected");
+
+        assert!(error.to_string().contains("assets/missing.js"));
         fs::remove_dir_all(root)?;
         Ok(())
     }
