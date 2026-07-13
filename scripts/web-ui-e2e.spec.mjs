@@ -137,6 +137,7 @@ async function asset(pathname) {
 }
 
 async function startServer(options = {}) {
+  let installPrepared = false;
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     const pathname = url.pathname;
@@ -157,7 +158,29 @@ async function startServer(options = {}) {
       return;
     }
     if (pathname === "/api/recovery") {
-      json(response, options.recovery || {
+      const freshRecovery = {
+        can_resume: false,
+        can_retry_step: false,
+        can_reset: false,
+        can_rollback: false,
+        recommended_action: "manual",
+        failed_step: null,
+        restore_status: null,
+        message: "설치기 소유 흔적이 없습니다.",
+        metadata_paths: [],
+        rollback_reason: null,
+        resume_reason: null,
+        g7_database_created: false,
+        g7_database_confirmed: false,
+        g7_database_name: null,
+        server_configured: false,
+        app_files_prepared: false,
+        g7_install_completed: false,
+        g7_install_lock_path: null,
+        app_install_url: null,
+        lifecycle_status: "fresh",
+      };
+      const pendingRecovery = {
         can_resume: false,
         can_retry_step: false,
         can_reset: true,
@@ -165,14 +188,21 @@ async function startServer(options = {}) {
         recommended_action: "reset",
         failed_step: null,
         restore_status: null,
-        message: "설치기 소유 기록이 있어 재설치 초기화가 가능합니다.",
+        message: "서버 구성과 앱 파일 배치는 완료됐으며 웹 설치를 마무리해야 합니다.",
         metadata_paths: ["/var/lib/g7-installer/state.json"],
         rollback_reason: "앱/DB/인증서 단계 이후에는 reset을 사용합니다.",
         resume_reason: "현재 단계에서는 이어서 진행할 수 없습니다.",
-        g7_database_created: false,
+        g7_database_created: true,
+        g7_database_confirmed: true,
+        g7_database_name: "g7devops",
+        server_configured: true,
+        app_files_prepared: true,
         g7_install_completed: false,
-        g7_install_lock_path: null,
-      });
+        g7_install_lock_path: "/home/g7devops/public_html/storage/app/g7_installed",
+        app_install_url: "https://g7devops.com/install/",
+        lifecycle_status: "app-install-pending",
+      };
+      json(response, options.recovery || (options.reportExists === false && !installPrepared ? freshRecovery : pendingRecovery));
       return;
     }
     if (pathname === "/api/status") {
@@ -184,7 +214,7 @@ async function startServer(options = {}) {
       return;
     }
     if (pathname === "/api/report") {
-      if (options.reportExists === false) {
+      if (options.reportExists === false && !installPrepared) {
         json(response, { exists: false, path: "/var/log/g7-installer/report.json", content: "" });
         return;
       }
@@ -196,7 +226,7 @@ async function startServer(options = {}) {
       return;
     }
     if (pathname === "/api/doctor") {
-      json(response, {
+      json(response, options.doctor || {
         install_allowed: true,
         resources: {
           total_memory_mib: 2048,
@@ -225,6 +255,7 @@ async function startServer(options = {}) {
         }, 500);
         return;
       }
+      installPrepared = true;
       json(response, mockReport());
       return;
     }
@@ -275,7 +306,10 @@ async function startServer(options = {}) {
 test("wizard routes render report, downloads, and provision cards", async ({ page }) => {
   const { server, baseUrl } = await startServer();
   try {
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${baseUrl}/setup/result?token=e2e`);
+    const shellBox = await page.locator(".app-shell").boundingBox();
+    expect(shellBox?.y).toBe(0);
     await expect(page.getByRole("heading", { name: "설치 결과" })).toBeVisible();
     await expect(page.locator("#live-log")).toHaveCount(1);
     await expect(page.locator("#install-live-log")).toHaveCount(0);
@@ -302,6 +336,43 @@ test("wizard routes render report, downloads, and provision cards", async ({ pag
 
     await page.getByRole("button", { name: "설정 파일/값 확인" }).nth(2).click();
     await expect(page.locator("#provision-action-details code").filter({ hasText: "/etc/mysql/conf.d/g7-installer.cnf" })).toBeVisible();
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("managed server check reports web install pending instead of fresh-server failure", async ({ page }) => {
+  const { server, baseUrl } = await startServer({
+    doctor: {
+      install_allowed: false,
+      resources: {
+        total_memory_mib: 2048,
+        available_memory_mib: 1024,
+        swap_total_mib: 2048,
+        root_available_mib: 40000,
+        root_inode_free_percent: 95,
+      },
+      checks: [
+        { name: "ubuntu-version", status: "pass", message: "Ubuntu 24.04 확인" },
+        { name: "nginx-service", status: "fail", message: "Nginx가 이미 실행 중입니다." },
+        { name: "port-80", status: "fail", message: "TCP 80 포트를 사용 중입니다." },
+        { name: "installer-state", status: "fail", message: "설치 상태 파일이 이미 있습니다." },
+      ],
+    },
+  });
+  try {
+    await page.goto(`${baseUrl}/setup/doctor?token=e2e`);
+    await page.getByRole("button", { name: "점검 실행" }).click();
+
+    await expect(page.getByText("서버 구성 완료 · 웹 설치 대기", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("서버 점검 실패", { exact: true })).toHaveCount(0);
+    await expect(page.locator(".doctor-lifecycle")).toContainText("서버 구성완료");
+    await expect(page.locator(".doctor-lifecycle")).toContainText("g7devops 현재 확인됨");
+    await expect(page.locator(".doctor-lifecycle")).toContainText("앱 파일배치 완료");
+    await expect(page.locator(".doctor-lifecycle")).toContainText("그누보드7앱 파일 준비됨");
+    await expect(page.getByRole("link", { name: "웹 설치 열기" })).toHaveAttribute("href", "https://g7devops.com/install/");
+    await expect(page.getByText("웹 설치 마무리 / 초기화", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("Nginx가 이미 실행 중입니다.", { exact: true })).toBeVisible();
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -664,8 +735,14 @@ test("reset confirmation warns when a completed G7 install is detected", async (
       rollback_reason: "운영 데이터가 있어 패키지 되돌리기를 사용할 수 없습니다.",
       resume_reason: "설치가 이미 완료되었습니다.",
       g7_database_created: true,
+      g7_database_confirmed: true,
+      g7_database_name: "g7devops",
+      server_configured: true,
+      app_files_prepared: true,
       g7_install_completed: true,
       g7_install_lock_path: "/home/g7devops/public_html/storage/app/g7_installed",
+      app_install_url: "https://g7devops.com/",
+      lifecycle_status: "app-installed",
     },
   });
   try {

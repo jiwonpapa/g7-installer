@@ -392,8 +392,14 @@ pub(super) struct RecoveryApiStatus {
     pub(super) rollback_reason: Option<String>,
     pub(super) resume_reason: Option<String>,
     pub(super) g7_database_created: bool,
+    pub(super) g7_database_confirmed: Option<bool>,
+    pub(super) g7_database_name: Option<String>,
+    pub(super) server_configured: bool,
+    pub(super) app_files_prepared: bool,
     pub(super) g7_install_completed: bool,
     pub(super) g7_install_lock_path: Option<String>,
+    pub(super) app_install_url: Option<String>,
+    pub(super) lifecycle_status: &'static str,
 }
 
 #[derive(Debug, Deserialize)]

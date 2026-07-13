@@ -763,6 +763,48 @@
     border-radius: 7px;
   }
 
+  .doctor-lifecycle {
+    @apply mb-4 overflow-hidden border border-info/35 border-l-4 border-l-info bg-info/[0.06] p-4;
+    border-radius: 7px;
+  }
+
+  .doctor-lifecycle[data-lifecycle="installed"] {
+    @apply border-success/35 border-l-success bg-success/[0.06];
+  }
+
+  .doctor-lifecycle[data-lifecycle="pending"] {
+    @apply border-warning/45 border-l-warning bg-warning/[0.08];
+  }
+
+  .doctor-lifecycle-heading {
+    @apply flex flex-col justify-between gap-3 sm:flex-row sm:items-center;
+  }
+
+  .doctor-lifecycle-heading strong {
+    @apply text-base font-bold;
+  }
+
+  .doctor-lifecycle-heading p {
+    @apply mt-1 text-sm leading-6 text-base-content/65;
+  }
+
+  .doctor-lifecycle dl {
+    @apply mt-4 grid gap-px overflow-hidden border border-base-300 bg-base-300 sm:grid-cols-2 lg:grid-cols-4;
+    border-radius: 6px;
+  }
+
+  .doctor-lifecycle dl > div {
+    @apply min-w-0 bg-base-100 px-3 py-3;
+  }
+
+  .doctor-lifecycle dt {
+    @apply text-[0.65rem] font-semibold text-base-content/45;
+  }
+
+  .doctor-lifecycle dd {
+    @apply mt-1 break-words text-sm font-semibold;
+  }
+
   .doctor-results {
     display: block;
   }
@@ -1153,7 +1195,7 @@
 
 @layer components {
   .app-shell {
-    @apply mx-auto flex min-h-screen w-full max-w-7xl flex-col overflow-hidden border-base-300 bg-base-100 shadow-xl sm:my-4 sm:min-h-[calc(100vh-2rem)] sm:rounded-xl sm:border;
+    @apply mx-auto flex min-h-screen w-full max-w-7xl flex-col overflow-hidden border-base-300 bg-base-100 shadow-xl sm:mb-4 sm:mt-0 sm:min-h-[calc(100vh-1rem)] sm:rounded-b-xl sm:border sm:border-t-0;
   }
 
   .app-header {

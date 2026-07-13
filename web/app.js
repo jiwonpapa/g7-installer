@@ -1815,6 +1815,91 @@ function recoveryActionButtons(action) {
   return Array.from(document.querySelectorAll(`[data-recovery-action="${action}"]`));
 }
 
+function lifecycleView(status) {
+  const lifecycle = status?.lifecycle_status || "fresh";
+  const views = {
+    "app-installed": {
+      tone: "installed",
+      title: "그누보드7 설치 완료",
+      description: "서버 구성, DB와 그누보드7 설치 완료 잠금을 확인했습니다.",
+      recoveryTitle: "기존 설치 관리",
+    },
+    "app-install-pending": {
+      tone: "pending",
+      title: "서버 구성 완료 · 웹 설치 대기",
+      description: "서버와 DB 준비는 끝났습니다. 그누보드7 웹 설치 화면에서 관리자 설정을 마무리하세요.",
+      recoveryTitle: "웹 설치 마무리 / 초기화",
+    },
+    "server-configured": {
+      tone: "configured",
+      title: "서버 구성 완료",
+      description: "설치기의 서버 구성 단계는 완료됐습니다. DB와 앱 파일 상태를 확인하세요.",
+      recoveryTitle: "서버 구성 관리 / 초기화",
+    },
+    "install-interrupted": {
+      tone: "interrupted",
+      title: "설치 진행 중 또는 중단됨",
+      description: "저장된 단계와 실패 원인을 확인한 뒤 현재 단계부터 다시 진행할 수 있습니다.",
+      recoveryTitle: "중단된 설치 복구 / 초기화",
+    },
+    "managed-existing": {
+      tone: "configured",
+      title: "설치기 관리 서버 확인",
+      description: "설치기 메타데이터가 있습니다. 신규 설치를 다시 실행하기 전에 현재 상태를 확인하세요.",
+      recoveryTitle: "설치 상태 / 초기화",
+    },
+    fresh: {
+      tone: "fresh",
+      title: "신규 서버 설치 가능",
+      description: "설치기 소유 구성이나 앱 설치 흔적이 없습니다.",
+      recoveryTitle: "설치 상태 / 관리",
+    },
+  };
+  return views[lifecycle] || views["managed-existing"];
+}
+
+function databaseLifecycleLabel(status) {
+  if (status?.g7_database_confirmed === true) {
+    return `${status.g7_database_name || "앱 DB"} 현재 확인됨`;
+  }
+  if (status?.g7_database_confirmed === false) {
+    return `${status.g7_database_name || "앱 DB"} 현재 없음`;
+  }
+  if (status?.g7_database_created) {
+    return `${status.g7_database_name || "앱 DB"} 생성 기록 있음 · 현재 조회 불가`;
+  }
+  return "DB 생성 기록 없음";
+}
+
+function lifecycleSummaryHtml(status) {
+  if (!status || status.lifecycle_status === "fresh") {
+    return "";
+  }
+  const view = lifecycleView(status);
+  const installUrl = safePromoHref(status.app_install_url);
+  const action = status.lifecycle_status === "app-install-pending" && installUrl
+    ? `<a class="btn btn-sm btn-primary icon-button" data-icon="external-link" href="${escapeHtml(installUrl)}" target="_blank" rel="noreferrer noopener">웹 설치 열기</a>`
+    : "";
+  const appStatus = status.g7_install_completed
+    ? "설치 완료 잠금 확인"
+    : (status.app_files_prepared ? "앱 파일 준비됨" : "앱 파일 확인 필요");
+
+  return `
+    <section class="doctor-lifecycle" data-lifecycle="${escapeHtml(view.tone)}" aria-label="기존 설치 상태">
+      <div class="doctor-lifecycle-heading">
+        <div><strong>${escapeHtml(view.title)}</strong><p>${escapeHtml(view.description)}</p></div>
+        ${action}
+      </div>
+      <dl>
+        <div><dt>서버 구성</dt><dd>${status.server_configured ? "완료" : "진행 중/확인 필요"}</dd></div>
+        <div><dt>데이터베이스</dt><dd>${escapeHtml(databaseLifecycleLabel(status))}</dd></div>
+        <div><dt>앱 파일</dt><dd>${status.app_files_prepared ? "배치 완료" : "확인 필요"}</dd></div>
+        <div><dt>그누보드7</dt><dd>${escapeHtml(appStatus)}</dd></div>
+      </dl>
+    </section>
+  `;
+}
+
 function renderRecoveryStatus(status) {
   state.recoveryStatus = status || null;
   const hasMetadata = Boolean(status?.metadata_paths?.length);
@@ -1825,6 +1910,11 @@ function renderRecoveryStatus(status) {
     panel.hidden = !shouldShowPanel;
     const message = panel.querySelector("[data-recovery-message]");
     const paths = panel.querySelector("[data-recovery-paths]");
+    const title = panel.querySelector("[data-recovery-title]");
+
+    if (title) {
+      title.textContent = lifecycleView(status).recoveryTitle;
+    }
 
     if (message) {
       const failed = status?.failed_step ? ` 실패 단계: ${status.failed_step}.` : "";
@@ -1917,6 +2007,7 @@ function renderDoctor(report) {
   const resources = report.resources || {};
 
   nodes.doctorResults.innerHTML = `
+    ${lifecycleSummaryHtml(state.recoveryStatus)}
     <section class="doctor-overview" aria-label="서버 자원 요약">
       <div class="doctor-metric"><span>전체 메모리</span><strong>${escapeHtml(formatResourceMib(resources.total_memory_mib))}</strong></div>
       <div class="doctor-metric"><span>사용 가능 메모리</span><strong>${escapeHtml(formatResourceMib(resources.available_memory_mib))}</strong></div>
@@ -1928,15 +2019,23 @@ function renderDoctor(report) {
       <div class="doctor-detail-list"></div>
     </details>
   `;
+  hydrateIcons(nodes.doctorResults);
   setDoctorPassed(Boolean(report.install_allowed));
 
+  const managedLifecycle = state.recoveryStatus
+    && state.recoveryStatus.lifecycle_status !== "fresh";
+  const lifecycle = lifecycleView(state.recoveryStatus);
   setAlert(
     nodes.doctorStatus,
-    report.install_allowed ? "success" : "error",
-    report.install_allowed ? "서버 점검 통과" : "서버 점검 실패",
+    report.install_allowed ? "success" : (managedLifecycle ? "info" : "error"),
+    report.install_allowed
+      ? "서버 점검 통과"
+      : (managedLifecycle ? lifecycle.title : "서버 점검 실패"),
     report.install_allowed
       ? "서버 설치를 계속 진행할 수 있습니다."
-      : "실패 항목을 해결한 뒤 다시 점검하세요.",
+      : (managedLifecycle
+        ? `${lifecycle.description} 아래 실패 표시는 신규 설치를 다시 실행하지 못하게 막는 보호 점검입니다.`
+        : "실패 항목을 해결한 뒤 다시 점검하세요."),
   );
 
   const detailList = nodes.doctorResults.querySelector(".doctor-detail-list");
@@ -1993,8 +2092,9 @@ async function runDoctorCheck() {
   hideAlert(nodes.doctorStatus);
   log("서버 점검 실행");
   const report = await apiFetch("/api/doctor");
-  renderDoctor(report);
+  state.doctorReport = report;
   await refreshRecoveryStatus();
+  renderDoctor(report);
   auditDoctorReport(report);
   log(`서버 점검 완료: ${report.install_allowed ? "설치 가능" : "설치 차단"}`);
   return report;
