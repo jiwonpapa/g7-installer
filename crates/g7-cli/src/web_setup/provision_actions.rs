@@ -340,15 +340,13 @@ pub(super) fn app_permission_checks(
     for writable_path in writable_paths {
         let target = format!("{web_root}/{writable_path}");
         checks.push(dir_check(&format!("app-dir:{writable_path}"), &target));
-        if path_is_dir(&target) {
-            if !site_user.is_empty() {
-                checks.push(run_command_check(
-                    &format!("app-writable-test:{writable_path}"),
-                    "runuser",
-                    &["-u", site_user, "--", "test", "-w", &target],
-                    None,
-                ));
-            }
+        if path_is_dir(&target) && !site_user.is_empty() {
+            checks.push(run_command_check(
+                &format!("app-writable-test:{writable_path}"),
+                "runuser",
+                &["-u", site_user, "--", "test", "-w", &target],
+                None,
+            ));
         }
     }
 
