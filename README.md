@@ -2,7 +2,7 @@
 
 Ubuntu VPS에 `g7inst`를 설치하고 웹 마법사로 그누보드7용 서버 구성과 사이트 프로비저닝을 진행하는 도구입니다.
 
-> 현재 공개 릴리스는 `v0.3.0-beta.1` Public Beta입니다. 새 Ubuntu 24.04 VPS 전용으로 `g7inst` 설치, 서버 점검, 웹 마법사, apt 패키지 설치, Nginx/Apache 도메인 연결 설정(vhost), PHP/DB 사양 튜닝, DB 앱 계정 생성, Let's Encrypt 인증서 발급/갱신 검증, 그누보드7 브라우저 설치 화면 준비, 7단계 세부 설정 액션 패널과 카드별 재시작/점검, 상세 설정 안내서 저장까지 검증합니다.
+> 현재 공개 릴리스는 `v0.3.0-beta.2` Public Beta입니다. 새 Ubuntu 24.04 VPS 전용으로 `g7inst` 설치, 서버 점검, 웹 마법사, apt 패키지 설치, Nginx/Apache 도메인 연결 설정(vhost), PHP/DB 사양 튜닝, DB 앱 계정 생성, Let's Encrypt 인증서 발급/갱신 검증, 그누보드7 브라우저 설치 화면 준비, 7단계 세부 설정 액션 패널과 카드별 재시작/점검, 상세 설정 안내서 저장까지 검증합니다.
 
 `completed`는 **서버 프로비저닝 완료**를 뜻합니다. 그누보드7의 CMS 내부 설정, 테이블 구성, 관리자 계정 생성은 결과 리포트의 앱 링크에서 공식 브라우저 설치기를 한 번 더 진행해야 완료됩니다.
 
@@ -86,13 +86,13 @@ Ubuntu VPS에 `g7inst`를 설치하고 웹 마법사로 그누보드7용 서버 
 Mac 터미널:
 
 ```bash
-ssh -i "$HOME/.ssh/YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.1/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$HOME/.ssh/YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.2/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 Windows PowerShell:
 
 ```powershell
-ssh -i "$env:USERPROFILE\.ssh\YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.1/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$env:USERPROFILE\.ssh\YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.2/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 ### SSH 비밀번호로 접속
@@ -100,7 +100,7 @@ ssh -i "$env:USERPROFILE\.ssh\YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SER
 Mac 터미널과 Windows PowerShell에서 같은 명령을 사용합니다.
 
 ```bash
-ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.1/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.2/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 `SSH_USER`는 VPS 접속 계정으로 바꿉니다. Ubuntu 이미지의 기본 계정은 보통 `ubuntu`입니다. SSH 비밀번호와 sudo 비밀번호는 요청될 때 터미널에 입력하며, 명령어나 웹 화면에 적지 않습니다. Lightsail 기본 Ubuntu는 일반적으로 SSH 비밀번호 대신 `.pem` 개인키를 사용합니다.
@@ -201,7 +201,7 @@ apt-get update
 apt-get install -y ca-certificates curl
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT HUP INT TERM
-curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.1/bootstrap.sh -o "$tmp"
+curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.2/bootstrap.sh -o "$tmp"
 bash "$tmp"
 g7inst --version
 ```

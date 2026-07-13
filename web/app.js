@@ -3492,7 +3492,11 @@ function provisioningActions(report = {}) {
         "smtp_password = ******",
       ],
     }),
-    provisioningAction("security", "보안 경계 안내", [...(report.safety_checks || []), ...(report.firewall_checks || [])], {
+    provisioningAction("security", "보안 경계 안내", [
+      ...(report.safety_checks || []),
+      ...(report.firewall_checks || []),
+      ...(report.vhost_checks || []).filter((check) => ["site-user-password", "ssh-password-auth"].includes(check.name)),
+    ], {
       summary: "SSH 서비스와 외부 포트 운영 경계를 확인합니다. UFW/fail2ban은 설치하거나 변경하지 않습니다.",
       command: "sudo systemctl is-active ssh",
       settings: [
@@ -4676,12 +4680,11 @@ function bindEvents() {
         body: JSON.stringify(payload),
       });
       renderInstallReport(report);
-      await refreshRecoveryStatus();
       setAlert(nodes.installStatus, "success", "서버 세팅 완료", "결과 리포트에서 웹서버, PHP, DB, SSL, 앱 경로와 재시작 명령을 확인하세요.");
       log(`서버 세팅 완료: ${report.phase}`);
       await finishInstallProgressDialog(true);
-      await refreshRecoveryStatus();
       showStep("report", { force: true });
+      await refreshRecoveryStatus();
     } catch (error) {
       stopPackageTicker();
       const reportPayload = await apiFetch("/api/report").catch(() => null);
@@ -4704,6 +4707,7 @@ function bindEvents() {
       if (installButton && !state.installCompleted) {
         installButton.disabled = false;
       }
+      await refreshRecoveryStatus();
     }
   });
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-COVERAGE_FLOOR="${G7_COVERAGE_FLOOR:-75}"
+COVERAGE_FLOOR="${G7_COVERAGE_FLOOR:-77}"
 
 cd "${ROOT_DIR}"
 
@@ -19,7 +19,8 @@ cargo audit
 echo "[quality-gate] cargo deny"
 cargo deny check
 echo "[quality-gate] cargo llvm-cov"
-cargo llvm-cov --locked --workspace --all-targets --summary-only --fail-under-lines "${COVERAGE_FLOOR}"
+cargo llvm-cov --locked --workspace --all-targets --json --output-path target/llvm-cov.json --fail-under-lines "${COVERAGE_FLOOR}"
+python3 scripts/check-coverage-ratchet.py target/llvm-cov.json "${ROOT_DIR}"
 
 echo "[quality-gate] web build"
 (cd web && bun install --frozen-lockfile && (bun run build || npm run build))

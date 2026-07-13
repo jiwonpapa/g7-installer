@@ -8,6 +8,7 @@ pub(super) fn apply_runtime_phase<R: CommandRunner>(
     paths: &InstallPaths,
     plan: &plan::InstallPlan,
     owned: &mut Vec<String>,
+    preinstall_package_checks: &[InstallCheck],
 ) -> Result<Vec<InstallCheck>> {
     let mut checks = Vec::new();
     let sizing = detected_memory_sizing(probe);
@@ -37,6 +38,12 @@ pub(super) fn apply_runtime_phase<R: CommandRunner>(
             &sizing,
             &ini_content,
         )?);
+        if package_was_absent(
+            preinstall_package_checks,
+            &format!("php{}-fpm", plan.php_version),
+        ) {
+            checks.push(disable_default_php_fpm_pool(paths, plan)?);
+        }
     }
 
     write_owned_file(paths, &ini_path, &ini_content, owned)?;
@@ -267,6 +274,40 @@ pub(super) fn apply_runtime_phase<R: CommandRunner>(
     Ok(checks)
 }
 
+fn default_php_fpm_pool_path(plan: &plan::InstallPlan) -> String {
+    format!("/etc/php/{}/fpm/pool.d/www.conf", plan.php_version)
+}
+
+pub(super) fn disable_default_php_fpm_pool(
+    paths: &InstallPaths,
+    plan: &plan::InstallPlan,
+) -> Result<InstallCheck> {
+    let path = default_php_fpm_pool_path(plan);
+    let target = paths.resolve(&path);
+    match fs::symlink_metadata(&target) {
+        Ok(metadata) if metadata.is_file() || metadata.file_type().is_symlink() => {
+            fs::remove_file(&target).map_err(|source| Error::FileRemoveFailed {
+                path: path.clone(),
+                source,
+            })?;
+            Ok(InstallCheck::pass(
+                "php-fpm-default-pool-disabled",
+                format!(
+                    "신규 PHP-FPM 설치의 기본 www 풀 `{path}`을 비활성화하고 사이트 전용 풀만 사용합니다."
+                ),
+            ))
+        }
+        Ok(_) => Err(Error::InstallVerificationFailed {
+            checks: format!("기본 PHP-FPM 풀 경로가 일반 파일이 아닙니다: {path}"),
+        }),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(InstallCheck::pass(
+            "php-fpm-default-pool-disabled",
+            "기본 PHP-FPM www 풀은 이미 비활성화되어 있습니다.",
+        )),
+        Err(source) => Err(Error::FileReadFailed { path, source }),
+    }
+}
+
 fn validate_php_runtime_candidates<R: CommandRunner>(
     probe: &SystemProbe<R>,
     paths: &InstallPaths,
@@ -310,7 +351,12 @@ pub(super) fn php_runtime_diagnostic_checks<R: CommandRunner>(
     sizing: &plan::ResolvedMemorySizing,
 ) -> Vec<InstallCheck> {
     let mut checks = Vec::new();
-    let output = match probe.runner().run(&php_runtime_probe_command(plan)) {
+    let runtime_command = if plan.web_server == "frankenphp" {
+        php_runtime_probe_command(plan)
+    } else {
+        php_fpm_info_command(plan)
+    };
+    let output = match probe.runner().run(&runtime_command) {
         Ok(output) => output,
         Err(error) => {
             checks.push(InstallCheck::fail(
@@ -334,7 +380,37 @@ pub(super) fn php_runtime_diagnostic_checks<R: CommandRunner>(
         return checks;
     }
 
-    let facts = parse_key_value_lines(&output.stdout);
+    let mut facts = if plan.web_server == "frankenphp" {
+        parse_key_value_lines(&output.stdout)
+    } else {
+        parse_php_fpm_info(&output.stdout)
+    };
+    if plan.web_server != "frankenphp" {
+        let extensions = match probe.runner().run(&php_runtime_probe_command(plan)) {
+            Ok(output) if output.status == 0 => {
+                fact(&parse_key_value_lines(&output.stdout), "extensions")
+            }
+            Ok(output) => {
+                checks.push(InstallCheck::fail(
+                    "php-runtime-probe",
+                    format!(
+                        "PHP 확장 정보 수집 실패: status={} stderr={}",
+                        output.status,
+                        short_text(&output.stderr)
+                    ),
+                ));
+                return checks;
+            }
+            Err(error) => {
+                checks.push(InstallCheck::fail(
+                    "php-runtime-probe",
+                    format!("PHP 확장 정보를 실행하지 못했습니다: {error}"),
+                ));
+                return checks;
+            }
+        };
+        facts.push(("extensions".to_string(), extensions));
+    }
     checks.push(InstallCheck::pass(
         "phpinfo-summary",
         format!(
@@ -445,6 +521,10 @@ pub(super) fn php_runtime_probe_command(plan: &plan::InstallPlan) -> CommandSpec
         .arg(php_runtime_probe_script())
 }
 
+pub(super) fn php_fpm_info_command(plan: &plan::InstallPlan) -> CommandSpec {
+    CommandSpec::new(format!("php-fpm{}", plan.php_version)).arg("-i")
+}
+
 pub(super) fn php_runtime_probe_script() -> &'static str {
     r#"
 echo "php_version=".PHP_VERSION."\n";
@@ -544,6 +624,53 @@ pub(super) fn parse_key_value_lines(output: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+pub(super) fn parse_php_fpm_info(output: &str) -> Vec<(String, String)> {
+    const FIELDS: [(&str, &str); 16] = [
+        ("php version", "php_version"),
+        ("server api", "sapi"),
+        ("loaded configuration file", "loaded_ini"),
+        ("scan this dir for additional .ini files", "scan_dir"),
+        ("memory_limit", "memory_limit"),
+        ("upload_max_filesize", "upload_max_filesize"),
+        ("post_max_size", "post_max_size"),
+        ("max_execution_time", "max_execution_time"),
+        ("max_input_vars", "max_input_vars"),
+        ("date.timezone", "date.timezone"),
+        ("realpath_cache_size", "realpath_cache_size"),
+        ("realpath_cache_ttl", "realpath_cache_ttl"),
+        ("opcache.enable", "opcache.enable"),
+        ("opcache.memory_consumption", "opcache.memory_consumption"),
+        ("opcache.validate_timestamps", "opcache.validate_timestamps"),
+        (
+            "opcache.enable_file_override",
+            "opcache.enable_file_override",
+        ),
+    ];
+
+    let mut facts = Vec::new();
+    for line in output.lines() {
+        let Some((name, _value)) = line.split_once("=>") else {
+            continue;
+        };
+        let normalized_name = name.trim().to_ascii_lowercase();
+        let Some((_, key)) = FIELDS
+            .iter()
+            .find(|(label, _key)| *label == normalized_name)
+        else {
+            continue;
+        };
+        if facts.iter().any(|(existing, _)| existing == key) {
+            continue;
+        }
+        let value = line
+            .rsplit_once("=>")
+            .map(|(_name, value)| value.trim())
+            .unwrap_or("-");
+        facts.push(((*key).to_string(), value.to_string()));
+    }
+    facts
+}
+
 pub(super) fn fact(facts: &[(String, String)], key: &str) -> String {
     facts
         .iter()
@@ -554,7 +681,11 @@ pub(super) fn fact(facts: &[(String, String)], key: &str) -> String {
 }
 
 pub(super) fn normalize_php_value(value: &str) -> String {
-    value.trim().to_ascii_lowercase()
+    match value.trim().to_ascii_lowercase().as_str() {
+        "on" => "1".to_string(),
+        "off" => "0".to_string(),
+        value => value.to_string(),
+    }
 }
 
 pub(super) fn short_text(value: &str) -> String {
@@ -900,13 +1031,22 @@ pub(super) fn nginx_main_runtime_content(
         .any(|line| line.trim_start().starts_with("worker_rlimit_nofile "));
     let mut found_processes = false;
     let mut found_connections = false;
+    let mut found_server_tokens = false;
     let mut in_events = false;
+    let mut in_http = false;
     let mut output = Vec::new();
 
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with("events") && trimmed.contains('{') {
             in_events = true;
+        }
+        if trimmed.starts_with("http") && trimmed.contains('{') {
+            in_http = true;
+            output.push(line.to_string());
+            output.push("    server_tokens off;".to_string());
+            found_server_tokens = true;
+            continue;
         }
         if trimmed.starts_with("worker_processes ") {
             let indent = &line[..line.len() - line.trim_start().len()];
@@ -940,16 +1080,29 @@ pub(super) fn nginx_main_runtime_content(
             found_connections = true;
             continue;
         }
+        if in_http
+            && (trimmed.starts_with("server_tokens ") || trimmed.starts_with("# server_tokens "))
+        {
+            if !found_server_tokens {
+                let indent = &line[..line.len() - line.trim_start().len()];
+                output.push(format!("{indent}server_tokens off;"));
+                found_server_tokens = true;
+            }
+            continue;
+        }
         output.push(line.to_string());
         if in_events && trimmed == "}" {
             in_events = false;
         }
+        if in_http && trimmed == "}" {
+            in_http = false;
+        }
     }
 
-    if !found_processes || !found_connections {
+    if !found_processes || !found_connections || !found_server_tokens {
         return Err(Error::InstallVerificationFailed {
             checks: format!(
-                "{NGINX_MAIN_CONFIG_PATH} does not contain expected worker_processes/events worker_connections directives"
+                "{NGINX_MAIN_CONFIG_PATH} does not contain expected worker_processes/events/http directives"
             ),
         });
     }

@@ -289,10 +289,14 @@ pub(super) fn random_laravel_app_key() -> Result<String> {
 }
 
 pub(super) fn config_content(plan: &plan::InstallPlan) -> String {
+    config_content_for_phase(plan, InstallerPhase::Prepared.as_str())
+}
+
+pub(super) fn config_content_for_phase(plan: &plan::InstallPlan, phase: &str) -> String {
     let mut content = String::new();
     content.push_str(&format!("domain = \"{}\"\n", plan.domain));
     content.push_str(&format!("deployment_mode = \"{}\"\n", plan.deployment_mode));
-    content.push_str("phase = \"prepared\"\n");
+    content.push_str(&format!("phase = \"{phase}\"\n"));
     content.push_str(&format!("app_profile = \"{}\"\n", plan.app_profile));
     content.push_str(&format!(
         "app_document_root = \"{}\"\n",

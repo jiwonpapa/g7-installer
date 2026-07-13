@@ -8,6 +8,7 @@ cd "${ROOT_DIR}"
 echo "[quick-gate] shell syntax"
 bash -n scripts/*.sh
 python3 -m py_compile scripts/generate-sbom.py
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 echo "[quick-gate] web static smoke"
 bash scripts/web-static-smoke.sh
 echo "[quick-gate] setup auth smoke"
@@ -21,6 +22,10 @@ if rg -n -i 'wordpress|워드프레스' README.md SPEC.md DEVELOPMENT_CONSTITUTI
 fi
 if rg -n -i 'mariadb' README.md SPEC.md DEVELOPMENT_CONSTITUTION.md docs; then
   echo "public documentation must describe the MySQL-only database scope" >&2
+  exit 1
+fi
+if rg -n -i 'wordpress|mariadb' .github/workflows/ops-harness.yml scripts/ops-harness.sh; then
+  echo "ops harness must match the G7/Laravel and MySQL-only product scope" >&2
   exit 1
 fi
 echo "[quick-gate] cargo fmt"

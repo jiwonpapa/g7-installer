@@ -1,12 +1,15 @@
 use super::{
     CSRF_HEADER, DoctorCheckStatus, REPORT_PATH, SESSION_COOKIE, SESSION_TTL, Session,
-    SetupRequest, WebState, api_install_prepare, api_plan, api_recovery, api_report, api_reset,
-    api_rollback, api_status, app_css, app_js, bootstrap, browser_addr_for, create_session,
-    doctor_status_label, doctor_to_api, emit_log, ensure_remote_binding_is_explicit,
-    event_history_snapshot, failed_doctor_details, index, install_checks_to_api, install_to_api,
-    lock_client_ip, options_from_request, parse_bind, promo_json, remove_session,
-    require_allowed_client_ip, require_authenticated_session, require_csrf, require_session,
-    require_session_id, rollback_to_api, secure_eq, secure_token, session_cookie,
+    SetupRequest, WebState, api_install_prepare, api_logout, api_plan, api_recovery, api_report,
+    api_reset, api_rollback, api_status, app_css, app_js, bootstrap, browser_addr_for,
+    build_router, create_session, current_user_is_root, doctor_status_label, doctor_to_api,
+    emit_log, ensure_remote_binding_is_explicit, event_history_snapshot, event_stream_js,
+    failed_doctor_details, html_attr_escape, index, index_html, install_checks_to_api,
+    install_to_api, is_loopback, lock_client_ip, options_from_request, parse_bind, print_startup,
+    promo_json, remove_session, require_allowed_client_ip, require_authenticated_session,
+    require_csrf, require_session, require_session_id, rollback_to_api, secure_eq, secure_token,
+    session_cookie, setup_requires_root_error, validate_database_request, validate_mail_request,
+    validate_site_password_request,
 };
 use axum::Json;
 use axum::body::to_bytes;
@@ -167,6 +170,65 @@ fn browser_url_uses_loopback_for_unspecified_bind() {
 }
 
 #[test]
+fn route_helpers_reject_invalid_bind_and_escape_manifest_attributes() {
+    assert!(parse_bind("not-an-address").is_err());
+    assert_eq!(
+        html_attr_escape("https://example.test/?a=1&b=\"<tag>\""),
+        "https://example.test/?a=1&amp;b=&quot;&lt;tag&gt;&quot;"
+    );
+    let html = index_html();
+    assert!(!html.contains("__G7INST_ASSET_VERSION__"));
+    assert!(!html.contains("__G7INST_PROMO_MANIFEST_URL__"));
+}
+
+#[test]
+fn root_and_loopback_helpers_match_the_current_host()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let expected_root = std::process::Command::new("id").arg("-u").output()?.stdout == b"0\n";
+    assert_eq!(current_user_is_root()?, expected_root);
+    assert!(is_loopback(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+    assert!(is_loopback(IpAddr::V6(std::net::Ipv6Addr::LOCALHOST)));
+    assert!(!is_loopback(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))));
+    assert!(
+        setup_requires_root_error()
+            .to_string()
+            .contains("sudo/root")
+    );
+
+    print_startup(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 7717),
+        "test-token",
+    );
+    print_startup(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 7717),
+        "test-token",
+    );
+    Ok(())
+}
+
+#[test]
+fn router_build_registers_all_wizard_and_api_routes() {
+    let router = build_router(test_state());
+    let debug = format!("{router:?}");
+    for route in [
+        "/setup/connect",
+        "/setup/doctor",
+        "/setup/options",
+        "/setup/plan",
+        "/setup/install",
+        "/setup/result",
+        "/setup/provision",
+        "/api/bootstrap",
+        "/api/install/prepare",
+        "/api/install/resume",
+        "/api/reset",
+        "/api/report",
+    ] {
+        assert!(debug.contains(route), "router must register {route}");
+    }
+}
+
+#[test]
 fn failed_doctor_details_lists_blocking_checks_only() {
     let report = DoctorReport {
         install_allowed: false,
@@ -237,7 +299,7 @@ fn session_cookie_uses_http_only_same_site() {
     assert!(cookie.contains("g7inst_session=abc123"));
     assert!(cookie.contains("HttpOnly"));
     assert!(cookie.contains("SameSite=Strict"));
-    assert!(cookie.contains("Max-Age=1800"));
+    assert!(cookie.contains("Max-Age=28800"));
 }
 
 #[test]
@@ -387,6 +449,125 @@ fn public_wizard_accepts_only_mysql_80_or_84() {
             .status,
         StatusCode::BAD_REQUEST
     );
+}
+
+#[test]
+fn site_password_validation_covers_required_confirmation_length_and_forbidden_characters() {
+    let mut request = setup_request("example.com");
+    request.site_password = None;
+    request.site_password_confirm = None;
+    assert_eq!(
+        validate_site_password_request(&request)
+            .expect_err("empty password must fail")
+            .status,
+        StatusCode::BAD_REQUEST
+    );
+
+    request.site_password = Some("valid-pass-9".to_string());
+    request.site_password_confirm = Some("different".to_string());
+    assert!(validate_site_password_request(&request).is_err());
+
+    request.site_password = Some("short".to_string());
+    request.site_password_confirm = Some("short".to_string());
+    assert!(validate_site_password_request(&request).is_err());
+
+    request.site_password = Some("invalid:pass".to_string());
+    request.site_password_confirm = Some("invalid:pass".to_string());
+    assert!(validate_site_password_request(&request).is_err());
+
+    request.site_password = Some("valid-pass-9".to_string());
+    request.site_password_confirm = Some("valid-pass-9".to_string());
+    assert!(validate_site_password_request(&request).is_ok());
+}
+
+#[test]
+fn database_validation_covers_identifiers_and_secret_policy() {
+    let mut request = setup_request("example.com");
+    let cases = [
+        (
+            None,
+            Some("g7_app"),
+            Some("valid-pass-9"),
+            Some("valid-pass-9"),
+        ),
+        (
+            Some("7invalid"),
+            Some("g7_app"),
+            Some("valid-pass-9"),
+            Some("valid-pass-9"),
+        ),
+        (
+            Some("g7_db"),
+            None,
+            Some("valid-pass-9"),
+            Some("valid-pass-9"),
+        ),
+        (
+            Some("g7_db"),
+            Some("-bad"),
+            Some("valid-pass-9"),
+            Some("valid-pass-9"),
+        ),
+        (Some("g7_db"), Some("g7_app"), None, None),
+        (
+            Some("g7_db"),
+            Some("g7_app"),
+            Some("valid-pass-9"),
+            Some("different"),
+        ),
+        (Some("g7_db"), Some("g7_app"), Some("short"), Some("short")),
+        (
+            Some("g7_db"),
+            Some("g7_app"),
+            Some("invalid'pass"),
+            Some("invalid'pass"),
+        ),
+    ];
+    for (database, user, password, confirm) in cases {
+        request.database_name = database.map(str::to_string);
+        request.database_user = user.map(str::to_string);
+        request.database_password = password.map(str::to_string);
+        request.database_password_confirm = confirm.map(str::to_string);
+        assert!(validate_database_request(&request).is_err());
+    }
+
+    request.database_name = Some("g7_db".to_string());
+    request.database_user = Some("g7_app".to_string());
+    request.database_password = Some("valid-pass-9".to_string());
+    request.database_password_confirm = Some("valid-pass-9".to_string());
+    assert!(validate_database_request(&request).is_ok());
+}
+
+#[test]
+fn smtp_validation_is_noop_outside_relay_and_strict_for_relay_credentials() {
+    let mut request = setup_request("example.com");
+    request.mail_mode = "none".to_string();
+    assert!(validate_mail_request(&request).is_ok());
+
+    request.mail_mode = "smtp-relay".to_string();
+    request.smtp_username = None;
+    request.smtp_password = None;
+    request.smtp_password_confirm = None;
+    assert!(validate_mail_request(&request).is_err());
+
+    request.smtp_username = Some("mailer".to_string());
+    assert!(validate_mail_request(&request).is_err());
+
+    request.smtp_password = Some("valid-pass-9".to_string());
+    request.smtp_password_confirm = Some("different".to_string());
+    assert!(validate_mail_request(&request).is_err());
+
+    request.smtp_password = Some("short".to_string());
+    request.smtp_password_confirm = Some("short".to_string());
+    assert!(validate_mail_request(&request).is_err());
+
+    request.smtp_username = Some("bad\\name".to_string());
+    request.smtp_password = Some("valid-pass-9".to_string());
+    request.smtp_password_confirm = Some("valid-pass-9".to_string());
+    assert!(validate_mail_request(&request).is_err());
+
+    request.smtp_username = Some("mailer".to_string());
+    assert!(validate_mail_request(&request).is_ok());
 }
 
 #[test]
@@ -594,6 +775,12 @@ async fn static_assets_require_first_token_ip_lock()
             "application/javascript; charset=utf-8"
         ))
     );
+
+    let event_stream = event_stream_js(axum::extract::State(state.clone()), peer())
+        .await
+        .expect("event stream js should be served")
+        .into_response();
+    assert_eq!(event_stream.status(), StatusCode::OK);
     assert_eq!(
         js.headers().get(header::CACHE_CONTROL),
         Some(&HeaderValue::from_static("no-store, no-cache, max-age=0"))
@@ -630,6 +817,21 @@ async fn static_assets_require_first_token_ip_lock()
 }
 
 #[tokio::test]
+async fn static_assets_reject_different_client_after_token_ip_lock() {
+    let state = test_state();
+    lock_client_ip(&state, IpAddr::V4(Ipv4Addr::LOCALHOST)).expect("client IP should lock");
+    let other_peer = ConnectInfo(SocketAddr::new(
+        IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)),
+        49152,
+    ));
+    let error = match app_js(axum::extract::State(state), other_peer).await {
+        Ok(_) => panic!("asset access from a different client must fail"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn bootstrap_reports_token_session_authenticated_state()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     let state = test_state();
@@ -649,6 +851,42 @@ async fn bootstrap_reports_token_session_authenticated_state()
     assert_eq!(payload["auth"]["authenticated"], true);
     assert_eq!(payload["auth"]["username"], "root");
     Ok(())
+}
+
+#[tokio::test]
+async fn logout_requires_csrf_and_removes_the_session()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let state = test_state();
+    let headers = authenticated_headers(&state)?;
+    assert_eq!(state.sessions.lock().expect("session lock").len(), 1);
+
+    let response = api_logout(axum::extract::State(state.clone()), peer(), headers)
+        .await
+        .expect("logout should succeed")
+        .into_response();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert!(state.sessions.lock().expect("session lock").is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn index_rejects_a_different_client_after_access_lock() {
+    let state = test_state();
+    lock_client_ip(&state, IpAddr::V4(Ipv4Addr::LOCALHOST)).expect("client IP should lock");
+    let response = index(
+        axum::extract::State(state),
+        ConnectInfo(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)),
+            49152,
+        )),
+        axum::extract::Query(HashMap::from([(
+            "token".to_string(),
+            "wrong-token".to_string(),
+        )])),
+    )
+    .await
+    .into_response();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

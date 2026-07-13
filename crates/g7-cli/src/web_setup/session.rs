@@ -154,7 +154,9 @@ pub(super) fn remove_session(
 }
 
 pub(super) fn session_cookie(session_id: &str) -> String {
-    format!("{SESSION_COOKIE}={session_id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=1800")
+    format!(
+        "{SESSION_COOKIE}={session_id}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_TTL_SECONDS}"
+    )
 }
 
 pub(super) fn secure_eq(left: &str, right: &str) -> bool {

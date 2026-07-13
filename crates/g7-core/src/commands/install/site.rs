@@ -38,10 +38,11 @@ pub(super) fn apply_site_phase<R: CommandRunner>(
         checks.push(InstallCheck::pass(
             "site-user-password",
             format!(
-                "Password was set for Linux account `{}` for SFTP/login use.",
+                "Linux 계정 `{}`에 비밀번호를 설정했습니다. 실제 SSH/SFTP 비밀번호 로그인 허용 여부는 별도 점검 결과를 따릅니다.",
                 plan.site_user
             ),
         ));
+        checks.push(ssh_password_auth_check(probe));
     }
 
     let ready_path = ready_probe_path(plan);
@@ -88,6 +89,47 @@ pub(super) fn apply_site_phase<R: CommandRunner>(
     ));
 
     Ok(checks)
+}
+
+fn ssh_password_auth_check<R: CommandRunner>(probe: &SystemProbe<R>) -> InstallCheck {
+    let command = CommandSpec::new("sshd").arg("-T");
+    let output = match probe.runner().run(&command) {
+        Ok(output) => output,
+        Err(error) => {
+            return InstallCheck::warn(
+                "ssh-password-auth",
+                format!(
+                    "sshd 유효 설정을 확인하지 못했습니다: {error}. SSH 키 접속은 유지하고 제공자 문서에서 비밀번호 로그인 정책을 확인하세요."
+                ),
+            );
+        }
+    };
+    if output.status != 0 {
+        return InstallCheck::warn(
+            "ssh-password-auth",
+            format!(
+                "sshd -T 점검이 종료 코드 {}로 끝났습니다. SSH 키 접속은 유지하고 제공자 정책을 확인하세요.",
+                output.status
+            ),
+        );
+    }
+
+    let password_authentication = output.stdout.lines().find_map(|line| {
+        let mut fields = line.split_whitespace();
+        let name = fields.next()?;
+        (name.eq_ignore_ascii_case("passwordauthentication")).then(|| fields.next().unwrap_or("no"))
+    });
+    if password_authentication.is_some_and(|value| value.eq_ignore_ascii_case("yes")) {
+        InstallCheck::pass(
+            "ssh-password-auth",
+            "sshd 유효 설정에서 비밀번호 SSH/SFTP 로그인이 허용되어 있습니다.",
+        )
+    } else {
+        InstallCheck::warn(
+            "ssh-password-auth",
+            "현재 VPS의 sshd 유효 설정은 비밀번호 SSH/SFTP 로그인을 허용하지 않습니다. 사이트 계정 비밀번호는 설정되었지만 접속에는 SSH 키를 사용하거나 운영자가 SSH 정책을 별도로 변경해야 합니다.",
+        )
+    }
 }
 
 pub(super) fn install_placeholder_app(
@@ -265,7 +307,7 @@ pub(super) fn app_base_url_from_access_url(plan: &plan::InstallPlan, app_url: &s
 
 pub(super) fn app_entry_path(plan: &plan::InstallPlan) -> &'static str {
     match plan.app_profile.as_str() {
-        "gnuboard7" | "gnuboard7-octane" => "/install",
+        "gnuboard7" | "gnuboard7-octane" => "/install/",
         "wordpress" => "/wp-admin/install.php",
         _ => "/",
     }

@@ -27,7 +27,19 @@ pub async fn run(config: WebSetupConfig) -> Result<()> {
     let local_addr = listener.local_addr().into_diagnostic()?;
     print_startup(local_addr, &state.access_token);
 
-    let app = Router::new()
+    let app = build_router(state);
+
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .map_err(|err| miette!("web setup controller failed: {err}"))
+}
+
+pub(super) fn build_router(state: WebState) -> Router {
+    Router::new()
         .route("/", get(index))
         .route("/setup/connect", get(index))
         .route("/setup/doctor", get(index))
@@ -54,15 +66,7 @@ pub async fn run(config: WebSetupConfig) -> Result<()> {
         .route("/api/recovery", get(api_recovery))
         .route("/api/report", get(api_report))
         .layer(TraceLayer::new_for_http())
-        .with_state(state);
-
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .with_graceful_shutdown(shutdown_signal())
-    .await
-    .map_err(|err| miette!("web setup controller failed: {err}"))
+        .with_state(state)
 }
 
 pub(super) fn parse_bind(bind: &str) -> Result<SocketAddr> {

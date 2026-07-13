@@ -179,7 +179,14 @@ pub fn resume_with_probe_and_paths<R: CommandRunner>(
                     .any(|check| check.name == "tls-certificate" && check.status == "pass");
                 apply_summary.certbot_checks = checks;
                 if tls_passed {
-                    mark_step(&mut completed_steps, "certbot-issued");
+                    mark_step(
+                        &mut completed_steps,
+                        if tls_certificate_was_reused(&apply_summary.certbot_checks) {
+                            "certbot-reused"
+                        } else {
+                            "certbot-issued"
+                        },
+                    );
                     mark_step(&mut completed_steps, "https-vhost-written");
                     mark_step(&mut completed_steps, "certbot-renew-dry-run");
                     state.set_phase(InstallerPhase::TlsEnabled);
@@ -304,6 +311,11 @@ pub fn resume_with_probe_and_paths<R: CommandRunner>(
     if tls_ready && app_ready {
         state.set_phase(InstallerPhase::Completed);
     }
+    write_existing_file(
+        paths,
+        CONFIG_PATH,
+        &config_content_for_phase(&install_plan, &state.phase),
+    )?;
     mark_step(&mut completed_steps, "setup-guide-written");
     state.completed_steps = completed_steps.clone();
     write_or_update_tracked_file(
@@ -703,7 +715,13 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         &apply_summary,
         None,
     )?;
-    match apply_runtime_phase(probe, paths, &install_plan, &mut owned_file_list) {
+    match apply_runtime_phase(
+        probe,
+        paths,
+        &install_plan,
+        &mut owned_file_list,
+        &apply_summary.preinstall_package_checks,
+    ) {
         Ok(runtime_checks) => {
             let frankenphp_service_active = install_plan.web_server == "frankenphp"
                 && runtime_checks
@@ -810,7 +828,13 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         &apply_summary,
         None,
     )?;
-    match apply_vhost_phase(probe, paths, &install_plan, &mut owned_file_list) {
+    match apply_vhost_phase(
+        probe,
+        paths,
+        &install_plan,
+        &mut owned_file_list,
+        &apply_summary.preinstall_package_checks,
+    ) {
         Ok(vhost_checks) => {
             if !vhost_checks.is_empty() {
                 apply_summary.vhost_checks.extend(vhost_checks);
@@ -1003,7 +1027,14 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
                 .any(|check| check.name == "tls" && check.status == "skipped");
             apply_summary.certbot_checks = certbot_checks;
             if tls_passed {
-                completed_steps.push("certbot-issued".to_string());
+                completed_steps.push(
+                    if tls_certificate_was_reused(&apply_summary.certbot_checks) {
+                        "certbot-reused"
+                    } else {
+                        "certbot-issued"
+                    }
+                    .to_string(),
+                );
                 completed_steps.push("https-vhost-written".to_string());
                 completed_steps.push("certbot-renew-dry-run".to_string());
                 state.set_phase(InstallerPhase::TlsEnabled);
@@ -1148,6 +1179,11 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     {
         state.set_phase(InstallerPhase::Completed);
     }
+    write_existing_file(
+        paths,
+        CONFIG_PATH,
+        &config_content_for_phase(&install_plan, &state.phase),
+    )?;
     state.completed_steps = completed_steps.clone();
     write_new_file(
         paths,
@@ -1484,7 +1520,13 @@ fn resume_pre_tls_steps<R: CommandRunner>(
         )?;
         state.begin_step("runtime");
         persist_resume_step(progress, owned_files, owned, state, plan, summary, None)?;
-        match apply_runtime_phase(probe, paths, plan, owned) {
+        match apply_runtime_phase(
+            probe,
+            paths,
+            plan,
+            owned,
+            &summary.preinstall_package_checks,
+        ) {
             Ok(checks) => {
                 let frankenphp_service_active = plan.web_server == "frankenphp"
                     && checks
@@ -1575,12 +1617,23 @@ fn resume_pre_tls_steps<R: CommandRunner>(
         )?;
         state.begin_step("vhost");
         persist_resume_step(progress, owned_files, owned, state, plan, summary, None)?;
-        match apply_vhost_phase(probe, paths, plan, owned) {
+        match apply_vhost_phase(
+            probe,
+            paths,
+            plan,
+            owned,
+            &summary.preinstall_package_checks,
+        ) {
             Ok(checks) => {
                 summary.vhost_checks.retain(|check| {
                     matches!(
                         check.name.as_str(),
-                        "site-user" | "web-root" | "php-ready-probe" | "web-root-permissions"
+                        "site-user"
+                            | "site-user-password"
+                            | "ssh-password-auth"
+                            | "web-root"
+                            | "php-ready-probe"
+                            | "web-root-permissions"
                     )
                 });
                 summary.vhost_checks.extend(checks);
@@ -1728,6 +1781,12 @@ fn tls_is_ready(checks: &[InstallCheck]) -> bool {
     })
 }
 
+pub(super) fn tls_certificate_was_reused(checks: &[InstallCheck]) -> bool {
+    checks
+        .iter()
+        .any(|check| check.name == "certbot-renewal-webroot" && check.status == "pass")
+}
+
 pub(super) fn app_is_ready(completed_steps: &[String], checks: &[InstallCheck]) -> bool {
     completed_steps
         .iter()
@@ -1754,6 +1813,9 @@ fn vhost_transaction_files(plan: &plan::InstallPlan) -> Vec<String> {
         vec![
             g7_system::nginx::G7_SITE_AVAILABLE.to_string(),
             g7_system::nginx::G7_SITE_ENABLED.to_string(),
+            g7_system::nginx::G7_DEFAULT_DENY_AVAILABLE.to_string(),
+            g7_system::nginx::G7_DEFAULT_DENY_ENABLED.to_string(),
+            "/etc/nginx/sites-enabled/default".to_string(),
         ]
     };
     files.push(ready_probe_path(plan));
@@ -1783,6 +1845,7 @@ fn runtime_transaction_files(plan: &plan::InstallPlan) -> Vec<String> {
         ]);
     } else {
         files.push(php_pool_path(plan));
+        files.push(format!("/etc/php/{}/fpm/pool.d/www.conf", plan.php_version));
     }
     files
 }

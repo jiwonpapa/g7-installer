@@ -111,12 +111,8 @@ pub(super) fn provision_php(report: &serde_json::Value) -> Vec<InstallApiCheck> 
     ]
 }
 
-pub(super) fn provision_database(report: &serde_json::Value) -> Vec<InstallApiCheck> {
-    let service = if report_string(report, "database").as_deref() == Some("mariadb") {
-        "mariadb"
-    } else {
-        "mysql"
-    };
+pub(super) fn provision_database(_report: &serde_json::Value) -> Vec<InstallApiCheck> {
+    let service = "mysql";
     vec![
         run_command_check("database-restart", "systemctl", &["restart", service], None),
         run_command_check(
@@ -237,8 +233,6 @@ pub(super) fn provision_app(report: &serde_json::Value) -> Vec<InstallApiCheck> 
         .unwrap_or_default();
     let web_root = report_string(report, "web_root").unwrap_or_default();
     let site_user = report_string(report, "site_user").unwrap_or_default();
-    let app_document_root = report_string(report, "app_document_root").unwrap_or(web_root.clone());
-
     if app_profile == "gnuboard7" {
         let mut checks = vec![
             file_check("app-artisan", &format!("{web_root}/artisan")),
@@ -284,25 +278,6 @@ pub(super) fn provision_app(report: &serde_json::Value) -> Vec<InstallApiCheck> 
             message: "그누보드7은 브라우저 /install 완료 후 /, /login, /admin 접속을 확인하세요."
                 .to_string(),
         });
-        return checks;
-    }
-
-    if app_profile == "wordpress" {
-        let mut checks = vec![
-            file_check(
-                "wordpress-install-screen",
-                &format!("{app_document_root}/wp-admin/install.php"),
-            ),
-            dir_check(
-                "wordpress-uploads",
-                &format!("{app_document_root}/wp-content"),
-            ),
-        ];
-        checks.extend(app_permission_checks(
-            &web_root,
-            &site_user,
-            &["wp-content/uploads"],
-        ));
         return checks;
     }
 
@@ -655,5 +630,61 @@ mod tests {
 
         assert_eq!(trimmed.chars().count(), 403);
         assert!(trimmed.ends_with("..."));
+    }
+
+    #[test]
+    fn provision_status_prioritizes_fail_then_manual_then_pass() {
+        let ssl = run_provision_action("ssl", &serde_json::json!({}))
+            .expect("missing domain should produce a report");
+        assert_eq!(ssl.status, "fail");
+        assert_eq!(ssl.message, "실패 항목을 확인하세요.");
+
+        let mail = run_provision_action("mail", &serde_json::json!({ "mail_mode": "none" }))
+            .expect("disabled mail should produce a manual report");
+        assert_eq!(mail.status, "manual");
+        assert!(mail.message.contains("수동"));
+
+        let success = run_command_check("true", "true", &[], None);
+        assert_eq!(success.status, "pass");
+        let failure = run_command_check("false", "false", &[], None);
+        assert_eq!(failure.status, "fail");
+        let missing = run_command_check("missing", "g7inst-command-that-does-not-exist", &[], None);
+        assert_eq!(missing.status, "fail");
+    }
+
+    #[test]
+    fn app_permission_checks_fail_closed_for_missing_identity_and_paths() {
+        let missing_root = app_permission_checks("", "", &["storage"]);
+        assert_eq!(missing_root[0].name, "app-web-root");
+        assert_eq!(missing_root[0].status, "fail");
+
+        let root = temp_path("permissions");
+        fs::create_dir_all(&root).expect("temp root should be created");
+        let checks = app_permission_checks(root.to_str().expect("utf8 path"), "", &["storage"]);
+        assert!(checks.iter().any(|check| check.name == "app-site-user"));
+        assert!(
+            checks
+                .iter()
+                .any(|check| check.name == "app-env" && check.status == "fail")
+        );
+        assert!(
+            checks
+                .iter()
+                .any(|check| check.name == "app-dir:storage" && check.status == "fail")
+        );
+        fs::remove_dir_all(root).expect("temp root should be removed");
+    }
+
+    #[test]
+    fn ckeditor_invalid_json_is_reported_as_manual() {
+        let root = temp_path("ckeditor-invalid");
+        fs::create_dir_all(&root).expect("temp dir should be created");
+        let setting = root.join("setting.json");
+        fs::write(&setting, "not-json").expect("setting should be written");
+
+        let check = g7_ckeditor_upload_limit_check(setting.to_str().expect("utf8 path"));
+        assert_eq!(check.status, "manual");
+        assert!(check.message.contains("읽지 못했습니다"));
+        fs::remove_dir_all(root).expect("temp dir should be removed");
     }
 }

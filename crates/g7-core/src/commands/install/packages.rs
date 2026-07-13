@@ -674,6 +674,12 @@ pub(super) fn inspect_preinstall_packages<R: CommandRunner>(
         .collect()
 }
 
+pub(super) fn package_was_absent(checks: &[InstallCheck], package: &str) -> bool {
+    checks
+        .iter()
+        .any(|check| check.name == package && check.status == "not-installed")
+}
+
 pub(super) fn verify_services<R: CommandRunner>(
     probe: &SystemProbe<R>,
     services: &[String],

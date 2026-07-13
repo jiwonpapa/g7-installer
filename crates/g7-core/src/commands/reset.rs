@@ -1031,6 +1031,8 @@ fn validate_reset_path(path: &str) -> Result<()> {
         "/var/www/g7",
         "/etc/nginx/sites-available/g7.conf",
         "/etc/nginx/sites-enabled/g7.conf",
+        "/etc/nginx/sites-available/g7-default-deny.conf",
+        "/etc/nginx/sites-enabled/g7-default-deny.conf",
         "/etc/apache2/sites-available/g7.conf",
         "/etc/apache2/sites-enabled/g7.conf",
         "/etc/apt/sources.list.d/ondrej-ubuntu-php-noble.sources",

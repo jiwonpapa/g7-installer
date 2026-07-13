@@ -162,7 +162,7 @@ async function startServer(options = {}) {
         can_retry_step: false,
         can_reset: true,
         can_rollback: false,
-        recommended_action: "manual",
+        recommended_action: "reset",
         failed_step: null,
         restore_status: null,
         message: "설치기 소유 기록이 있어 재설치 초기화가 가능합니다.",
@@ -565,6 +565,7 @@ test("install uses one modal graph and groups PHP packages", async ({ page }, te
     await expect(page).toHaveURL(/\/setup\/result/, { timeout: 5000 });
     await expect(page.locator("#install-progress-dialog[open]")).toHaveCount(0);
     await expect(page.locator("#log-dock-home #live-log")).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "전체 초기화" })).toBeEnabled();
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

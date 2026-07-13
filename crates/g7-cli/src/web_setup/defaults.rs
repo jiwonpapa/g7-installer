@@ -14,4 +14,5 @@ pub(super) const ASSET_VERSION: &str = match option_env!("G7_ASSET_VERSION") {
 };
 pub(super) const SESSION_COOKIE: &str = "g7inst_session";
 pub(super) const CSRF_HEADER: &str = "x-g7-csrf";
-pub(super) const SESSION_TTL: Duration = Duration::from_secs(30 * 60);
+pub(super) const SESSION_TTL_SECONDS: u64 = 8 * 60 * 60;
+pub(super) const SESSION_TTL: Duration = Duration::from_secs(SESSION_TTL_SECONDS);

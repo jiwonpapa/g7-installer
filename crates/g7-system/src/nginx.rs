@@ -8,6 +8,8 @@ use crate::command::{CommandError, CommandOutput, CommandRunner, CommandSpec};
 pub const SERVICE_NAME: &str = "nginx";
 pub const G7_SITE_AVAILABLE: &str = "/etc/nginx/sites-available/g7.conf";
 pub const G7_SITE_ENABLED: &str = "/etc/nginx/sites-enabled/g7.conf";
+pub const G7_DEFAULT_DENY_AVAILABLE: &str = "/etc/nginx/sites-available/g7-default-deny.conf";
+pub const G7_DEFAULT_DENY_ENABLED: &str = "/etc/nginx/sites-enabled/g7-default-deny.conf";
 
 pub fn config_test<R: CommandRunner>(runner: &R) -> Result<CommandOutput, CommandError> {
     runner.run(&CommandSpec::new("nginx").arg("-t"))

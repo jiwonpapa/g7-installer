@@ -37,13 +37,7 @@ pub(super) fn recovery_status() -> RecoveryApiStatus {
     let resume_reason = resume.resume_reason;
     let can_reset = has_installer_metadata;
     let g7_evidence = g7_install_evidence();
-    let recommended_action = if can_resume {
-        "resume"
-    } else if can_rollback {
-        "rollback"
-    } else {
-        "manual"
-    };
+    let recommended_action = recommended_recovery_action(can_resume, can_rollback, can_reset);
     let mut message = match recommended_action {
         "resume" if can_retry_step => {
             "실패한 단계의 변경을 복원한 뒤 해당 단계부터 다시 실행할 수 있습니다."
@@ -81,6 +75,22 @@ pub(super) fn recovery_status() -> RecoveryApiStatus {
         g7_database_created: g7_evidence.database_created,
         g7_install_completed: g7_evidence.install_completed,
         g7_install_lock_path: g7_evidence.install_lock_path,
+    }
+}
+
+fn recommended_recovery_action(
+    can_resume: bool,
+    can_rollback: bool,
+    can_reset: bool,
+) -> &'static str {
+    if can_resume {
+        "resume"
+    } else if can_rollback {
+        "rollback"
+    } else if can_reset {
+        "reset"
+    } else {
+        "manual"
     }
 }
 
@@ -189,7 +199,7 @@ pub(super) fn installer_metadata_paths() -> [&'static str; 6] {
 
 #[cfg(test)]
 mod tests {
-    use super::{classify_g7_install_evidence, classify_resume_state};
+    use super::{classify_g7_install_evidence, classify_resume_state, recommended_recovery_action};
     use g7_state::state::{InstallerPhase, InstallerState};
 
     #[test]
@@ -218,6 +228,11 @@ mod tests {
             recovery.resume_reason.as_deref(),
             Some("설치가 이미 완료되었습니다.")
         );
+    }
+
+    #[test]
+    fn completed_owned_install_recommends_reset() {
+        assert_eq!(recommended_recovery_action(false, false, true), "reset");
     }
 
     #[test]

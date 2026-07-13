@@ -20,6 +20,7 @@ WEB_SERVER="${G7_OPS_WEB_SERVER:-nginx}"
 PHP_VERSION="${G7_OPS_PHP_VERSION:-8.5}"
 PHP_SOURCE="${G7_OPS_PHP_SOURCE:-auto}"
 DATABASE="${G7_OPS_DATABASE:-mysql}"
+DATABASE_VERSION="${G7_OPS_DATABASE_VERSION:-8.0}"
 REDIS="${G7_OPS_REDIS:-enable}"
 MAIL_MODE="${G7_OPS_MAIL_MODE:-none}"
 WWW_MODE="${G7_OPS_WWW_MODE:-redirect-to-root}"
@@ -40,6 +41,43 @@ case "${SOURCE}" in
     ;;
   *)
     echo "unsupported G7_OPS_SOURCE: ${SOURCE} (use release or local)" >&2
+    exit 2
+    ;;
+esac
+
+case "${APP_PROFILE}" in
+  gnuboard7|laravel) ;;
+  *)
+    echo "unsupported G7_OPS_APP: ${APP_PROFILE} (use gnuboard7 or laravel)" >&2
+    exit 2
+    ;;
+esac
+
+case "${WEB_SERVER}" in
+  nginx|apache) ;;
+  *)
+    echo "unsupported G7_OPS_WEB_SERVER: ${WEB_SERVER} (use nginx or apache)" >&2
+    exit 2
+    ;;
+esac
+
+case "${PHP_VERSION}" in
+  8.3|8.5) ;;
+  *)
+    echo "unsupported G7_OPS_PHP_VERSION: ${PHP_VERSION} (use 8.3 or 8.5)" >&2
+    exit 2
+    ;;
+esac
+
+if [[ "${DATABASE}" != "mysql" ]]; then
+  echo "unsupported G7_OPS_DATABASE: ${DATABASE} (use mysql)" >&2
+  exit 2
+fi
+
+case "${DATABASE_VERSION}" in
+  8.0|8.4) ;;
+  *)
+    echo "unsupported G7_OPS_DATABASE_VERSION: ${DATABASE_VERSION} (use 8.0 or 8.4)" >&2
     exit 2
     ;;
 esac
@@ -209,7 +247,7 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
     data = json.load(handle)
 services = {"redis-server"}
 services.add("apache2" if data.get("web_server") == "apache" else "nginx")
-services.add("mariadb" if data.get("database") == "mariadb" else "mysql")
+services.add("mysql")
 if data.get("web_server") == "frankenphp":
     services.add("g7-frankenphp")
 for service in sorted(services):
@@ -320,7 +358,7 @@ PY
 
 install_args() {
   local common
-  common="--app $(quote "${APP_PROFILE}") --web-server $(quote "${WEB_SERVER}") --php-version $(quote "${PHP_VERSION}") --php-source $(quote "${PHP_SOURCE}") --database $(quote "${DATABASE}") --redis $(quote "${REDIS}") --mail-mode $(quote "${MAIL_MODE}") --www-mode $(quote "${WWW_MODE}")"
+  common="--app $(quote "${APP_PROFILE}") --web-server $(quote "${WEB_SERVER}") --php-version $(quote "${PHP_VERSION}") --php-source $(quote "${PHP_SOURCE}") --database $(quote "${DATABASE}") --database-version $(quote "${DATABASE_VERSION}") --redis $(quote "${REDIS}") --mail-mode $(quote "${MAIL_MODE}") --www-mode $(quote "${WWW_MODE}")"
   case "${CERTBOT_SCOPE}" in
     skip)
       printf -- "--local-test --domain %s %s" "$(quote "${DOMAIN}")" "${common}"
@@ -329,6 +367,43 @@ install_args() {
       printf -- "--domain %s %s" "$(quote "${DOMAIN}")" "${common}"
       ;;
   esac
+}
+
+validate_effective_configuration() {
+  local cycle="$1"
+  local report_path="$2"
+  local site_user
+  local php_pool
+  local database_name
+  local database_user
+
+  read -r site_user database_name database_user < <(python3 - "${report_path}" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+print(data["site_user"], data["database_name"], data["database_user"])
+PY
+)
+  php_pool="/etc/php/${PHP_VERSION}/fpm/pool.d/${site_user}.conf"
+
+  if [[ "${WEB_SERVER}" == "nginx" ]]; then
+    sudo_capture "${cycle}-nginx-configtest" "nginx -t" >/dev/null
+    sudo_sh_capture "${cycle}-nginx-default-deny" "test -L /etc/nginx/sites-enabled/g7-default-deny && test ! -e /etc/nginx/sites-enabled/default && grep -Rqs 'return 444' /etc/nginx/sites-enabled/g7-default-deny"
+  else
+    sudo_capture "${cycle}-apache-configtest" "apache2ctl configtest" >/dev/null
+  fi
+
+  sudo_capture "${cycle}-php-fpm-configtest" "php-fpm${PHP_VERSION} -t" >/dev/null
+  sudo_sh_capture "${cycle}-php-pool-contract" "test -f $(quote "${php_pool}") && test ! -e $(quote "/etc/php/${PHP_VERSION}/fpm/pool.d/www.conf") && grep -Fqs $(quote "user = ${site_user}") $(quote "${php_pool}") && grep -Fqs 'group = www-data' $(quote "${php_pool}")"
+  sudo_capture "${cycle}-mysql-configtest" "mysqld --validate-config" >/dev/null
+  sudo_sh_capture "${cycle}-mysql-version" "mysql -NBe 'SELECT VERSION()' | grep -Eq $(quote "^${DATABASE_VERSION}[.]")"
+  sudo_capture "${cycle}-mysql-database" "mysql -NBe $(quote "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME='${database_name}'")" >/dev/null
+  sudo_capture "${cycle}-mysql-account" "mysql -NBe $(quote "SELECT User FROM mysql.user WHERE User='${database_user}' AND Host='localhost'")" >/dev/null
+
+  if [[ "${REDIS}" == "enable" ]]; then
+    sudo_sh_capture "${cycle}-redis-contract" "test \"\$(redis-cli --raw CONFIG GET protected-mode | tail -n 1)\" = yes && redis-cli --raw CONFIG GET bind | tail -n 1 | grep -Eq '(^|[[:space:]])127[.]0[.]0[.]1($|[[:space:]])'"
+  fi
 }
 
 install_env_prefix() {
@@ -500,6 +575,7 @@ PY
     sudo_sh_capture "${cycle}-candidate-files-absent" "test ! -d /var/lib/g7-installer/candidates || ! find /var/lib/g7-installer/candidates -type f -print -quit | grep -q ."
     sudo_sh_capture "${cycle}-transactions-finished" "test ! -d /var/lib/g7-installer/transactions || ! grep -R -q '\"status\": \"started\"' /var/lib/g7-installer/transactions"
     sudo_sh_capture "${cycle}-secrets-mode" "test \"\$(stat -c %a /etc/g7-installer/secrets.toml)\" = 600"
+    validate_effective_configuration "${cycle}" "${report_path}"
   else
     log "${cycle}: state contract skipped"
   fi
@@ -572,7 +648,7 @@ need_local python3
 mkdir -p "${REPORT_DIR}"
 log "writing artifacts to ${REPORT_DIR}"
 log "steps: ${STEPS}"
-log "profile: ${APP_PROFILE}; web: ${WEB_SERVER}; PHP: ${PHP_VERSION}/${PHP_SOURCE}; DB: ${DATABASE}"
+log "profile: ${APP_PROFILE}; web: ${WEB_SERVER}; PHP: ${PHP_VERSION}/${PHP_SOURCE}; DB: ${DATABASE} ${DATABASE_VERSION}"
 log "certbot scope: ${CERTBOT_SCOPE}; app smoke: ${APP_SMOKE}; pre-clean: ${PRE_CLEAN}"
 
 capture_remote "host-baseline" "uname -a; cat /etc/os-release; id"

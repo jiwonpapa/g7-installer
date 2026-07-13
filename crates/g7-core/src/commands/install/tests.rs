@@ -62,6 +62,7 @@ fn install_writes_prepared_state_and_owned_files()
     assert!(fs_root.join("etc/g7-installer/config.toml").exists());
     let config = fs::read_to_string(fs_root.join("etc/g7-installer/config.toml"))?;
     assert!(config.contains("deployment_mode = \"public\""));
+    assert!(config.contains("phase = \"completed\""));
     assert!(config.contains("web_server = \"nginx\""));
     assert!(config.contains("php_version = \"8.5\""));
     assert!(config.contains("database = \"mysql\""));
@@ -379,7 +380,9 @@ fn install_writes_prepared_state_and_owned_files()
             .any(|check| { check.name == "php-fpm-pool" && check.status == "pass" })
     );
     assert!(report.runtime_checks.iter().any(|check| {
-        check.name == "phpinfo-summary" && check.message.contains("FPM ini 기준")
+        check.name == "phpinfo-summary"
+            && check.message.contains("FPM ini 기준")
+            && check.message.contains("SAPI=FPM/FastCGI")
     }));
     assert!(
         report
@@ -479,7 +482,7 @@ fn install_continues_app_phase_when_certbot_is_rate_limited()
             .completed_steps
             .contains(&"app-source-prepared".to_string())
     );
-    assert_eq!(report.app_url, "http://www.example.com/install");
+    assert_eq!(report.app_url, "http://www.example.com/install/");
     assert!(
         report
             .certbot_checks
@@ -628,6 +631,7 @@ fn tls_phase_reuses_existing_certificate_without_certonly()
             && check.status == "pass"
             && check.message.contains("기존 Let's Encrypt 인증서")
     }));
+    assert!(super::tls_certificate_was_reused(&checks));
     let recorded = probe.runner().recorded();
     assert!(!recorded.iter().any(|spec| {
         spec.program == std::ffi::OsStr::new("certbot")
@@ -942,7 +946,7 @@ fn install_applies_apache_vhost_runtime_tls_and_app_link()
     let commands = probe.runner().recorded();
 
     assert_eq!(report.web_server, "apache");
-    assert_eq!(report.app_url, "https://www.example.com/install");
+    assert_eq!(report.app_url, "https://www.example.com/install/");
     assert!(fs_root.join("etc/apache2/sites-available/g7.conf").exists());
     assert!(fs_root.join("etc/apache2/sites-enabled/g7.conf").exists());
     assert!(commands.iter().any(|command| {
@@ -1040,7 +1044,7 @@ fn php_candidate_failure_never_writes_active_runtime_files()
     let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
     let mut owned = Vec::new();
 
-    let error = super::apply_runtime_phase(&probe, &paths, &plan, &mut owned)
+    let error = super::apply_runtime_phase(&probe, &paths, &plan, &mut owned, &[])
         .expect_err("candidate validation must fail");
 
     assert!(matches!(
@@ -1414,7 +1418,52 @@ fn nginx_worker_tuning_updates_only_expected_main_directives()
     assert!(tuned.contains("worker_processes 2;"));
     assert!(tuned.contains("worker_rlimit_nofile 8192;"));
     assert!(tuned.contains("worker_connections 2048;"));
+    assert!(tuned.contains("server_tokens off;"));
     assert!(tuned.contains("include mime.types;"));
+    Ok(())
+}
+
+#[test]
+fn nginx_http_redirect_goes_directly_to_canonical_https_host()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let plan = super::plan::build("example.com".to_string())?;
+    let content = super::nginx_tls_vhost_content(&plan, "/run/php/example.sock", None);
+
+    assert!(content.contains("return 301 https://www.example.com$request_uri;"));
+    assert!(!content.contains("return 301 https://$host$request_uri;"));
+    Ok(())
+}
+
+#[test]
+fn fresh_nginx_default_site_is_disabled() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let fs_root = create_temp_fs_root()?;
+    let paths = InstallPaths::with_root(&fs_root);
+    let enabled = fs_root.join("etc/nginx/sites-enabled/default");
+    fs::create_dir_all(enabled.parent().expect("default site parent"))?;
+    std::os::unix::fs::symlink("../sites-available/default", &enabled)?;
+
+    let check = super::disable_default_nginx_site(&paths)?;
+
+    assert_eq!(check.status, "pass");
+    assert!(!enabled.exists());
+    fs::remove_dir_all(fs_root)?;
+    Ok(())
+}
+
+#[test]
+fn fresh_php_default_pool_is_disabled() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let fs_root = create_temp_fs_root()?;
+    let paths = InstallPaths::with_root(&fs_root);
+    let plan = super::plan::build("example.com".to_string())?;
+    let pool = fs_root.join(format!("etc/php/{}/fpm/pool.d/www.conf", plan.php_version));
+    fs::create_dir_all(pool.parent().expect("pool parent"))?;
+    fs::write(&pool, "[www]\n")?;
+
+    let check = super::disable_default_php_fpm_pool(&paths, &plan)?;
+
+    assert_eq!(check.status, "pass");
+    assert!(!pool.exists());
+    fs::remove_dir_all(fs_root)?;
     Ok(())
 }
 
@@ -1545,7 +1594,7 @@ fn install_configures_gnuboard7_octane_on_frankenphp()
     let report = run_with_probe_and_paths("example.com".to_string(), options, &probe, &paths)?;
 
     assert_eq!(report.app_profile, "gnuboard7-octane");
-    assert_eq!(report.app_url, "https://www.example.com/install");
+    assert_eq!(report.app_url, "https://www.example.com/install/");
     assert!(
         report
             .app_checks
@@ -1734,6 +1783,11 @@ fn install_sets_site_account_password_when_requested()
             .iter()
             .any(|check| check.name == "site-user-password" && check.status == "pass")
     );
+    assert!(report.vhost_checks.iter().any(|check| {
+        check.name == "ssh-password-auth"
+            && check.status == "warn"
+            && check.message.contains("SSH 키")
+    }));
 
     fs::remove_file(os_release_path)?;
     fs::remove_dir_all(fs_root)?;
@@ -2016,6 +2070,9 @@ fn push_successful_site_and_vhost_outputs(
     runner.push_output(CommandOutput::success(""));
     if site_password_set {
         runner.push_output(CommandOutput::success(""));
+        runner.push_output(CommandOutput::success(
+            "passwordauthentication no\npubkeyauthentication yes\n",
+        ));
     }
     runner.push_output(CommandOutput::success(""));
     runner.push_output(CommandOutput::success(""));
@@ -2092,9 +2149,19 @@ fn push_runtime_outputs(runner: &FakeCommandRunner, install_plan: &super::plan::
             runner.push_output(CommandOutput::success(value));
         }
     }
-    runner.push_output(CommandOutput::success(successful_php_runtime_probe_output(
-        install_plan,
-    )));
+    if install_plan.web_server == "frankenphp" {
+        runner.push_output(CommandOutput::success(successful_php_runtime_probe_output(
+            install_plan,
+        )));
+    } else {
+        runner.push_output(CommandOutput::success(successful_php_fpm_info_output(
+            install_plan,
+        )));
+        runner.push_output(CommandOutput::success(format!(
+            "extensions={}\n",
+            super::required_php_extensions(install_plan).join(",")
+        )));
+    }
 }
 
 fn push_database_tls_outputs(
@@ -2225,6 +2292,39 @@ fn successful_php_runtime_probe_output(install_plan: &super::plan::InstallPlan) 
         sizing.php_post_limit,
         sizing.opcache_memory.trim_end_matches('M'),
         extensions
+    )
+}
+
+fn successful_php_fpm_info_output(install_plan: &super::plan::InstallPlan) -> String {
+    let sizing = super::plan::resolve_memory_sizing(1024 * 1024, 1);
+    format!(
+        "PHP Version => {}.0\n\
+         Server API => FPM/FastCGI\n\
+         Loaded Configuration File => /etc/php/{}/fpm/php.ini\n\
+         Scan this dir for additional .ini files => /etc/php/{}/fpm/conf.d\n\
+         memory_limit => {} => {}\n\
+         upload_max_filesize => {} => {}\n\
+         post_max_size => {} => {}\n\
+         max_execution_time => 120 => 120\n\
+         max_input_vars => 3000 => 3000\n\
+         date.timezone => UTC => UTC\n\
+         realpath_cache_size => 4096K => 4096K\n\
+         realpath_cache_ttl => 600 => 600\n\
+         opcache.enable => On => On\n\
+         opcache.memory_consumption => {} => {}\n\
+         opcache.validate_timestamps => On => On\n\
+         opcache.enable_file_override => Off => Off\n",
+        install_plan.php_version,
+        install_plan.php_version,
+        install_plan.php_version,
+        sizing.php_memory_limit,
+        sizing.php_memory_limit,
+        sizing.php_upload_limit,
+        sizing.php_upload_limit,
+        sizing.php_post_limit,
+        sizing.php_post_limit,
+        sizing.opcache_memory.trim_end_matches('M'),
+        sizing.opcache_memory.trim_end_matches('M'),
     )
 }
 

@@ -294,14 +294,18 @@ fn remove_file_or_symlink(target: &Path, logical: &str) -> Result<()> {
 mod tests {
     use super::*;
 
+    fn temp_root(name: &str) -> std::result::Result<PathBuf, Box<dyn std::error::Error>> {
+        Ok(std::env::temp_dir().join(format!(
+            "g7-transaction-{name}-{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+        )))
+    }
+
     #[test]
     fn transaction_restores_existing_and_removes_new_files()
     -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let root = std::env::temp_dir().join(format!(
-            "g7-transaction-{}-{}",
-            std::process::id(),
-            SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
-        ));
+        let root = temp_root("restore")?;
         let paths = InstallPaths::with_root(&root);
         fs::create_dir_all(root.join("etc/nginx"))?;
         fs::write(root.join("etc/nginx/existing.conf"), "before")?;
@@ -324,6 +328,112 @@ mod tests {
             "before"
         );
         assert!(!root.join("etc/nginx/new.conf").exists());
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn completed_transaction_is_not_restored_on_resume()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let root = temp_root("complete")?;
+        let paths = InstallPaths::with_root(&root);
+        let transaction = StepTransaction::begin(
+            &paths,
+            "install-id",
+            "runtime",
+            &["/etc/php/new.ini".to_string()],
+        )?;
+        transaction.complete()?;
+
+        assert!(!restore_unfinished_transaction(
+            &paths,
+            "install-id",
+            "runtime"
+        )?);
+        let manifest = fs::read_to_string(
+            root.join("var/lib/g7-installer/transactions/install-id/runtime/manifest.json"),
+        )?;
+        assert!(manifest.contains("\"status\": \"completed\""));
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unfinished_transaction_restores_files_symlinks_and_marks_manifest()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let root = temp_root("resume")?;
+        let paths = InstallPaths::with_root(&root);
+        fs::create_dir_all(root.join("etc/nginx"))?;
+        fs::write(root.join("etc/nginx/original.conf"), "original")?;
+        unix_fs::symlink("original.conf", root.join("etc/nginx/enabled.conf"))?;
+        let transaction = StepTransaction::begin(
+            &paths,
+            "install-id",
+            "vhost",
+            &[
+                "/etc/nginx/original.conf".to_string(),
+                "/etc/nginx/enabled.conf".to_string(),
+                "/etc/nginx/new.conf".to_string(),
+                "/etc/nginx".to_string(),
+            ],
+        )?;
+        fs::write(root.join("etc/nginx/original.conf"), "changed")?;
+        fs::remove_file(root.join("etc/nginx/enabled.conf"))?;
+        unix_fs::symlink("new.conf", root.join("etc/nginx/enabled.conf"))?;
+        fs::write(root.join("etc/nginx/new.conf"), "new")?;
+        drop(transaction);
+
+        assert!(restore_unfinished_transaction(
+            &paths,
+            "install-id",
+            "vhost"
+        )?);
+        assert_eq!(
+            fs::read_to_string(root.join("etc/nginx/original.conf"))?,
+            "original"
+        );
+        assert_eq!(
+            fs::read_link(root.join("etc/nginx/enabled.conf"))?,
+            PathBuf::from("original.conf")
+        );
+        assert!(!root.join("etc/nginx/new.conf").exists());
+        let manifest = fs::read_to_string(
+            root.join("var/lib/g7-installer/transactions/install-id/vhost/manifest.json"),
+        )?;
+        assert!(manifest.contains("\"status\": \"restored\""));
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unfinished_transaction_rejects_invalid_manifest_and_snapshot_kind()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let root = temp_root("invalid")?;
+        let paths = InstallPaths::with_root(&root);
+        let manifest_dir = root.join("var/lib/g7-installer/transactions/install-id/runtime");
+        fs::create_dir_all(&manifest_dir)?;
+        fs::write(manifest_dir.join("manifest.json"), "not-json")?;
+        assert!(restore_unfinished_transaction(&paths, "install-id", "runtime").is_err());
+
+        let manifest = TransactionManifest {
+            version: 1,
+            install_id: "install-id".to_string(),
+            step: "runtime".to_string(),
+            status: "started".to_string(),
+            files: vec![FileSnapshot {
+                path: "/etc/php/invalid".to_string(),
+                kind: "unsupported".to_string(),
+                backup: None,
+                link_target: None,
+                mode: None,
+            }],
+        };
+        fs::write(
+            manifest_dir.join("manifest.json"),
+            serde_json::to_vec(&manifest)?,
+        )?;
+        assert!(restore_unfinished_transaction(&paths, "install-id", "runtime").is_err());
         fs::remove_dir_all(root)?;
         Ok(())
     }

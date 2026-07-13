@@ -5,9 +5,31 @@ pub(super) fn apply_vhost_phase<R: CommandRunner>(
     paths: &InstallPaths,
     plan: &plan::InstallPlan,
     owned: &mut Vec<String>,
+    preinstall_package_checks: &[InstallCheck],
 ) -> Result<Vec<InstallCheck>> {
     let mut checks = Vec::new();
     let sizing = detected_memory_sizing(probe);
+    if matches!(plan.web_server.as_str(), "nginx" | "frankenphp")
+        && package_was_absent(preinstall_package_checks, "nginx")
+    {
+        checks.push(disable_default_nginx_site(paths)?);
+        write_owned_file(
+            paths,
+            g7_system::nginx::G7_DEFAULT_DENY_AVAILABLE,
+            nginx_default_deny_content(),
+            owned,
+        )?;
+        create_owned_symlink(
+            paths,
+            g7_system::nginx::G7_DEFAULT_DENY_AVAILABLE,
+            g7_system::nginx::G7_DEFAULT_DENY_ENABLED,
+            owned,
+        )?;
+        checks.push(InstallCheck::pass(
+            "nginx-unknown-host-deny",
+            "등록되지 않은 HTTP Host 요청을 Nginx 기본 서버에서 444로 종료하도록 설정했습니다.",
+        ));
+    }
 
     match plan.web_server.as_str() {
         "nginx" => {
@@ -167,6 +189,54 @@ pub(super) fn apply_vhost_phase<R: CommandRunner>(
     ));
 
     Ok(checks)
+}
+
+pub(super) fn disable_default_nginx_site(paths: &InstallPaths) -> Result<InstallCheck> {
+    const PATH: &str = "/etc/nginx/sites-enabled/default";
+    let target = paths.resolve(PATH);
+    match fs::symlink_metadata(&target) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            let link_target = fs::read_link(&target).map_err(|source| Error::FileReadFailed {
+                path: PATH.to_string(),
+                source,
+            })?;
+            let expected = link_target == Path::new("/etc/nginx/sites-available/default")
+                || link_target == Path::new("../sites-available/default")
+                || link_target == Path::new("/etc/nginx/sites-enabled/../sites-available/default");
+            if !expected {
+                return Err(Error::InstallVerificationFailed {
+                    checks: format!(
+                        "Nginx 기본 사이트 링크가 배포판 기본 대상을 가리키지 않습니다: {} -> {}",
+                        PATH,
+                        link_target.display()
+                    ),
+                });
+            }
+            fs::remove_file(&target).map_err(|source| Error::FileRemoveFailed {
+                path: PATH.to_string(),
+                source,
+            })?;
+            Ok(InstallCheck::pass(
+                "nginx-default-site-disabled",
+                "신규 Nginx 설치의 기본 사이트를 비활성화해 알 수 없는 Host 요청이 기본 페이지로 연결되지 않게 했습니다.",
+            ))
+        }
+        Ok(_) => Err(Error::InstallVerificationFailed {
+            checks: format!("{PATH}가 배포판 기본 심볼릭 링크가 아니므로 자동 변경하지 않습니다."),
+        }),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(InstallCheck::pass(
+            "nginx-default-site-disabled",
+            "Nginx 기본 사이트는 이미 비활성화되어 있습니다.",
+        )),
+        Err(source) => Err(Error::FileReadFailed {
+            path: PATH.to_string(),
+            source,
+        }),
+    }
+}
+
+pub(super) fn nginx_default_deny_content() -> &'static str {
+    "# Managed by g7inst.\nserver {\n    listen 80 default_server;\n    listen [::]:80 default_server;\n    server_name _;\n    return 444;\n}\n"
 }
 
 const VHOST_SMOKE_ATTEMPTS: usize = 20;
@@ -572,12 +642,13 @@ pub(super) fn nginx_tls_vhost_content(
     let http_hosts = certificate_hosts(plan).join(" ");
     let cert_name = &plan.domain;
     let app_hosts = nginx_app_hosts(plan);
+    let https_host = primary_http_host(plan);
     let canonical_redirect = nginx_https_canonical_redirect(plan);
     let certbot_http01_location = nginx_certbot_http01_challenge_location();
     let runtime_directives = nginx_server_runtime_directives(sizing);
 
     format!(
-        "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {http_hosts};\n    root {root};\n\n{certbot_http01_location}\n    location / {{\n        return 301 https://$host$request_uri;\n    }}\n}}\n\n{canonical_redirect}server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    ssl_certificate /etc/letsencrypt/live/{cert_name}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{cert_name}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_prefer_server_ciphers off;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    add_header X-Content-Type-Options nosniff always;\n    add_header X-Frame-Options SAMEORIGIN always;\n    add_header Referrer-Policy strict-origin-when-cross-origin always;\n\n{runtime_directives}{certbot_http01_location}\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
+        "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {http_hosts};\n    root {root};\n\n{certbot_http01_location}\n    location / {{\n        return 301 https://{https_host}$request_uri;\n    }}\n}}\n\n{canonical_redirect}server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    ssl_certificate /etc/letsencrypt/live/{cert_name}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{cert_name}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_prefer_server_ciphers off;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    add_header X-Content-Type-Options nosniff always;\n    add_header X-Frame-Options SAMEORIGIN always;\n    add_header Referrer-Policy strict-origin-when-cross-origin always;\n\n{runtime_directives}{certbot_http01_location}\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n\n    location ~ \\.php$ {{\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{php_socket};\n    }}\n\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
         root = plan.app_document_root,
     )
 }
@@ -586,12 +657,13 @@ pub(super) fn nginx_frankenphp_tls_vhost_content(plan: &plan::InstallPlan) -> St
     let http_hosts = certificate_hosts(plan).join(" ");
     let cert_name = &plan.domain;
     let app_hosts = nginx_app_hosts(plan);
+    let https_host = primary_http_host(plan);
     let canonical_redirect = nginx_https_canonical_redirect(plan);
     let certbot_http01_location = nginx_certbot_http01_challenge_location();
     let proxy = nginx_frankenphp_proxy_location();
 
     format!(
-        "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {http_hosts};\n    root {root};\n\n{certbot_http01_location}\n    location / {{\n        return 301 https://$host$request_uri;\n    }}\n}}\n\n{canonical_redirect}server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    ssl_certificate /etc/letsencrypt/live/{cert_name}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{cert_name}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_prefer_server_ciphers off;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    add_header X-Content-Type-Options nosniff always;\n    add_header X-Frame-Options SAMEORIGIN always;\n    add_header Referrer-Policy strict-origin-when-cross-origin always;\n\n{certbot_http01_location}{proxy}\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
+        "server {{\n    listen 80;\n    listen [::]:80;\n    server_name {http_hosts};\n    root {root};\n\n{certbot_http01_location}\n    location / {{\n        return 301 https://{https_host}$request_uri;\n    }}\n}}\n\n{canonical_redirect}server {{\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name {app_hosts};\n    root {root};\n    index index.php index.html index.htm;\n\n    ssl_certificate /etc/letsencrypt/live/{cert_name}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{cert_name}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_prefer_server_ciphers off;\n\n    access_log /var/log/nginx/g7-access.log;\n    error_log /var/log/nginx/g7-error.log;\n\n    add_header X-Content-Type-Options nosniff always;\n    add_header X-Frame-Options SAMEORIGIN always;\n    add_header Referrer-Policy strict-origin-when-cross-origin always;\n\n{certbot_http01_location}{proxy}\n    location ~ /\\. {{\n        deny all;\n    }}\n}}\n",
         root = plan.app_document_root,
     )
 }
