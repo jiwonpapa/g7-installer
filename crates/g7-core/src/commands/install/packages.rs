@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn apply_package_phase<R: CommandRunner>(
     probe: &SystemProbe<R>,
     paths: &InstallPaths,
-    plan: &plan::InstallPlan,
+    plan: &mut plan::InstallPlan,
 ) -> std::result::Result<ApplySummary, Box<PackagePhaseFailure>> {
     apply_package_phase_with_baseline(probe, paths, plan, None)
 }
@@ -11,24 +11,13 @@ pub(super) fn apply_package_phase<R: CommandRunner>(
 pub(super) fn apply_package_phase_with_baseline<R: CommandRunner>(
     probe: &SystemProbe<R>,
     paths: &InstallPaths,
-    plan: &plan::InstallPlan,
+    plan: &mut plan::InstallPlan,
     preserved_baseline: Option<&[InstallCheck]>,
 ) -> std::result::Result<ApplySummary, Box<PackagePhaseFailure>> {
-    let packages = package_names(plan);
     let services = managed_services(plan);
     let ports = managed_ports(plan);
-    let preinstall_package_checks = match preserved_baseline.filter(|checks| !checks.is_empty()) {
-        Some(checks) => checks.to_vec(),
-        None => {
-            inspect_preinstall_packages(probe, &packages).map_err(|error| PackagePhaseFailure {
-                error,
-                summary: ApplySummary::default(),
-                completed_steps: Vec::new(),
-            })?
-        }
-    };
     let mut summary = ApplySummary {
-        preinstall_package_checks,
+        preinstall_package_checks: preserved_baseline.unwrap_or_default().to_vec(),
         ..ApplySummary::default()
     };
     let mut completed_steps = Vec::new();
@@ -47,6 +36,59 @@ pub(super) fn apply_package_phase_with_baseline<R: CommandRunner>(
         return Err(package_phase_failure(error, &summary, &completed_steps));
     }
     completed_steps.push("apt-updated".to_string());
+
+    if plan.php_source == g7_system::php::PHP_SOURCE_AUTO {
+        let candidate_package = format!("php{}-cli", plan.php_version);
+        let available = match probe.apt_candidate_available(&candidate_package) {
+            Ok(available) => available,
+            Err(err) => {
+                return Err(package_phase_failure(
+                    command_error(
+                        "php-source-detect",
+                        format!("apt-cache policy {candidate_package}"),
+                        err,
+                    ),
+                    &summary,
+                    &completed_steps,
+                ));
+            }
+        };
+        plan.php_source = if available {
+            g7_system::php::PHP_SOURCE_UBUNTU
+        } else {
+            g7_system::php::PHP_SOURCE_ONDREJ
+        }
+        .to_string();
+        completed_steps.push("php-apt-source-detected".to_string());
+    }
+
+    let mysql_candidate = match probe.apt_candidate_version("mysql-server") {
+        Ok(candidate) => candidate,
+        Err(err) => {
+            return Err(package_phase_failure(
+                command_error("mysql-source-detect", "apt-cache policy mysql-server", err),
+                &summary,
+                &completed_steps,
+            ));
+        }
+    };
+    let mysql_source_required =
+        mysql_apt_source_required(mysql_candidate.as_deref(), &plan.database_version);
+
+    let mut packages = package_names(plan);
+    if plan.php_source == g7_system::php::PHP_SOURCE_ONDREJ {
+        packages.extend(php_source_prerequisite_packages());
+    }
+    if mysql_source_required {
+        packages.push("mysql-apt-config".to_string());
+    }
+    packages.sort();
+    packages.dedup();
+
+    if summary.preinstall_package_checks.is_empty() {
+        summary.preinstall_package_checks = inspect_preinstall_packages(probe, &packages)
+            .map_err(|error| package_phase_failure(error, &summary, &completed_steps))?;
+    }
 
     if plan.php_source == g7_system::php::PHP_SOURCE_ONDREJ {
         let source_packages = php_source_prerequisite_packages();
@@ -89,6 +131,7 @@ pub(super) fn apply_package_phase_with_baseline<R: CommandRunner>(
             return Err(package_phase_failure(error, &summary, &completed_steps));
         }
         completed_steps.push("php-apt-source-added".to_string());
+        summary.php_apt_source_added = true;
 
         let output = match probe.apt_update() {
             Ok(output) => output,
@@ -107,11 +150,12 @@ pub(super) fn apply_package_phase_with_baseline<R: CommandRunner>(
         completed_steps.push("apt-updated-after-php-source".to_string());
     }
 
-    if plan.database_version == "8.4" {
-        if let Err(error) = configure_mysql_apt_source(probe, paths) {
+    if mysql_source_required {
+        if let Err(error) = configure_mysql_apt_source(probe, paths, &plan.database_version) {
             return Err(package_phase_failure(error, &summary, &completed_steps));
         }
         completed_steps.push("mysql-apt-source-added".to_string());
+        summary.mysql_apt_source_added = true;
 
         let output = match probe.apt_update() {
             Ok(output) => output,
@@ -282,6 +326,7 @@ impl Drop for TemporaryDownload {
 pub(super) fn configure_mysql_apt_source<R: CommandRunner>(
     probe: &SystemProbe<R>,
     paths: &InstallPaths,
+    database_version: &str,
 ) -> Result<()> {
     let archive = paths.resolve(MYSQL_APT_CONFIG_ARCHIVE_PATH);
     if let Some(parent) = archive.parent() {
@@ -329,8 +374,19 @@ pub(super) fn configure_mysql_apt_source<R: CommandRunner>(
         });
     }
 
+    let server_component = match database_version {
+        "8.0" => "mysql-8.0",
+        "8.4" => "mysql-8.4-lts",
+        value => {
+            return Err(Error::InvalidOption {
+                field: "database-version",
+                value: value.to_string(),
+                supported: "8.0, 8.4".to_string(),
+            });
+        }
+    };
     let output = probe
-        .apt_install_mysql_repo_config(&archive_path, "mysql-8.4-lts")
+        .apt_install_mysql_repo_config(&archive_path, server_component)
         .map_err(|err| {
             command_error(
                 "mysql-apt-source-add",
@@ -343,6 +399,20 @@ pub(super) fn configure_mysql_apt_source<R: CommandRunner>(
         format!("apt-get install -y {archive_path}"),
         output,
     )
+}
+
+pub(super) fn apt_version_matches_series(candidate: &str, series: &str) -> bool {
+    let candidate = candidate
+        .split_once(':')
+        .map_or(candidate, |(_, version)| version);
+
+    candidate == series
+        || candidate.starts_with(&format!("{series}."))
+        || candidate.starts_with(&format!("{series}-"))
+}
+
+pub(super) fn mysql_apt_source_required(candidate: Option<&str>, series: &str) -> bool {
+    !candidate.is_some_and(|candidate| apt_version_matches_series(candidate, series))
 }
 
 pub(super) fn package_phase_failure(

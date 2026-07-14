@@ -254,29 +254,8 @@ pub(super) fn normalize_php_version(version: String) -> Result<String> {
     }
 }
 
-pub(super) fn normalize_php_source(php_version: &str, source: String) -> Result<String> {
-    let source = normalize_supported_option("php-source", source, &SUPPORTED_PHP_SOURCES)?;
-    let source = if source == PHP_SOURCE_AUTO {
-        if php_version == UBUNTU_FPM_VERSION {
-            PHP_SOURCE_UBUNTU
-        } else {
-            PHP_SOURCE_ONDREJ
-        }
-    } else {
-        source.as_str()
-    };
-
-    if source == PHP_SOURCE_UBUNTU && php_version != UBUNTU_FPM_VERSION {
-        return Err(Error::InvalidOption {
-            field: "php-source",
-            value: format!("{source}+php{php_version}"),
-            supported: format!(
-                "Ubuntu 24.04 기본 apt는 PHP {UBUNTU_FPM_VERSION} 기준입니다. PHP {php_version}은 php-source=ondrej로 Ondrej PHP PPA를 추가해야 합니다."
-            ),
-        });
-    }
-
-    Ok(source.to_string())
+pub(super) fn normalize_php_source(_php_version: &str, source: String) -> Result<String> {
+    normalize_supported_option("php-source", source, &SUPPORTED_PHP_SOURCES)
 }
 
 pub(super) fn normalize_site_user(site_user: String) -> Result<String> {

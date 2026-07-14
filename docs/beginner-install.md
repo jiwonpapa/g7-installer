@@ -4,7 +4,7 @@
 
 대상은 그누보드 설치, 관리자 설정, FTP/SFTP 업로드 정도는 해본 사용자입니다. 서버 명령은 복사해서 따라 하고, 낯선 용어는 웹 화면의 `?` 도움말과 아래 용어 설명에서 확인합니다.
 
-현재 문서는 Public Beta 기준입니다. 새 Ubuntu 24.04 VPS에서 그누보드7 설치 기반을 만드는 흐름만 다룹니다.
+현재 문서는 Public Beta 기준입니다. 설치기는 새 Ubuntu 22.04 이상을 허용하며, 이 문서는 화면이 고정된 Lightsail Ubuntu 24.04 예시로 설명합니다.
 
 ## 전체 순서
 
@@ -71,7 +71,7 @@ apt-get update
 apt-get install -y ca-certificates curl
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT HUP INT TERM
-curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.10/bootstrap.sh -o "$tmp"
+curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.11/bootstrap.sh -o "$tmp"
 bash "$tmp"
 g7inst --version
 ```
@@ -187,7 +187,7 @@ sudo tail -120 /var/log/g7-lightsail-bootstrap.log
 sudo apt-get update
 sudo apt-get install -y ca-certificates curl
 tmp="$(mktemp)"
-curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.10/bootstrap.sh -o "$tmp"
+curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.11/bootstrap.sh -o "$tmp"
 sudo bash "$tmp"
 rm -f "$tmp"
 g7inst --version
@@ -243,13 +243,13 @@ SSH 접속 방식에 맞는 명령 하나만 실행합니다. SSH 연결, 터널
 Mac 터미널:
 
 ```bash
-ssh -i "$HOME/.ssh/lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.10/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$HOME/.ssh/lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.11/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 Windows PowerShell:
 
 ```powershell
-ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.10/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.11/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 ### SSH 비밀번호 방식
@@ -257,7 +257,7 @@ ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ub
 Mac 터미널과 Windows PowerShell에서 같은 명령을 사용합니다.
 
 ```bash
-ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.10/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.11/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 SSH 비밀번호와 sudo 비밀번호를 물으면 터미널에 입력합니다. 비밀번호는 명령어나 웹 화면에 넣지 않습니다.
@@ -272,9 +272,9 @@ http://127.0.0.1:7717/?token=...
 
 `사이트 계정 비밀번호`는 새로 정합니다. 이 값은 설치기가 만들 `g7` 같은 사이트 계정의 SFTP/파일관리 비밀번호입니다. sudo 권한은 주지 않습니다.
 
-`운영 권장` 프로필은 Ubuntu 24.04 기본 apt의 PHP 8.3과 MySQL 8.0을 사용합니다. `최신 지원` 프로필은 검증된 Ondrej PPA의 PHP 8.5와 MySQL 공식 APT의 8.4 LTS를 사용합니다.
+`운영 권장` 프로필은 PHP 8.3과 MySQL 8.0을, `최신 지원` 프로필은 PHP 8.5와 MySQL 8.4 LTS를 선택합니다. 설치기는 서버 기본 apt 후보를 우선하고 없을 때만 검증된 외부 저장소를 추가합니다.
 
-웹 UI 기본 조합은 `운영 권장 / Nginx / PHP 8.3 / MySQL 8.0 Ubuntu 기본 APT / www로 통일 / Redis 사용 / 메일 발송 안 함 / 그누보드7`입니다. 최신 지원은 PHP 8.5와 MySQL 8.4 LTS를 함께 선택합니다. 외부 SMTP를 선택하면 계정과 비밀번호를 필수로 받고 비밀번호는 루트 전용 비밀 파일에만 저장합니다. 로컬 Postfix는 발신 IP 평판·PTR·25번 포트 정책을 직접 관리할 사용자만 선택합니다.
+웹 UI 기본 조합은 `운영 권장 / Nginx / PHP 8.3 / MySQL 8.0 / www로 통일 / Redis 사용 / 메일 발송 안 함 / 그누보드7`입니다. 선택 버전의 apt 후보는 설치기가 자동 감지합니다. 최신 지원은 PHP 8.5와 MySQL 8.4 LTS를 함께 선택합니다. 외부 SMTP를 선택하면 계정과 비밀번호를 필수로 받고 비밀번호는 루트 전용 비밀 파일에만 저장합니다. 로컬 Postfix는 발신 IP 평판·PTR·25번 포트 정책을 직접 관리할 사용자만 선택합니다.
 
 ## 완료 기준
 

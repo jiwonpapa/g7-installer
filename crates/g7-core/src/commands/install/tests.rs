@@ -1187,6 +1187,31 @@ fn selected_database_version_must_match_installed_server() {
 }
 
 #[test]
+fn apt_candidate_series_matching_handles_epochs_and_future_ubuntu_revisions() {
+    assert!(super::apt_version_matches_series(
+        "1:8.4.6-0ubuntu0.26.04.1",
+        "8.4"
+    ));
+    assert!(super::apt_version_matches_series(
+        "8.0.46-0ubuntu0.22.04.1",
+        "8.0"
+    ));
+    assert!(!super::apt_version_matches_series(
+        "8.0.46-0ubuntu0.24.04.1",
+        "8.4"
+    ));
+    assert!(!super::mysql_apt_source_required(
+        Some("1:8.4.6-0ubuntu0.26.04.1"),
+        "8.4"
+    ));
+    assert!(super::mysql_apt_source_required(
+        Some("8.0.46-0ubuntu0.24.04.1"),
+        "8.4"
+    ));
+    assert!(super::mysql_apt_source_required(None, "8.4"));
+}
+
+#[test]
 fn mysql_84_source_is_downloaded_verified_and_selected_noninteractively()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     let fs_root = create_temp_fs_root()?;
@@ -1200,7 +1225,7 @@ fn mysql_84_source_is_downloaded_verified_and_selected_noninteractively()
     runner.push_output(CommandOutput::success(""));
     let probe = SystemProbe::new(runner).with_fs_root(&fs_root);
 
-    super::configure_mysql_apt_source(&probe, &paths)?;
+    super::configure_mysql_apt_source(&probe, &paths, "8.4")?;
     let commands = probe.runner().recorded();
 
     assert_eq!(commands[0].program, OsString::from("curl"));
@@ -1260,7 +1285,7 @@ fn package_retry_keeps_original_preinstall_baseline()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     let fs_root = create_temp_fs_root()?;
     let paths = InstallPaths::with_root(&fs_root);
-    let plan = super::plan::build_with_options(
+    let mut plan = super::plan::build_with_options(
         "example.com".to_string(),
         super::plan::PlanOptions::default(),
     )?;
@@ -1276,8 +1301,9 @@ fn package_retry_keeps_original_preinstall_baseline()
     runner.push_output(CommandOutput::failure(100, "apt update failed"));
     let probe = SystemProbe::new(runner);
 
-    let failure = super::apply_package_phase_with_baseline(&probe, &paths, &plan, Some(&baseline))
-        .expect_err("package phase must fail");
+    let failure =
+        super::apply_package_phase_with_baseline(&probe, &paths, &mut plan, Some(&baseline))
+            .expect_err("package phase must fail");
 
     assert_eq!(failure.summary.preinstall_package_checks, baseline);
     assert_eq!(probe.runner().recorded().len(), 1);
@@ -1847,17 +1873,36 @@ fn install_fails_before_install_when_package_candidate_is_missing()
     runner.push_output(CommandOutput::success("inactive\n"));
     runner.push_output(CommandOutput::success(""));
     runner.push_output(CommandOutput::success(""));
-    for _package in super::package_names(&install_plan) {
+    runner.push_output(CommandOutput::success("apt update ok\n"));
+    runner.push_output(CommandOutput::success("php8.5-cli:\n  Candidate: (none)\n"));
+    runner.push_output(CommandOutput::success(
+        "mysql-server:\n  Candidate: 8.0.46-0ubuntu0.24.04.3\n",
+    ));
+    let mut packages = super::package_names(&install_plan);
+    packages.extend(super::php_source_prerequisite_packages());
+    packages.sort();
+    packages.dedup();
+    for _package in &packages {
         runner.push_output(CommandOutput::failure(1, "no packages found"));
     }
-    runner.push_output(CommandOutput::success("apt update ok\n"));
     runner.push_output(CommandOutput::success(
         "php source prerequisites installed\n",
     ));
     runner.push_output(CommandOutput::success("ondrej ppa added\n"));
     runner.push_output(CommandOutput::success("apt update after php source ok\n"));
-    runner.push_output(CommandOutput::success("nginx:\n  Candidate: 1\n"));
-    runner.push_output(CommandOutput::success("php8.5-fpm:\n  Candidate: (none)\n"));
+    for package in &packages {
+        let candidate = if package == "php8.5-fpm" {
+            "(none)".to_string()
+        } else {
+            "1".to_string()
+        };
+        runner.push_output(CommandOutput::success(format!(
+            "{package}:\n  Candidate: {candidate}\n"
+        )));
+        if package == "php8.5-fpm" {
+            break;
+        }
+    }
     let probe = SystemProbe::new(runner)
         .with_os_release_path(&os_release_path)
         .with_fs_root(&fs_root);
@@ -1910,6 +1955,52 @@ fn install_adds_ondrej_source_for_php_85() -> std::result::Result<(), Box<dyn st
             .contains(&"apt-updated-after-php-source".to_string())
     );
     assert!(report_json.contains("\"php_source\": \"ondrej\""));
+
+    fs::remove_file(os_release_path)?;
+    fs::remove_dir_all(fs_root)?;
+    Ok(())
+}
+
+#[test]
+fn install_uses_native_php_candidate_on_newer_ubuntu()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let os_release_path = write_temp_os_release_version("26.04")?;
+    let fs_root = create_temp_fs_root()?;
+    prepare_webserver_test_files(&fs_root)?;
+    let options = super::plan::PlanOptions::default();
+    let plan = super::plan::build_with_options("example.com".to_string(), options.clone())?;
+    let runner = FakeCommandRunner::default();
+    runner.push_output(CommandOutput::success("0\n"));
+    runner.push_output(CommandOutput::success("inactive\n"));
+    runner.push_output(CommandOutput::success("inactive\n"));
+    runner.push_output(CommandOutput::success(""));
+    runner.push_output(CommandOutput::success(""));
+    push_successful_apply_outputs_with_certbot_and_php_candidate(
+        &runner,
+        &plan,
+        false,
+        CommandOutput::success("cert issued\n"),
+        true,
+    );
+    let probe = SystemProbe::new(runner)
+        .with_os_release_path(&os_release_path)
+        .with_fs_root(&fs_root);
+    let paths = InstallPaths::with_root(&fs_root);
+
+    let report = run_with_probe_and_paths("example.com".to_string(), options, &probe, &paths)?;
+    let commands = probe.runner().recorded();
+
+    assert_eq!(report.php_source, "ubuntu");
+    assert!(
+        !report
+            .completed_steps
+            .contains(&"php-apt-source-added".to_string())
+    );
+    assert!(
+        commands
+            .iter()
+            .all(|command| !command.display().contains("add-apt-repository"))
+    );
 
     fs::remove_file(os_release_path)?;
     fs::remove_dir_all(fs_root)?;
@@ -2012,15 +2103,59 @@ fn push_successful_apply_outputs_with_certbot(
     site_password_set: bool,
     certbot_output: CommandOutput,
 ) {
-    let packages = super::package_names(install_plan);
+    push_successful_apply_outputs_with_certbot_and_php_candidate(
+        runner,
+        install_plan,
+        site_password_set,
+        certbot_output,
+        false,
+    );
+}
+
+fn push_successful_apply_outputs_with_certbot_and_php_candidate(
+    runner: &FakeCommandRunner,
+    install_plan: &super::plan::InstallPlan,
+    site_password_set: bool,
+    certbot_output: CommandOutput,
+    native_php_candidate: bool,
+) {
+    let resolved_php_source =
+        if install_plan.php_source == g7_system::php::PHP_SOURCE_AUTO && native_php_candidate {
+            g7_system::php::PHP_SOURCE_UBUNTU
+        } else if install_plan.php_source == g7_system::php::PHP_SOURCE_AUTO {
+            g7_system::php::PHP_SOURCE_ONDREJ
+        } else {
+            install_plan.php_source.as_str()
+        };
+    let mut packages = super::package_names(install_plan);
+    if resolved_php_source == g7_system::php::PHP_SOURCE_ONDREJ {
+        packages.extend(super::php_source_prerequisite_packages());
+    }
+    packages.sort();
+    packages.dedup();
     let services = super::managed_services(install_plan);
     let ports = super::managed_ports(install_plan);
 
+    runner.push_output(CommandOutput::success("apt update ok\n"));
+    if install_plan.php_source == g7_system::php::PHP_SOURCE_AUTO {
+        let candidate = if native_php_candidate {
+            format!("{}.1-test", install_plan.php_version)
+        } else {
+            "(none)".to_string()
+        };
+        runner.push_output(CommandOutput::success(format!(
+            "php{}-cli:\n  Candidate: {candidate}\n",
+            install_plan.php_version,
+        )));
+    }
+    runner.push_output(CommandOutput::success(format!(
+        "mysql-server:\n  Candidate: {}.99-test\n",
+        install_plan.database_version
+    )));
     for _package in &packages {
         runner.push_output(CommandOutput::failure(1, "no packages found"));
     }
-    runner.push_output(CommandOutput::success("apt update ok\n"));
-    if install_plan.php_source == g7_system::php::PHP_SOURCE_ONDREJ {
+    if resolved_php_source == g7_system::php::PHP_SOURCE_ONDREJ {
         runner.push_output(CommandOutput::success(
             "php source prerequisites installed\n",
         ));
@@ -2454,11 +2589,17 @@ fn push_successful_app_permission_outputs(
 }
 
 fn write_temp_os_release() -> std::result::Result<PathBuf, Box<dyn std::error::Error>> {
+    write_temp_os_release_version("24.04")
+}
+
+fn write_temp_os_release_version(
+    version: &str,
+) -> std::result::Result<PathBuf, Box<dyn std::error::Error>> {
     let mut path = std::env::temp_dir();
     path.push(format!("g7-install-os-release-{}", unique_temp_suffix()?));
     fs::write(
         &path,
-        "ID=ubuntu\nVERSION_ID=\"24.04\"\nPRETTY_NAME=\"Ubuntu 24.04.4 LTS\"\n",
+        format!("ID=ubuntu\nVERSION_ID=\"{version}\"\nPRETTY_NAME=\"Ubuntu {version}\"\n"),
     )?;
     Ok(path)
 }

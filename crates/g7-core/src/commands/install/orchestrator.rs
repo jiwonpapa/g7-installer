@@ -3,6 +3,8 @@ use super::*;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct ApplySummary {
     pub(super) install_started_at_unix_ms: u128,
+    pub(super) php_apt_source_added: bool,
+    pub(super) mysql_apt_source_added: bool,
     pub(super) safety_checks: Vec<InstallCheck>,
     pub(super) preinstall_package_checks: Vec<InstallCheck>,
     pub(super) package_checks: Vec<InstallCheck>,
@@ -101,7 +103,7 @@ pub fn resume_with_probe_and_paths<R: CommandRunner>(
     let mut options = plan_options_from_report(&report_value)?;
     options.database_password = read_database_password(paths)?;
     options.smtp_password = read_smtp_password(paths)?;
-    let install_plan = plan::build_with_options(state.domain.clone(), options)?;
+    let mut install_plan = plan::build_with_options(state.domain.clone(), options)?;
     let mut apply_summary = apply_summary_from_report(&report_value);
     let mut owned_files =
         read_owned_files(&owned_files_path).map_err(|source| Error::FileReadFailed {
@@ -141,7 +143,7 @@ pub fn resume_with_probe_and_paths<R: CommandRunner>(
     resume_pre_tls_steps(
         probe,
         paths,
-        &install_plan,
+        &mut install_plan,
         &mut state,
         &mut apply_summary,
         &mut owned_files,
@@ -400,7 +402,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
             .unwrap_or(random_hex_secret()?),
     );
     let smtp_password = options.smtp_password.clone();
-    let install_plan = plan::build_with_options(domain, options)?;
+    let mut install_plan = plan::build_with_options(domain, options)?;
     let doctor_report = doctor::run_with_probe(probe);
 
     require_root(&doctor_report)?;
@@ -557,7 +559,7 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
         path: STATE_PATH.to_string(),
         source,
     })?;
-    let mut apply_summary = match apply_package_phase(probe, paths, &install_plan) {
+    let mut apply_summary = match apply_package_phase(probe, paths, &mut install_plan) {
         Ok(summary) => summary,
         Err(failure) => {
             let failure = *failure;
@@ -587,11 +589,11 @@ pub fn run_with_probe_and_paths<R: CommandRunner>(
     apply_summary.runtime_checks.extend(early_runtime_checks);
 
     completed_steps.push("apt-updated".to_string());
-    if install_plan.php_source == g7_system::php::PHP_SOURCE_ONDREJ {
+    if apply_summary.php_apt_source_added {
         completed_steps.push("php-apt-source-added".to_string());
         completed_steps.push("apt-updated-after-php-source".to_string());
     }
-    if install_plan.database_version == "8.4" {
+    if apply_summary.mysql_apt_source_added {
         completed_steps.push("mysql-apt-source-added".to_string());
         completed_steps.push("apt-updated-after-mysql-source".to_string());
     }
@@ -1385,6 +1387,8 @@ fn apply_summary_from_report(report: &serde_json::Value) -> ApplySummary {
             .and_then(|value| value.as_u64())
             .map(u128::from)
             .unwrap_or_else(unix_timestamp_millis),
+        php_apt_source_added: false,
+        mysql_apt_source_added: false,
         safety_checks: checks_from_report(report, "safety_checks"),
         preinstall_package_checks: checks_from_report(report, "preinstall_package_checks"),
         package_checks: checks_from_report(report, "package_checks"),
@@ -1421,7 +1425,7 @@ fn checks_from_report(report: &serde_json::Value, key: &str) -> Vec<InstallCheck
 fn resume_pre_tls_steps<R: CommandRunner>(
     probe: &SystemProbe<R>,
     paths: &InstallPaths,
-    plan: &plan::InstallPlan,
+    plan: &mut plan::InstallPlan,
     state: &mut InstallerState,
     summary: &mut ApplySummary,
     owned_files: &mut OwnedFiles,
@@ -1435,6 +1439,10 @@ fn resume_pre_tls_steps<R: CommandRunner>(
         let package_baseline = summary.preinstall_package_checks.clone();
         match apply_package_phase_with_baseline(probe, paths, plan, Some(&package_baseline)) {
             Ok(package_summary) => {
+                let php_apt_source_added = package_summary.php_apt_source_added;
+                let mysql_apt_source_added = package_summary.mysql_apt_source_added;
+                summary.php_apt_source_added = php_apt_source_added;
+                summary.mysql_apt_source_added = mysql_apt_source_added;
                 summary.preinstall_package_checks = package_summary.preinstall_package_checks;
                 summary.package_checks = package_summary.package_checks;
                 summary.service_checks = package_summary.service_checks;
@@ -1456,11 +1464,11 @@ fn resume_pre_tls_steps<R: CommandRunner>(
                 ] {
                     mark_step(completed_steps, step);
                 }
-                if plan.php_source == g7_system::php::PHP_SOURCE_ONDREJ {
+                if php_apt_source_added {
                     mark_step(completed_steps, "php-apt-source-added");
                     mark_step(completed_steps, "apt-updated-after-php-source");
                 }
-                if plan.database_version == "8.4" {
+                if mysql_apt_source_added {
                     mark_step(completed_steps, "mysql-apt-source-added");
                     mark_step(completed_steps, "apt-updated-after-mysql-source");
                 }

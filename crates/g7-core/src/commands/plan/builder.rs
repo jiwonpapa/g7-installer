@@ -170,7 +170,6 @@ pub fn build_with_options(domain: String, options: PlanOptions) -> Result<Instal
         php_version: &php_version,
         php_source: &php_source,
         database_engine: &database_engine,
-        database_version: &database_version,
         redis_mode: &redis_mode,
         mail_mode: &mail_mode,
         local_test: options.local_test,

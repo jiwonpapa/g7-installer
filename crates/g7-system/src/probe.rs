@@ -9,8 +9,8 @@ use crate::account::{
 use crate::apache::{config_test as apache_config_test, enable_module as apache_enable_module};
 use crate::app::{artisan, composer_install, composer_require, npm_install, npm_run_build};
 use crate::apt::{
-    apt_add_repository, apt_candidate_available, apt_install, apt_install_mysql_repo_config,
-    apt_mark_manual, apt_purge, apt_update,
+    apt_add_repository, apt_candidate_available, apt_candidate_version, apt_install,
+    apt_install_mysql_repo_config, apt_mark_manual, apt_purge, apt_update,
 };
 use crate::archive::{
     copy_dir_contents, copy_file, download_file, fetch_text, git_clone, git_fsck_full,
@@ -142,6 +142,10 @@ impl<R: CommandRunner> SystemProbe<R> {
 
     pub fn apt_candidate_available(&self, package: &str) -> Result<bool, SystemProbeError> {
         apt_candidate_available(&self.runner, package).map_err(SystemProbeError::Command)
+    }
+
+    pub fn apt_candidate_version(&self, package: &str) -> Result<Option<String>, SystemProbeError> {
+        apt_candidate_version(&self.runner, package).map_err(SystemProbeError::Command)
     }
 
     pub fn postfix_preseed(&self, mailname: &str) -> Result<CommandOutput, SystemProbeError> {

@@ -2,7 +2,7 @@
 
 Ubuntu VPS에 `g7inst`를 설치하고 웹 마법사로 그누보드7용 서버 구성과 사이트 프로비저닝을 진행하는 도구입니다.
 
-> 현재 공개 릴리스는 `v0.3.0-beta.10` Public Beta입니다. 새 Ubuntu 24.04 VPS 전용으로 `g7inst` 설치, 서버 점검, 웹 마법사, apt 패키지 설치, Nginx/Apache 도메인 연결 설정(vhost), PHP/DB 사양 튜닝, DB 앱 계정 생성, Let's Encrypt 인증서 발급/갱신 검증, 그누보드7 브라우저 설치 화면 준비, G7 런타임 마무리와 설치 안내서까지 검증합니다.
+> 현재 공개 릴리스는 `v0.3.0-beta.11` Public Beta입니다. 새 Ubuntu 22.04 이상 VPS에서 `g7inst` 설치, 서버 점검, 웹 마법사, apt 패키지 설치, Nginx/Apache 도메인 연결 설정(vhost), PHP/DB 사양 튜닝, DB 앱 계정 생성, Let's Encrypt 인증서 발급/갱신 검증, 그누보드7 브라우저 설치 화면 준비, G7 런타임 마무리와 설치 안내서까지 검증합니다.
 
 `completed`는 **서버 프로비저닝 완료**를 뜻합니다. 결과 리포트의 앱 링크에서 G7 공식 브라우저 설치를 마친 뒤 설치 안내서의 `G7 런타임 설정 적용`을 실행해야 Redis 캐시·세션·큐, 스케줄러, Reverb와 실효 설정 검증까지 완료됩니다.
 
@@ -59,7 +59,7 @@ Ubuntu VPS에 `g7inst`를 설치하고 웹 마법사로 그누보드7용 서버 
 
 설치·초기화·되돌리기 명령의 stdout/stderr는 웹 화면에 실시간 표시됩니다. 브라우저 연결이 끊기거나 새로고침되어도 같은 컨트롤러의 최근 로그를 순번 기준으로 다시 받습니다. 설치기는 실패 원인을 자동 수정하지 않습니다. 실패 단계의 파일 변경을 복원하고, 설치기 업데이트나 입력·환경 수정 후 `수정 후 현재 단계 재실행`으로 마지막 정상 단계 다음부터 재개합니다.
 
-공개 DB는 MySQL만 지원합니다. MySQL 8.0은 Ubuntu 24.04 기본 APT를 사용하고, MySQL 8.4 LTS는 Oracle 공식 `mysql-apt-config` 패키지의 고정 SHA-256을 검증한 뒤 공식 APT 저장소를 추가합니다. 실제 설치 계열은 DB 단계에서 `VERSION()` 결과로 다시 검증합니다.
+공개 DB는 MySQL만 지원합니다. 선택한 MySQL 계열이 서버 기본 APT에 있으면 그대로 사용하고, 없을 때만 Oracle 공식 `mysql-apt-config` 패키지의 고정 SHA-256을 검증한 뒤 공식 APT 저장소를 추가합니다. 실제 설치 계열은 DB 단계에서 `VERSION()` 결과로 다시 검증합니다.
 
 설치 완료 리포트에는 PHP 버전, SAPI, 로드된 `php.ini`, 추가 ini 경로, 시간대, 메모리/업로드/POST 한도, 실행시간, 입력 변수, OPcache, PHP-FPM pool과 필수 확장을 `PHP 환경 요약`으로 표시합니다. 전체 `phpinfo()` 페이지는 외부에 공개하지 않습니다.
 
@@ -67,10 +67,11 @@ Ubuntu VPS에 `g7inst`를 설치하고 웹 마법사로 그누보드7용 서버 
 
 ## PHP 버전과 apt 소스
 
-- `운영 권장` 프로필은 PHP 8.3과 MySQL 8.0을 선택하고 Ubuntu 24.04 기본 apt 소스를 우선합니다.
-- `최신 지원` 프로필은 PHP 8.5와 MySQL 8.4 LTS를 선택합니다. 설치기가 필요한 서명·저장소를 검증한 뒤 Ondrej PHP PPA와 MySQL 공식 APT를 추가합니다.
+- `운영 권장` 프로필은 PHP 8.3과 MySQL 8.0을 선택합니다.
+- `최신 지원` 프로필은 PHP 8.5와 MySQL 8.4 LTS를 선택합니다.
 - `직접 선택`에서는 PHP와 MySQL 계열을 각각 지정할 수 있습니다.
-- 리포트와 웹 UI에는 `php_source`가 `ubuntu` 또는 `ondrej`로 표시됩니다.
+- 설치기는 서버 기본 apt 후보를 먼저 확인하고, 없을 때만 Ondrej PHP PPA 또는 MySQL 공식 APT를 추가합니다.
+- 설치 전 계획은 `php_source=auto`, 설치 결과 리포트는 실제 선택된 `ubuntu` 또는 `ondrej`를 표시합니다.
 
 ## 공개 지원 범위
 
@@ -80,20 +81,20 @@ Ubuntu VPS에 `g7inst`를 설치하고 웹 마법사로 그누보드7용 서버 
 
 ## 바로 설치 UI 열기
 
-새 Ubuntu 24.04 VPS의 공인 IP와 SSH 접속 수단을 준비한 뒤, 아래 두 방식 중 하나만 실행합니다. 명령 한 줄이 SSH 접속, `7717` 터널 생성, 최신 `g7inst` 설치 또는 업데이트, 웹 마법사 실행을 모두 처리합니다.
+새 Ubuntu 22.04 이상 VPS의 공인 IP와 SSH 접속 수단을 준비한 뒤, 아래 두 방식 중 하나만 실행합니다. 명령 한 줄이 SSH 접속, `7717` 터널 생성, 최신 `g7inst` 설치 또는 업데이트, 웹 마법사 실행을 모두 처리합니다.
 
 ### SSH 개인키로 접속
 
 Mac 터미널:
 
 ```bash
-ssh -i "$HOME/.ssh/YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.10/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$HOME/.ssh/YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.11/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 Windows PowerShell:
 
 ```powershell
-ssh -i "$env:USERPROFILE\.ssh\YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.10/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$env:USERPROFILE\.ssh\YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.11/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 ### SSH 비밀번호로 접속
@@ -101,7 +102,7 @@ ssh -i "$env:USERPROFILE\.ssh\YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SER
 Mac 터미널과 Windows PowerShell에서 같은 명령을 사용합니다.
 
 ```bash
-ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.10/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.11/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 `SSH_USER`는 VPS 접속 계정으로 바꿉니다. Ubuntu 이미지의 기본 계정은 보통 `ubuntu`입니다. SSH 비밀번호와 sudo 비밀번호는 요청될 때 터미널에 입력하며, 명령어나 웹 화면에 적지 않습니다. Lightsail 기본 Ubuntu는 일반적으로 SSH 비밀번호 대신 `.pem` 개인키를 사용합니다.
@@ -203,7 +204,7 @@ apt-get update
 apt-get install -y ca-certificates curl
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT HUP INT TERM
-curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.10/bootstrap.sh -o "$tmp"
+curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.11/bootstrap.sh -o "$tmp"
 bash "$tmp"
 g7inst --version
 ```

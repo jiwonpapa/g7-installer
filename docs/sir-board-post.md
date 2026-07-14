@@ -11,7 +11,7 @@
 ## 게시용 본문
 
 ````markdown
-새 Ubuntu 24.04 VPS에서 그누보드7을 올릴 때, 서버 패키지와 도메인 연결을 웹 마법사로 준비하는 `G7 Installer`를 공개 베타로 배포합니다.
+새 Ubuntu 22.04 이상 VPS에서 그누보드7을 올릴 때, 서버 패키지와 도메인 연결을 웹 마법사로 준비하는 `G7 Installer`를 공개 베타로 배포합니다.
 
 GitHub: https://github.com/jiwonpapa/g7-installer
 
@@ -19,7 +19,7 @@ GitHub: https://github.com/jiwonpapa/g7-installer
 
 ### 하는 일
 
-- 새 Ubuntu 24.04 VPS 점검과 설치 가능 여부 확인
+- 새 Ubuntu 22.04 이상 VPS 점검과 설치 가능 여부 확인
 - Nginx 권장 또는 Apache 호환 구성, PHP 8.3·MySQL 8.0 운영 권장 프로필, PHP 8.5·MySQL 8.4 LTS 최신 지원 프로필, Redis, PHP-FPM 사이트 계정 pool 설정
 - RAM과 vCPU에 맞춘 PHP, DB, Redis, swap 기준값 적용 및 리포트 저장
 - 도메인과 `www` DNS/IP 확인, vhost 생성, Let's Encrypt 인증서 발급 또는 기존 인증서 재사용·갱신 점검
@@ -37,7 +37,7 @@ GitHub: https://github.com/jiwonpapa/g7-installer
 
 ### 설치 전 준비
 
-1. 새 Ubuntu 24.04 VPS를 준비합니다.
+1. 새 Ubuntu 22.04 이상 VPS를 준비합니다.
 2. 도메인 A 레코드는 서버 공인 IP로, `www`는 루트 도메인 CNAME으로 연결합니다.
 3. VPS 제공자 방화벽에서 `22/tcp`, `80/tcp`, `443/tcp`만 엽니다. `7717`, `3306`, `6379`은 외부에 열지 않습니다.
 4. Cloudflare 사용 시 인증서 발급 중에는 프록시를 `DNS only`로 둡니다.
@@ -47,19 +47,19 @@ GitHub: https://github.com/jiwonpapa/g7-installer
 `.pem` 개인키를 사용하는 Mac은 아래 한 줄을 실행합니다.
 
 ```bash
-ssh -i "$HOME/.ssh/YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.10/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$HOME/.ssh/YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.11/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 Windows PowerShell:
 
 ```powershell
-ssh -i "$env:USERPROFILE\.ssh\YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.10/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$env:USERPROFILE\.ssh\YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.11/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 SSH 비밀번호 로그인을 허용하는 VPS는 Mac과 Windows에서 아래 명령을 사용합니다.
 
 ```bash
-ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.10/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.11/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 SSH 비밀번호와 sudo 비밀번호는 터미널에만 입력합니다. 터미널에 출력된 아래 형태의 정확한 주소를 같은 PC 브라우저에서 엽니다. 설치가 끝날 때까지 터미널을 닫지 않습니다.

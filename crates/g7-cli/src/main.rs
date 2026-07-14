@@ -58,7 +58,7 @@ enum Command {
         /// Public web server: nginx or apache.
         #[arg(long, default_value_t = plan::DEFAULT_WEB_SERVER.to_string())]
         web_server: String,
-        /// PHP runtime version. Default is 8.5. PHP 8.3 uses Ubuntu apt; PHP 8.5 adds the Ondrej PHP PPA automatically.
+        /// PHP runtime version. The installer prefers native apt candidates and adds Ondrej only when needed.
         #[arg(long, default_value_t = plan::DEFAULT_PHP_VERSION.to_string())]
         php_version: String,
         /// PHP apt source: auto, ubuntu, or ondrej.
@@ -136,7 +136,7 @@ enum Command {
         /// Public web server: nginx or apache.
         #[arg(long, default_value_t = plan::DEFAULT_WEB_SERVER.to_string())]
         web_server: String,
-        /// PHP runtime version. Default is 8.5. PHP 8.3 uses Ubuntu apt; PHP 8.5 adds the Ondrej PHP PPA automatically.
+        /// PHP runtime version. The installer prefers native apt candidates and adds Ondrej only when needed.
         #[arg(long, default_value_t = plan::DEFAULT_PHP_VERSION.to_string())]
         php_version: String,
         /// PHP apt source: auto, ubuntu, or ondrej.

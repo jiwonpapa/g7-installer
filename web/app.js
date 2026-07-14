@@ -260,15 +260,15 @@ const errorLabel = {
 const stackProfiles = {
   stable: {
     label: "운영 권장",
-    description: "Ubuntu 기본 저장소를 중심으로 호환성과 관리 편의성을 우선합니다.",
-    repositoryLabel: "Ubuntu 기본 저장소 중심",
+    description: "선택 버전의 apt 후보를 확인해 호환성과 관리 편의성을 우선합니다.",
+    repositoryLabel: "서버 apt 후보 자동 감지",
     php_version: "8.3",
     database_version: "8.0",
   },
   latest: {
     label: "최신 지원",
-    description: "검증된 공식 외부 저장소를 사용해 현재 지원 계열의 기능을 구성합니다.",
-    repositoryLabel: "Ondrej PPA · MySQL 공식 APT",
+    description: "기본 apt 후보를 우선하고 없을 때만 검증된 외부 저장소를 추가합니다.",
+    repositoryLabel: "기본 apt 우선 · 외부 저장소 보완",
     php_version: "8.5",
     database_version: "8.4",
   },
@@ -1765,11 +1765,16 @@ function webServiceName(value) {
 }
 
 function phpSourceForVersion(version) {
-  return version === "8.3" ? "ubuntu" : "ondrej";
+  return "auto";
 }
 
 function phpSourceLabel(value) {
-  return value === "ondrej" ? "Ondrej PPA" : "Ubuntu 기본 apt";
+  const labels = {
+    auto: "저장소 자동 감지",
+    ubuntu: "Ubuntu 기본 apt",
+    ondrej: "Ondrej PPA",
+  };
+  return labels[value] || labels.auto;
 }
 
 function phpRuntimeLabel(version, source = phpSourceForVersion(version)) {
@@ -1782,8 +1787,8 @@ function databaseLabel(value) {
 
 function databaseVersionLabel(value) {
   const labels = {
-    "8.0": "MySQL 8.0 (Ubuntu 기본 APT)",
-    "8.4": "MySQL 8.4 LTS (공식 MySQL APT)",
+    "8.0": "MySQL 8.0 (저장소 자동 감지)",
+    "8.4": "MySQL 8.4 LTS (저장소 자동 감지)",
   };
   return labels[value] || labels["8.4"];
 }

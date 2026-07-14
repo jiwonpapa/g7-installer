@@ -461,8 +461,8 @@ test("options expose MySQL 8.0 and 8.4 only with account autocomplete disabled",
     await page.goto(`${baseUrl}/setup/options?token=e2e`);
     await expect(page.locator('input[name="database"]')).toHaveValue("mysql");
     await expect(page.locator('select[name="database_version"] option')).toHaveText([
-      "MySQL 8.0 (Ubuntu 기본 APT)",
-      "MySQL 8.4 LTS (공식 MySQL APT)",
+      "MySQL 8.0 (저장소 자동 감지)",
+      "MySQL 8.4 LTS (저장소 자동 감지)",
     ]);
     await expect(page.locator('select[name="database_version"]')).toHaveValue("8.0");
     await expect(page.getByText("MariaDB", { exact: true })).toHaveCount(0);
@@ -510,7 +510,9 @@ test("stack profiles synchronize runtime versions and render desktop/mobile prod
     await page.locator('label.profile-segment:has(input[name="stack_profile"][value="latest"])').click();
     await expect(page.locator('select[name="php_version"]')).toHaveValue("8.5");
     await expect(page.locator('select[name="database_version"]')).toHaveValue("8.4");
-    await expect(page.locator("#stack-repository-label")).toContainText("MySQL 공식 APT");
+    await expect(page.locator("#stack-repository-label")).toContainText(
+      "기본 apt 우선 · 외부 저장소 보완",
+    );
 
     await page.locator('.runtime-segments label:has(input[name="web_server"][value="apache"])').click();
     await expect(page.locator('input[name="install_template"]')).toHaveValue("apache");

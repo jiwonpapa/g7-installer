@@ -39,11 +39,11 @@ G7 본체와의 관계:
 ### 3.1 MVP 지원
 
 ```text
-OS: Ubuntu 24.04 LTS
+OS: Ubuntu 22.04 이상
 권한: root 또는 sudo
 웹서버: Nginx 기본, Apache 선택 옵션
 PHP: PHP-FPM 8.5 기본, 8.3 선택 옵션
-DB: MySQL 전용, 8.0(Ubuntu 기본 APT) 또는 8.4 LTS(Oracle 공식 APT)
+DB: MySQL 전용, 8.0 또는 8.4 LTS(apt 후보 자동 감지)
 공개 앱 프로파일: gnuboard7 단일 지원
 HTTPS: Certbot Let's Encrypt
 Cache/Queue: Redis 기본 지원
@@ -51,7 +51,7 @@ Cache/Queue: Redis 기본 지원
 설치 대상: 새 VPS
 ```
 
-PHP 8.5는 `ppa:ondrej/php` apt 소스를 자동 추가합니다. PHP 8.3은 Ubuntu 24.04 기본 apt 소스를 사용합니다.
+PHP와 MySQL은 서버 기본 apt 후보를 우선합니다. 선택 버전 후보가 없을 때만 검증된 Ondrej PHP PPA 또는 Oracle MySQL 공식 APT를 추가하며, 설치 전 모든 패키지 후보를 다시 검사합니다.
 
 Laravel, Octane, FrankenPHP는 내부 실험 프로필로 남아 있지만 Public Beta 사용자 흐름과 문서에서는 지원 범위로 보지 않습니다.
 
@@ -463,7 +463,7 @@ bash scripts/quality-gate.sh
 
 ### 14.4 실제 smoke
 
-릴리스 전 Ubuntu 24.04 fresh VPS 또는 VM에서:
+릴리스 전 Ubuntu 24.04 fresh VPS 또는 VM 기준 하네스에서:
 
 ```bash
 sudo g7inst setup --domain test.example.com
@@ -478,7 +478,8 @@ curl -I https://test.example.com
 
 Public Beta는 아래 조건을 만족해야 배포 가능합니다.
 
-- Ubuntu 24.04 fresh VPS에서 설치 성공
+- Ubuntu 22.04 이상 판정과 패키지 후보 검증 성공
+- 기준 하네스인 Ubuntu 24.04 fresh VPS에서 설치 성공
 - `sudo g7inst setup --domain example.com` 동작
 - `sudo g7inst install --domain example.com` 동작
 - 기존 운영 서버 감지 시 안전 중단

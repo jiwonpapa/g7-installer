@@ -97,16 +97,27 @@ pub fn apt_candidate_available<R: CommandRunner>(
     runner: &R,
     package: &str,
 ) -> Result<bool, CommandError> {
+    Ok(apt_candidate_version(runner, package)?.is_some())
+}
+
+/// Returns the apt candidate version, or `None` when the package has no candidate.
+pub fn apt_candidate_version<R: CommandRunner>(
+    runner: &R,
+    package: &str,
+) -> Result<Option<String>, CommandError> {
     let output = runner.run(&CommandSpec::new("apt-cache").arg("policy").arg(package))?;
 
     if output.status != 0 {
-        return Ok(false);
+        return Ok(None);
     }
 
     Ok(output
         .stdout
         .lines()
-        .any(|line| line.trim().starts_with("Candidate:") && !line.contains("(none)")))
+        .find_map(|line| line.trim().strip_prefix("Candidate:"))
+        .map(str::trim)
+        .filter(|candidate| !candidate.is_empty() && *candidate != "(none)")
+        .map(str::to_string))
 }
 
 fn apt_env() -> CommandSpec {
@@ -118,8 +129,8 @@ fn apt_env() -> CommandSpec {
 #[cfg(test)]
 mod tests {
     use super::{
-        apt_add_repository, apt_candidate_available, apt_install, apt_install_mysql_repo_config,
-        apt_mark_manual, apt_purge, apt_update,
+        apt_add_repository, apt_candidate_available, apt_candidate_version, apt_install,
+        apt_install_mysql_repo_config, apt_mark_manual, apt_purge, apt_update,
     };
     use crate::command::{CommandOutput, FakeCommandRunner};
     use std::ffi::OsString;
@@ -237,6 +248,31 @@ mod tests {
         runner.push_output(CommandOutput::success("php8.5-fpm:\n  Candidate: (none)\n"));
 
         assert!(!apt_candidate_available(&runner, "php8.5-fpm")?);
+        Ok(())
+    }
+
+    #[test]
+    fn apt_candidate_returns_available_version()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::success(
+            "mysql-server:\n  Installed: (none)\n  Candidate: 8.4.6-0ubuntu0.26.04.1\n",
+        ));
+
+        assert_eq!(
+            apt_candidate_version(&runner, "mysql-server")?.as_deref(),
+            Some("8.4.6-0ubuntu0.26.04.1")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn apt_candidate_treats_failed_policy_as_unavailable()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runner = FakeCommandRunner::default();
+        runner.push_output(CommandOutput::failure(100, "package lookup failed"));
+
+        assert_eq!(apt_candidate_version(&runner, "missing")?, None);
         Ok(())
     }
 

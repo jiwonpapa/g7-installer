@@ -263,13 +263,16 @@ fn ubuntu_check(result: Result<OsRelease, SystemProbeError>) -> DoctorCheck {
         Ok(release) if release.is_supported_ubuntu() => DoctorCheck {
             name: "ubuntu-version",
             status: DoctorCheckStatus::Pass,
-            message: format!("{} is supported.", release.pretty_name),
+            message: format!(
+                "{} is supported (minimum Ubuntu 22.04).",
+                release.pretty_name
+            ),
         },
         Ok(release) => DoctorCheck {
             name: "ubuntu-version",
             status: DoctorCheckStatus::Fail,
             message: format!(
-                "{} is not supported. MVP requires Ubuntu 24.04 LTS.",
+                "{} is not supported. Ubuntu 22.04 or newer is required.",
                 release.pretty_name
             ),
         },

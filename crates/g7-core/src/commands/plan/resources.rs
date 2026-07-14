@@ -4,7 +4,7 @@ pub(super) fn preflight_gates(local_test: bool) -> Vec<PlanGate> {
     let mut gates = vec![
         PlanGate {
             name: "os",
-            description: "Require Ubuntu 24.04 LTS.",
+            description: "Require Ubuntu 22.04 or newer and verify apt candidates.",
         },
         PlanGate {
             name: "privilege",
@@ -82,7 +82,6 @@ pub(super) struct PackageInput<'a> {
     pub(super) php_version: &'a str,
     pub(super) php_source: &'a str,
     pub(super) database_engine: &'a str,
-    pub(super) database_version: &'a str,
     pub(super) redis_mode: &'a str,
     pub(super) mail_mode: &'a str,
     pub(super) local_test: bool,
@@ -134,13 +133,6 @@ pub(super) fn packages(input: PackageInput<'_>) -> Vec<PlanPackage> {
             description: "앱 소스 다운로드, 압축 해제, HTTPS 검증에 필요한 도구입니다.",
         },
     ]);
-
-    if input.database_version == "8.4" {
-        packages.push(PlanPackage {
-            name: "mysql-apt-config".to_string(),
-            description: "MySQL 8.4 LTS를 설치하기 위한 Oracle 공식 APT 저장소 설정입니다.",
-        });
-    }
 
     if matches!(input.app_profile.id, "laravel" | "laravel-octane") {
         packages.push(PlanPackage {

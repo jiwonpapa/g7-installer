@@ -15,8 +15,8 @@ pub use crate::app_profile::DEFAULT_APP_PROFILE;
 use g7_state::owned_files::OWNED_FILES_PATH;
 use g7_state::state::STATE_PATH;
 use g7_system::php::{
-    DEFAULT_FPM_VERSION, PHP_SOURCE_AUTO, PHP_SOURCE_ONDREJ, PHP_SOURCE_UBUNTU,
-    SUPPORTED_FPM_VERSIONS, SUPPORTED_PHP_SOURCES, UBUNTU_FPM_VERSION,
+    DEFAULT_FPM_VERSION, PHP_SOURCE_AUTO, PHP_SOURCE_ONDREJ, SUPPORTED_FPM_VERSIONS,
+    SUPPORTED_PHP_SOURCES,
 };
 
 mod builder;
@@ -53,7 +53,7 @@ mod tests {
         assert_eq!(plan.deployment_mode, "public");
         assert_eq!(plan.web_server, "nginx");
         assert_eq!(plan.php_version, "8.5");
-        assert_eq!(plan.php_source, "ondrej");
+        assert_eq!(plan.php_source, "auto");
         assert_eq!(plan.database_engine, "mysql");
         assert_eq!(plan.database_version, "8.0");
         assert_eq!(plan.site_user, "g7");
@@ -293,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn plan_supports_mysql_84_official_repository()
+    fn plan_defers_mysql_84_repository_selection_to_install_time()
     -> std::result::Result<(), Box<dyn std::error::Error>> {
         let plan = build_with_options(
             "example.com".to_string(),
@@ -308,7 +308,7 @@ mod tests {
         assert!(
             plan.packages
                 .iter()
-                .any(|package| package.name == "mysql-apt-config")
+                .all(|package| package.name != "mysql-apt-config")
         );
         Ok(())
     }
@@ -357,7 +357,7 @@ mod tests {
 
         assert_eq!(plan.web_server, "frankenphp");
         assert_eq!(plan.php_version, "8.5");
-        assert_eq!(plan.php_source, "ondrej");
+        assert_eq!(plan.php_source, "auto");
         assert!(plan.packages.iter().any(|package| package.name == "nginx"));
         assert!(
             plan.packages
@@ -407,7 +407,7 @@ mod tests {
         let plan = build_with_options("example.com".to_string(), options)?;
 
         assert_eq!(plan.php_version, "8.5");
-        assert_eq!(plan.php_source, "ondrej");
+        assert_eq!(plan.php_source, "auto");
         assert!(
             plan.packages
                 .iter()
@@ -421,7 +421,7 @@ mod tests {
         assert!(
             plan.packages
                 .iter()
-                .any(|package| package.name.contains("software-properties-common"))
+                .all(|package| !package.name.contains("software-properties-common"))
         );
         assert!(
             plan.packages
@@ -552,7 +552,7 @@ mod tests {
     }
 
     #[test]
-    fn plan_rejects_php_85_with_ubuntu_source()
+    fn plan_accepts_explicit_php_source_for_runtime_candidate_validation()
     -> std::result::Result<(), Box<dyn std::error::Error>> {
         let options = PlanOptions {
             php_version: "8.5".to_string(),
@@ -560,18 +560,9 @@ mod tests {
             ..PlanOptions::default()
         };
 
-        let err = match build_with_options("example.com".to_string(), options) {
-            Ok(_) => return Err(std::io::Error::other("ubuntu php source should fail").into()),
-            Err(err) => err,
-        };
+        let plan = build_with_options("example.com".to_string(), options)?;
 
-        assert!(matches!(
-            err,
-            Error::InvalidOption {
-                field: "php-source",
-                ..
-            }
-        ));
+        assert_eq!(plan.php_source, "ubuntu");
         Ok(())
     }
 

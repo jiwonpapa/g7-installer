@@ -100,6 +100,7 @@ G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 ro
 - 템플릿 렌더링은 실제 nginx/systemd 문법에 가까운 테스트를 둔다.
 - state resume은 중간 실패 case를 포함해 테스트한다.
 - 외부 명령은 fake runner로 통합 테스트한다.
+- OS 지원 판정은 Ubuntu 22.04 이상을 상한 없이 허용하고, 이전 버전·타 배포판·잘못된 버전 문자열을 거부하는 회귀 테스트를 둔다.
 - 릴리스 전 Ubuntu 24.04 fresh VPS 또는 VM smoke test를 통과해야 한다.
 - reset/rollback은 인증서, DB, 사이트 계정, 웹루트, systemd, apt purge 보존·삭제 golden 테스트를 가진다.
 - 실제 VPS 하네스는 staging 인증서, 앱 스모크, 리포트 계약, reset, fresh doctor를 분리 증명한다.

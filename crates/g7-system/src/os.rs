@@ -1,6 +1,10 @@
+//! Linux distribution release detection and installer support policy.
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
+
+const MIN_UBUNTU_VERSION: (u16, u16) = (22, 4);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OsRelease {
@@ -10,9 +14,20 @@ pub struct OsRelease {
 }
 
 impl OsRelease {
+    /// Returns true for Ubuntu 22.04 and every newer Ubuntu release.
     pub fn is_supported_ubuntu(&self) -> bool {
-        self.id == "ubuntu" && self.version_id == "24.04"
+        self.id == "ubuntu"
+            && parse_version_pair(&self.version_id)
+                .is_some_and(|version| version >= MIN_UBUNTU_VERSION)
     }
+}
+
+fn parse_version_pair(value: &str) -> Option<(u16, u16)> {
+    let mut parts = value.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+
+    Some((major, minor))
 }
 
 pub fn read_os_release(path: &Path) -> Result<OsRelease, OsReleaseError> {
@@ -101,6 +116,40 @@ PRETTY_NAME="Ubuntu 24.04.4 LTS"
 
         assert!(release.is_supported_ubuntu());
         assert_eq!(release.pretty_name, "Ubuntu 24.04.4 LTS");
+        Ok(())
+    }
+
+    #[test]
+    fn supports_ubuntu_2204_and_newer_without_an_upper_bound()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        for version in ["22.04", "22.10", "24.04", "26.04", "30.10"] {
+            let release = parse_os_release(&format!(
+                "ID=ubuntu\nVERSION_ID=\"{version}\"\nPRETTY_NAME=\"Ubuntu {version}\"\n"
+            ))?;
+
+            assert!(
+                release.is_supported_ubuntu(),
+                "{version} should be supported"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_old_other_or_malformed_releases()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        for (id, version) in [
+            ("ubuntu", "20.04"),
+            ("debian", "24.04"),
+            ("ubuntu", "rolling"),
+            ("ubuntu", "22"),
+        ] {
+            let release = parse_os_release(&format!(
+                "ID={id}\nVERSION_ID=\"{version}\"\nPRETTY_NAME=\"test\"\n"
+            ))?;
+
+            assert!(!release.is_supported_ubuntu(), "{id} {version} should fail");
+        }
         Ok(())
     }
 }
