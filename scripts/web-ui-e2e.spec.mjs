@@ -136,6 +136,9 @@ async function asset(pathname) {
   if (pathname === "/assets/setup-orbit-light.webp") {
     return readFile(path.join(root, "web/assets/setup-orbit-light.webp"));
   }
+  if (pathname === "/assets/setup-orbit-dark.webp") {
+    return readFile(path.join(root, "web/assets/setup-orbit-dark.webp"));
+  }
   if (pathname === "/promo.sample.json" || pathname === "/promo.json") {
     return readFile(path.join(root, "web/promo.sample.json"));
   }
@@ -350,9 +353,18 @@ test("wizard routes render concise result and optional setup guide", async ({ pa
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${baseUrl}/setup/connect?token=e2e`);
     await expect(page.getByRole("heading", { name: "새 Ubuntu VPS를 그누보드7 서버로" })).toBeVisible();
-    await expect(page.locator(".connect-intro-media")).toHaveAttribute("src", "/assets/setup-orbit-light.webp?v=e2e");
+    await expect(page.locator(".connect-intro-media-light")).toHaveAttribute("src", "/assets/setup-orbit-light.webp?v=e2e");
+    await expect(page.locator(".connect-intro-media-dark")).toHaveAttribute("src", "/assets/setup-orbit-dark.webp?v=e2e");
+    await expect(page.locator(".connect-intro-media-light")).toHaveCSS("opacity", "1");
+    await expect(page.locator(".connect-intro-media-dark")).toHaveCSS("opacity", "0");
     await expect(page.locator(".hero-logo-node")).toHaveCount(6);
     await expect(page.getByRole("button", { name: "서버 점검 시작" })).toBeVisible();
+
+    await page.getByRole("button", { name: "다크 모드" }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator(".connect-intro-media-light")).toHaveCSS("opacity", "0");
+    await expect(page.locator(".connect-intro-media-dark")).toHaveCSS("opacity", "1");
+    await page.getByRole("button", { name: "라이트 모드" }).click();
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.reload();

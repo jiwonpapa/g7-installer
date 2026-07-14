@@ -62,6 +62,13 @@ reject_install_source_pattern() {
   fi
 }
 
+for intro_asset in setup-orbit-light.webp setup-orbit-dark.webp; do
+  if [[ ! -s "${ROOT_DIR}/web/assets/${intro_asset}" ]]; then
+    echo "missing intro artwork: web/assets/${intro_asset}" >&2
+    exit 1
+  fi
+done
+
 need_pattern "web/index.html" "G7 설치 마법사"
 need_pattern "web/index.html" "data-view=\"login\""
 need_pattern "web/index.html" "접속 확인"
@@ -73,6 +80,8 @@ need_pattern "web/index.html" "data-view=\"install\""
 need_pattern "web/index.html" "data-view=\"report\""
 need_pattern "web/index.html" "data-view=\"provision\""
 need_pattern "web/index.html" "id=\"theme-toggle\""
+need_pattern "web/index.html" "setup-orbit-light.webp"
+need_pattern "web/index.html" "setup-orbit-dark.webp"
 reject_pattern "web/index.html" "shutdown-button" "web wizard must not expose a non-functional shutdown control"
 need_pattern "web/index.html" "class=\"btn btn-sm btn-outline icon-button\""
 need_pattern "web/index.html" "data-icon=\"package-plus\""
@@ -215,6 +224,7 @@ need_pattern "web/input.css" ".download-actions"
 need_pattern "web/input.css" "g7inst-spin"
 need_pattern "web/input.css" "data-status=\"info\""
 need_web_setup_pattern "CACHE_CONTROL"
+need_web_setup_pattern "setup-orbit-dark.webp"
 need_web_setup_pattern "emit_progress"
 need_web_setup_pattern "ensure_setup_runs_as_root_or_reexec"
 need_web_setup_pattern "reexec_setup_with_sudo"

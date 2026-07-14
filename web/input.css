@@ -154,7 +154,29 @@
     height: 100%;
     object-fit: cover;
     object-position: center;
+    transition: opacity 260ms ease;
     animation: g7inst-intro-media 720ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .connect-intro-media-light {
+    opacity: 1;
+  }
+
+  .connect-intro-media-dark {
+    opacity: 0;
+  }
+
+  html[data-theme="dark"] .connect-intro {
+    background: #030711;
+    color: #f8fafc;
+  }
+
+  html[data-theme="dark"] .connect-intro-media-light {
+    opacity: 0;
+  }
+
+  html[data-theme="dark"] .connect-intro-media-dark {
+    opacity: 1;
   }
 
   .connect-intro-content {
@@ -294,14 +316,58 @@
   .hero-node-redis { left: 51%; top: 74%; color: #d82c20; animation-delay: -2.4s; }
   .hero-node-ssl { left: 45%; top: 45%; color: #2c3c69; animation-delay: -3s; }
 
+  html[data-theme="dark"] .connect-kicker,
+  html[data-theme="dark"] .connect-intro-copy > p,
+  html[data-theme="dark"] .connect-readiness span,
+  html[data-theme="dark"] .connect-intro-actions > span {
+    color: #aeb8ca;
+  }
+
+  html[data-theme="dark"] .connect-kicker i {
+    background: #27d8c7;
+    box-shadow: 0 0 0 5px rgb(39 216 199 / 0.12);
+  }
+
+  html[data-theme="dark"] .connect-readiness,
+  html[data-theme="dark"] .connect-readiness > div + div {
+    border-color: rgb(226 232 240 / 0.2);
+  }
+
+  html[data-theme="dark"] .connect-readiness strong {
+    color: #f8fafc;
+  }
+
+  html[data-theme="dark"] .connect-intro-actions code {
+    color: #d9e1ee;
+  }
+
+  html[data-theme="dark"] .connect-view #login-status.alert {
+    border-color: rgb(45 212 191 / 0.28);
+    background: rgb(6 36 40 / 0.82);
+    color: #ccfbf1;
+  }
+
+  html[data-theme="dark"] .connect-view #login-status.alert p {
+    color: #99d8cf;
+  }
+
+  html[data-theme="dark"] .hero-logo-node {
+    background: rgb(5 13 27 / 0.88);
+    box-shadow: 0 12px 30px rgb(0 0 0 / 0.42), inset 0 0 0 4px rgb(255 255 255 / 0.06);
+  }
+
+  html[data-theme="dark"] .hero-node-ssl {
+    color: #9aabe0;
+  }
+
   @keyframes g7inst-intro-media {
-    from { opacity: 0; transform: scale(1.025); }
-    to { opacity: 1; transform: scale(1); }
+    from { transform: scale(1.025); }
+    to { transform: scale(1); }
   }
 
   @keyframes g7inst-orbit-node {
-    0%, 100% { margin-top: 0; box-shadow: 0 10px 28px rgb(15 23 42 / 0.16), inset 0 0 0 4px rgb(255 255 255 / 0.58); }
-    50% { margin-top: -5px; box-shadow: 0 16px 34px rgb(15 23 42 / 0.2), inset 0 0 0 4px rgb(255 255 255 / 0.68); }
+    0%, 100% { margin-top: 0; }
+    50% { margin-top: -5px; }
   }
 
   .section-heading {
@@ -1619,8 +1685,12 @@
     }
 
     .connect-intro-media {
-      opacity: 0.3;
       object-position: 68% center;
+      filter: opacity(0.34);
+    }
+
+    html[data-theme="dark"] .connect-intro-media-dark {
+      filter: opacity(0.46);
     }
 
     .connect-orbit-logos {

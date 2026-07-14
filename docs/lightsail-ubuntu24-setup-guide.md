@@ -13,19 +13,19 @@
 Lightsail 기본 Ubuntu는 `.pem` 개인키와 `ubuntu` 계정을 사용합니다. Mac 터미널에서는 아래 한 줄을 실행합니다.
 
 ```bash
-ssh -i "$HOME/.ssh/lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.13/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$HOME/.ssh/lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.14/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 Windows PowerShell:
 
 ```powershell
-ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.13/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.14/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 다른 VPS에서 SSH 비밀번호 로그인을 허용하면 Mac과 Windows에서 아래 명령을 사용합니다.
 
 ```bash
-ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.13/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.14/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 SSH 비밀번호와 sudo 비밀번호는 요청될 때 터미널에만 입력합니다. 도메인은 웹 마법사에서 한 번만 입력합니다. 브라우저에서는 터미널에 출력된 접속 확인 주소를 엽니다.
@@ -79,7 +79,7 @@ apt-get update
 apt-get install -y ca-certificates curl
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT HUP INT TERM
-curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.13/bootstrap.sh -o "$tmp"
+curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.14/bootstrap.sh -o "$tmp"
 bash "$tmp"
 g7inst --version
 ```
@@ -229,7 +229,7 @@ sudo -n /usr/local/bin/g7inst --version
 sudo apt-get update
 sudo apt-get install -y ca-certificates curl
 tmp="$(mktemp)"
-curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.13/bootstrap.sh -o "$tmp"
+curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.14/bootstrap.sh -o "$tmp"
 sudo bash "$tmp"
 rm -f "$tmp"
 g7inst --version
@@ -254,19 +254,19 @@ g7inst --version
 Mac 터미널:
 
 ```bash
-ssh -i "$HOME/.ssh/lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.13/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$HOME/.ssh/lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.14/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 Windows PowerShell:
 
 ```powershell
-ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.13/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$env:USERPROFILE\.ssh\lightsail_g7inst.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.14/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 SSH 비밀번호 방식은 Mac과 Windows에서 같은 명령을 사용합니다.
 
 ```bash
-ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.13/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.14/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 브라우저에서 접속 확인 주소를 엽니다.
@@ -305,7 +305,7 @@ Lightsail이 아니어도 새 Ubuntu 22.04 이상 서버면 같은 초기 스크
 sudo apt-get update
 sudo apt-get install -y ca-certificates curl
 tmp="$(mktemp)"
-curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.13/bootstrap.sh -o "$tmp"
+curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.14/bootstrap.sh -o "$tmp"
 sudo bash "$tmp"
 rm -f "$tmp"
 ```

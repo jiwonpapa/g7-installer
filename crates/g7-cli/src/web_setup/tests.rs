@@ -5,11 +5,12 @@ use super::{
     build_router, create_session, current_user_is_root, doctor_status_label, doctor_to_api,
     emit_log, ensure_remote_binding_is_explicit, event_history_snapshot, event_stream_js,
     failed_doctor_details, html_attr_escape, index, index_html, install_checks_to_api,
-    install_to_api, intro_image, is_loopback, lock_client_ip, options_from_request, parse_bind,
-    print_startup, promo_json, remove_session, require_allowed_client_ip,
-    require_authenticated_session, require_csrf, require_session, require_session_id,
-    rollback_to_api, secure_eq, secure_token, session_cookie, setup_requires_root_error,
-    validate_database_request, validate_mail_request, validate_site_password_request,
+    install_to_api, intro_dark_image, intro_image, is_loopback, lock_client_ip,
+    options_from_request, parse_bind, print_startup, promo_json, remove_session,
+    require_allowed_client_ip, require_authenticated_session, require_csrf, require_session,
+    require_session_id, rollback_to_api, secure_eq, secure_token, session_cookie,
+    setup_requires_root_error, validate_database_request, validate_mail_request,
+    validate_site_password_request,
 };
 use axum::Json;
 use axum::body::to_bytes;
@@ -811,6 +812,20 @@ async fn static_assets_require_first_token_ip_lock()
     assert_eq!(
         intro.headers().get(header::CONTENT_TYPE),
         Some(&HeaderValue::from_static("image/webp"))
+    );
+
+    let dark_intro = intro_dark_image(axum::extract::State(state.clone()), peer())
+        .await
+        .expect("dark intro image should be served")
+        .into_response();
+    assert_eq!(dark_intro.status(), StatusCode::OK);
+    assert_eq!(
+        dark_intro.headers().get(header::CONTENT_TYPE),
+        Some(&HeaderValue::from_static("image/webp"))
+    );
+    assert_eq!(
+        dark_intro.headers().get(header::CACHE_CONTROL),
+        Some(&HeaderValue::from_static("no-store, no-cache, max-age=0"))
     );
 
     let promo = promo_json(axum::extract::State(state), peer())

@@ -53,6 +53,7 @@ pub(super) fn build_router(state: WebState) -> Router {
         .route("/modules/event-stream.js", get(event_stream_js))
         .route("/app.css", get(app_css))
         .route("/assets/setup-orbit-light.webp", get(intro_image))
+        .route("/assets/setup-orbit-dark.webp", get(intro_dark_image))
         .route("/promo.json", get(promo_json))
         .route("/api/bootstrap", get(bootstrap))
         .route("/api/auth/logout", post(api_logout))
@@ -341,6 +342,22 @@ pub(super) async fn intro_image(
             (header::CACHE_CONTROL, "no-store, no-cache, max-age=0"),
         ],
         INTRO_IMAGE,
+    ))
+}
+
+/// Serves the dark-theme intro artwork without allowing intermediary caching.
+pub(super) async fn intro_dark_image(
+    axum::extract::State(state): axum::extract::State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+) -> std::result::Result<impl IntoResponse, ApiError> {
+    require_allowed_client_ip(&state, peer.ip())?;
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, "image/webp"),
+            (header::CACHE_CONTROL, "no-store, no-cache, max-age=0"),
+        ],
+        INTRO_DARK_IMAGE,
     ))
 }
 
