@@ -826,7 +826,7 @@ test("reset overlay shows the shared live log expanded", async ({ page }, testIn
   }
 });
 
-test("reset confirmation warns when a completed G7 install is detected", async ({ page }) => {
+test("reset confirmation is wide and explicit when a completed G7 install is detected", async ({ page }) => {
   const { server, baseUrl } = await startServer({
     recovery: {
       can_resume: false,
@@ -852,17 +852,24 @@ test("reset confirmation warns when a completed G7 install is detected", async (
     },
   });
   try {
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${baseUrl}/setup/result?token=e2e`);
     await page.getByText("재설치 및 초기화", { exact: true }).click();
     await page.locator("#reset-button").click();
-    await expect(page.getByText(/이미 설치가 완료된 사이트/)).toBeVisible();
+    await expect(page.getByRole("heading", { name: /사이트와 DB를 삭제/ })).toBeVisible();
+    await expect(page.locator("#recovery-confirm-warning-text")).toContainText("영구 삭제");
+    await expect(page.locator("#recovery-confirm-warning-text")).toContainText("백업을 만들지 않으며");
     await expect(page.getByText(/웹파일 전체, DB\/DB 계정/)).toBeVisible();
-    await expect(page.getByText(/복구할 수 없습니다/)).toBeVisible();
+    await expect(page.getByText(/자동 백업을 생성하지 않습니다/)).toBeVisible();
+    await expect(page.locator('#recovery-confirm-summary dd').filter({ hasText: "Let's Encrypt 인증서" })).toBeVisible();
+    const dialogWidth = await page.locator(".recovery-modal-box").evaluate((element) => element.getBoundingClientRect().width);
+    expect(dialogWidth).toBeGreaterThanOrEqual(900);
     await expect(page.locator("#recovery-confirm-yes")).toBeDisabled();
     await page.fill("#recovery-confirm-input", "초기화 아님");
     await expect(page.locator("#recovery-confirm-yes")).toBeDisabled();
     await page.fill("#recovery-confirm-input", "초기화");
     await expect(page.locator("#recovery-confirm-yes")).toBeEnabled();
+    await expect(page.locator("#recovery-confirm-yes")).toHaveClass(/btn-error/);
     await page.getByRole("button", { name: "아니오" }).click();
   } finally {
     await new Promise((resolve) => server.close(resolve));

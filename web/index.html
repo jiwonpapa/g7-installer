@@ -799,18 +799,27 @@
         </footer>
       </section>
     </dialog>
-    <dialog id="recovery-confirm-dialog" class="modal">
-      <div class="modal-box">
-        <h3 id="recovery-confirm-title" class="text-lg font-semibold">작업을 실행할까요?</h3>
-        <p id="recovery-confirm-message" class="mt-2 text-sm text-base-content/60">이 작업은 서버 상태를 변경합니다.</p>
-        <div id="recovery-confirm-summary" class="report-card mt-5"></div>
-        <label id="recovery-confirm-phrase" class="field mt-5" hidden>
-          <span class="field-label">확인 문구</span>
-          <input id="recovery-confirm-input" class="input input-bordered w-full" type="text" autocomplete="off" spellcheck="false" placeholder="초기화" />
-          <small>계속하려면 <strong>초기화</strong>를 정확히 입력하세요.</small>
-        </label>
-        <div class="modal-action">
-          <form method="dialog" class="flex gap-2">
+    <dialog id="recovery-confirm-dialog" class="modal" aria-labelledby="recovery-confirm-title" aria-describedby="recovery-confirm-message recovery-confirm-warning-text">
+      <div class="modal-box recovery-modal-box">
+        <header class="recovery-modal-heading">
+          <span class="recovery-modal-kicker" data-ui-icon="shield-alert">위험 작업</span>
+          <h3 id="recovery-confirm-title">작업을 실행할까요?</h3>
+          <p id="recovery-confirm-message">이 작업은 서버 상태를 변경합니다.</p>
+        </header>
+        <div class="recovery-modal-body">
+          <div class="recovery-critical-warning" role="alert">
+            <span class="recovery-critical-warning-label" data-ui-icon="shield-alert">반드시 확인</span>
+            <p id="recovery-confirm-warning-text">삭제되는 항목과 보존되는 항목을 확인하세요.</p>
+          </div>
+          <div id="recovery-confirm-summary" class="report-card"></div>
+          <label id="recovery-confirm-phrase" class="field recovery-confirm-phrase" hidden>
+            <span class="field-label">최종 확인</span>
+            <input id="recovery-confirm-input" class="input input-bordered w-full" type="text" autocomplete="off" spellcheck="false" placeholder="초기화" />
+            <small><strong>초기화</strong>를 정확히 입력하세요. 이 입력은 백업을 생성하지 않습니다.</small>
+          </label>
+        </div>
+        <div class="modal-action recovery-modal-actions">
+          <form method="dialog" class="flex flex-wrap justify-end gap-2">
             <button class="btn btn-ghost icon-button" value="cancel" data-icon="x">아니오</button>
             <button id="recovery-confirm-yes" class="btn btn-error icon-button" value="confirm" data-icon="check">예</button>
           </form>

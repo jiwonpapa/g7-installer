@@ -2092,6 +2092,110 @@
     @apply break-words font-semibold;
   }
 
+  .recovery-modal-box {
+    @apply max-w-5xl overflow-hidden p-0;
+    width: min(64rem, calc(100vw - 2rem));
+    max-height: calc(100dvh - 2rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .recovery-modal-heading {
+    @apply border-b border-base-300 bg-base-200/40 px-6 py-5;
+  }
+
+  .recovery-modal-kicker,
+  .recovery-critical-warning-label {
+    @apply inline-flex items-center gap-2 text-xs font-bold text-error;
+  }
+
+  .recovery-modal-kicker .icon,
+  .recovery-critical-warning-label .icon {
+    @apply h-4 w-4;
+  }
+
+  .recovery-modal-heading h3 {
+    @apply mt-3 text-xl font-bold;
+  }
+
+  .recovery-modal-heading p {
+    @apply mt-2 text-sm leading-6 text-base-content/65;
+  }
+
+  .recovery-modal-body {
+    @apply grid gap-5 px-6 py-5;
+  }
+
+  .recovery-critical-warning {
+    @apply rounded-md border border-error/35 bg-error/10 p-4;
+  }
+
+  .recovery-critical-warning p {
+    @apply mt-2 text-sm font-semibold leading-6 text-base-content;
+  }
+
+  #recovery-confirm-summary {
+    @apply border-0 bg-transparent p-0 shadow-none;
+  }
+
+  #recovery-confirm-summary dl {
+    @apply mt-0 grid gap-3 md:grid-cols-2;
+  }
+
+  #recovery-confirm-summary dl > div {
+    @apply rounded-md border border-base-300 bg-base-100 p-4;
+  }
+
+  #recovery-confirm-summary dl > div[data-wide="true"] {
+    @apply md:col-span-2;
+  }
+
+  #recovery-confirm-summary dl > div[data-tone="danger"] {
+    @apply border-error/30 bg-error/5;
+  }
+
+  #recovery-confirm-summary dl > div[data-tone="danger"] dt {
+    @apply text-error;
+  }
+
+  #recovery-confirm-summary dl > div[data-tone="preserve"] {
+    @apply border-success/30 bg-success/5;
+  }
+
+  #recovery-confirm-summary dl > div[data-tone="preserve"] dt {
+    @apply text-success;
+  }
+
+  .recovery-confirm-phrase {
+    @apply rounded-md border border-error/25 bg-base-200/45 p-4;
+  }
+
+  .recovery-confirm-phrase small {
+    @apply leading-5;
+  }
+
+  .recovery-modal-actions {
+    @apply m-0 border-t border-base-300 bg-base-200/35 px-6 py-4;
+  }
+
+  @media (max-width: 639px) {
+    .recovery-modal-box {
+      width: calc(100vw - 1rem);
+      max-height: calc(100dvh - 1rem);
+    }
+
+    .recovery-modal-heading,
+    .recovery-modal-body,
+    .recovery-modal-actions {
+      @apply px-4;
+    }
+
+    .recovery-modal-actions form,
+    .recovery-modal-actions .btn {
+      @apply w-full;
+    }
+  }
+
   .download-actions {
     @apply flex flex-wrap gap-2;
   }

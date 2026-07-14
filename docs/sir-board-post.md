@@ -47,19 +47,19 @@ GitHub: https://github.com/jiwonpapa/g7-installer
 `.pem` 개인키를 사용하는 Mac은 아래 한 줄을 실행합니다.
 
 ```bash
-ssh -i "$HOME/.ssh/YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.11/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$HOME/.ssh/YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.12/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 Windows PowerShell:
 
 ```powershell
-ssh -i "$env:USERPROFILE\.ssh\YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.11/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -i "$env:USERPROFILE\.ssh\YOUR_KEY.pem" -t -L 7717:127.0.0.1:7717 ubuntu@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.12/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 SSH 비밀번호 로그인을 허용하는 VPS는 Mac과 Windows에서 아래 명령을 사용합니다.
 
 ```bash
-ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.11/bootstrap.sh | sudo bash && sudo g7inst setup'
+ssh -t -L 7717:127.0.0.1:7717 SSH_USER@SERVER_IP 'curl -fsSL https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.12/bootstrap.sh | sudo bash && sudo g7inst setup'
 ```
 
 SSH 비밀번호와 sudo 비밀번호는 터미널에만 입력합니다. 터미널에 출력된 아래 형태의 정확한 주소를 같은 PC 브라우저에서 엽니다. 설치가 끝날 때까지 터미널을 닫지 않습니다.

@@ -92,6 +92,7 @@ const nodes = {
   recoveryConfirmDialog: document.querySelector("#recovery-confirm-dialog"),
   recoveryConfirmTitle: document.querySelector("#recovery-confirm-title"),
   recoveryConfirmMessage: document.querySelector("#recovery-confirm-message"),
+  recoveryConfirmWarningText: document.querySelector("#recovery-confirm-warning-text"),
   recoveryConfirmSummary: document.querySelector("#recovery-confirm-summary"),
   recoveryConfirmPhrase: document.querySelector("#recovery-confirm-phrase"),
   recoveryConfirmInput: document.querySelector("#recovery-confirm-input"),
@@ -4352,6 +4353,7 @@ function recoveryConfirmContent(action) {
     return {
       title: "패키지 되돌리기를 실행할까요?",
       message: "설치 직후 운영 데이터가 없을 때만 사용하세요. 서비스 중지, 패키지 제거, 설치 기록 정리를 진행합니다.",
+      warning: "이번 설치에서 추가된 패키지와 서비스가 제거됩니다. 운영 데이터를 만든 뒤에는 실행하지 마세요.",
       yesClass: "btn btn-error icon-button",
       rows: [
         ["대상", "이번 설치기가 설치한 apt 패키지와 서비스"],
@@ -4363,16 +4365,19 @@ function recoveryConfirmContent(action) {
 
   const installed = Boolean(state.recoveryStatus?.g7_install_completed);
   return {
-    title: "재설치 초기화를 실행할까요?",
+    title: "재설치 초기화: 사이트와 DB를 삭제할까요?",
     message: installed
-      ? "그누보드7 DB 생성 기록과 설치 완료 잠금 파일이 확인되었습니다. 이미 설치가 완료된 사이트이며, 초기화하면 사이트 데이터가 삭제됩니다."
+      ? "그누보드7 설치 완료 상태가 확인되었습니다. 계속하면 현재 사이트를 재설치 가능한 빈 상태로 되돌립니다."
       : "초기화하면 설치기가 만든 사이트 계정, 웹파일, DB와 DB 계정, 서비스, 설정, 설치 패키지와 상태 기록이 삭제됩니다.",
-    yesClass: "btn btn-primary icon-button",
+    warning: installed
+      ? "사이트 파일과 MySQL 데이터가 영구 삭제됩니다. 이 설치기는 백업을 만들지 않으며 삭제 후 복구할 수 없습니다. 운영 사이트라면 지금 취소하세요."
+      : "설치기가 생성한 사이트 파일과 DB가 삭제됩니다. 필요한 데이터가 있다면 취소하고 별도 백업부터 진행하세요.",
+    yesClass: "btn btn-error icon-button",
     rows: [
       ["설치 상태", installed ? "그누보드7 설치 완료 증거 확인됨" : "그누보드7 설치 완료 증거 없음"],
-      ["삭제", "installer가 생성한 사이트 계정과 해당 계정의 프로세스/로그인 세션, 웹파일 전체, DB/DB 계정, 서비스, 설정 파일, 새 패키지, 상태 파일"],
+      ["영구 삭제", "설치기가 생성한 사이트 계정과 해당 계정의 프로세스/로그인 세션, 웹파일 전체, DB/DB 계정, 서비스, 설정 파일, 새 패키지, 상태 파일"],
       ["보존", "현재 설치기 웹 세션, Ubuntu SSH 접속, SSH 터널, Let's Encrypt 인증서"],
-      ["주의", "삭제된 사이트 파일과 DB 데이터는 이 설치기로 복구할 수 없습니다."],
+      ["백업", "자동 백업을 생성하지 않습니다. 삭제 전 필요한 파일과 DB는 사용자가 별도로 백업해야 합니다."],
       ["실행 후", "서버 점검 단계로 돌아가 다시 설치할 수 있습니다."],
     ],
   };
@@ -4381,7 +4386,7 @@ function recoveryConfirmContent(action) {
 function recoveryConfirmSummaryHtml(action) {
   const content = recoveryConfirmContent(action);
   return `<dl>${content.rows.map(([key, value]) => `
-    <div>
+    <div data-tone="${key === "영구 삭제" || key === "백업" ? "danger" : key === "보존" ? "preserve" : "neutral"}"${key === "영구 삭제" ? ' data-wide="true"' : ""}>
       <dt>${escapeHtml(key)}</dt>
       <dd>${escapeHtml(value)}</dd>
     </div>
@@ -4400,6 +4405,7 @@ function confirmRecoveryAction(action) {
 
   nodes.recoveryConfirmTitle.textContent = content.title;
   nodes.recoveryConfirmMessage.textContent = content.message;
+  nodes.recoveryConfirmWarningText.textContent = content.warning;
   nodes.recoveryConfirmSummary.innerHTML = recoveryConfirmSummaryHtml(action);
   nodes.recoveryConfirmYes.className = content.yesClass;
   setButtonLabel(nodes.recoveryConfirmYes, requiresPhrase ? "초기화 실행" : "실행");
