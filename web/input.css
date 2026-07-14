@@ -1391,7 +1391,6 @@
     }
 
     .product-copy p,
-    #shutdown-button,
     .status-pill {
       @apply hidden;
     }
