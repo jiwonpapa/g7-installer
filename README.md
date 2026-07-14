@@ -8,6 +8,8 @@ Ubuntu VPS에 `g7inst`를 설치하고 웹 마법사로 그누보드7용 서버 
 
 ## 설치 마법사 화면
 
+![G7 Installer 접속 인트로](docs/images/g7-installer-connect-intro.png)
+
 운영 권장·최신 지원 프로필을 고르면 웹서버, PHP, MySQL, Redis, SSL 구성이 한 화면에서 동기화됩니다.
 
 ![G7 Installer 설치 프로필과 서버 스택 선택 화면](docs/images/g7-installer-profile.png)
