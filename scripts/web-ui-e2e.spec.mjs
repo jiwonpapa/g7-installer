@@ -359,11 +359,38 @@ test("wizard routes render concise result and optional setup guide", async ({ pa
     await expect(page.locator(".connect-intro-media-dark")).toHaveCSS("opacity", "0");
     await expect(page.locator(".hero-logo-node")).toHaveCount(6);
     await expect(page.getByRole("button", { name: "서버 점검 시작" })).toBeVisible();
+    const lightCanvas = await page.evaluate(() => {
+      const shell = document.querySelector(".app-shell");
+      if (!(shell instanceof HTMLElement)) {
+        throw new Error("missing app shell");
+      }
+      const rootStyle = getComputedStyle(document.documentElement);
+      const bodyStyle = getComputedStyle(document.body);
+      const shellStyle = getComputedStyle(shell);
+      return {
+        rootBackground: rootStyle.backgroundColor,
+        bodyBackground: bodyStyle.backgroundColor,
+        bodyPaddingTop: bodyStyle.paddingTop,
+        bodyPaddingBottom: bodyStyle.paddingBottom,
+        shellMarginTop: shellStyle.marginTop,
+        shellMarginBottom: shellStyle.marginBottom,
+      };
+    });
+    expect(lightCanvas.rootBackground).toBe(lightCanvas.bodyBackground);
+    expect(lightCanvas.bodyPaddingTop).toBe("20px");
+    expect(lightCanvas.bodyPaddingBottom).toBe("16px");
+    expect(lightCanvas.shellMarginTop).toBe("0px");
+    expect(lightCanvas.shellMarginBottom).toBe("0px");
 
     await page.getByRole("button", { name: "다크 모드" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await expect(page.locator(".connect-intro-media-light")).toHaveCSS("opacity", "0");
     await expect(page.locator(".connect-intro-media-dark")).toHaveCSS("opacity", "1");
+    const darkCanvas = await page.evaluate(() => ({
+      rootBackground: getComputedStyle(document.documentElement).backgroundColor,
+      bodyBackground: getComputedStyle(document.body).backgroundColor,
+    }));
+    expect(darkCanvas.rootBackground).toBe(darkCanvas.bodyBackground);
     const darkOrbitPositions = await page.evaluate(() => {
       const orbit = document.querySelector(".connect-orbit-logos");
       if (!(orbit instanceof HTMLElement)) {
@@ -402,6 +429,7 @@ test("wizard routes render concise result and optional setup guide", async ({ pa
     await page.reload();
     await expect(page.getByRole("heading", { name: "새 Ubuntu VPS를 그누보드7 서버로" })).toBeVisible();
     await expect(page.getByRole("button", { name: "서버 점검 시작" })).toBeVisible();
+    await expect(page.locator("body")).toHaveCSS("padding-top", "0px");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
     await page.setViewportSize({ width: 1440, height: 900 });

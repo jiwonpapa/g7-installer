@@ -10,7 +10,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 LOG_FILE="${G7_LIGHTSAIL_BOOTSTRAP_LOG:-/var/log/g7-lightsail-bootstrap.log}"
 TIMEZONE="${G7_TIMEZONE:-Asia/Seoul}"
-BOOTSTRAP_URL="${G7_BOOTSTRAP_URL:-https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.15/bootstrap.sh}"
+BOOTSTRAP_URL="${G7_BOOTSTRAP_URL:-https://github.com/jiwonpapa/g7-installer/releases/download/v0.3.0-beta.16/bootstrap.sh}"
 BOOTSTRAP_SCRIPT="$(mktemp)"
 
 exec > >(tee -a "${LOG_FILE}") 2>&1

@@ -11,9 +11,22 @@
     color-scheme: dark;
   }
 
+  html[data-theme="light"],
+  html[data-theme="dark"],
+  body {
+    @apply bg-base-200;
+  }
+
   body {
     font-family:
       Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  @media (min-width: 640px) {
+    body {
+      padding-top: 1.25rem;
+      padding-bottom: 1rem;
+    }
   }
 }
 
@@ -1726,7 +1739,7 @@
 
 @layer components {
   .app-shell {
-    @apply mx-auto flex min-h-screen w-full max-w-7xl flex-col overflow-hidden border-base-300 bg-base-100 shadow-xl sm:mb-4 sm:mt-5 sm:min-h-[calc(100vh-2.25rem)] sm:rounded-xl sm:border;
+    @apply mx-auto flex min-h-screen w-full max-w-7xl flex-col overflow-hidden border-base-300 bg-base-100 shadow-xl sm:min-h-[calc(100vh-2.25rem)] sm:rounded-xl sm:border;
   }
 
   .app-header {
