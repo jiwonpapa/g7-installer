@@ -216,6 +216,12 @@ need_pattern "web/input.css" "body\\[data-active-step=\"install\"\\] \\.promo-pa
 need_pattern "web/input.css" "body\\[data-active-step=\"login\"\\] \\[data-progress=\"login\"\\]"
 need_pattern "web/input.css" ".plan-review"
 need_pattern "web/input.css" ".package-plan-list"
+need_pattern "web/input.css" 'html\[data-theme="dark"\] \.hero-node-ubuntu'
+need_pattern "web/input.css" 'html\[data-theme="dark"\] \.hero-node-nginx'
+need_pattern "web/input.css" 'html\[data-theme="dark"\] \.hero-node-php'
+need_pattern "web/input.css" 'html\[data-theme="dark"\] \.hero-node-mysql'
+need_pattern "web/input.css" 'html\[data-theme="dark"\] \.hero-node-redis'
+need_pattern "web/input.css" 'html\[data-theme="dark"\] \.hero-node-ssl'
 need_pattern "web/input.css" "lg:grid-cols-2"
 need_pattern "web/input.css" ".operation-overlay"
 need_pattern "web/input.css" ".provision-detail-grid"

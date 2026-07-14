@@ -316,6 +316,13 @@
   .hero-node-redis { left: 51%; top: 74%; color: #d82c20; animation-delay: -2.4s; }
   .hero-node-ssl { left: 45%; top: 45%; color: #2c3c69; animation-delay: -3s; }
 
+  html[data-theme="dark"] .hero-node-ubuntu { left: 70.2%; top: 22.3%; }
+  html[data-theme="dark"] .hero-node-nginx { left: 89.1%; top: 34%; }
+  html[data-theme="dark"] .hero-node-php { left: 92%; top: 57.8%; }
+  html[data-theme="dark"] .hero-node-mysql { left: 78.9%; top: 79.5%; }
+  html[data-theme="dark"] .hero-node-redis { left: 55.6%; top: 71.5%; }
+  html[data-theme="dark"] .hero-node-ssl { left: 50.7%; top: 43.9%; }
+
   html[data-theme="dark"] .connect-kicker,
   html[data-theme="dark"] .connect-intro-copy > p,
   html[data-theme="dark"] .connect-readiness span,

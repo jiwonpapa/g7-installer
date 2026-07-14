@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+## 0.3.0-beta.15 - 2026-07-14
+
+### Changed
+
+- 다크모드 인트로의 Ubuntu, Nginx, PHP, MySQL, Redis, SSL 아이콘을 실제 행성 중심에 맞춤
+- 라이트모드 좌표와 분리한 다크모드 전용 좌표 및 6개 좌표 회귀 검사 추가
+
 ## 0.3.0-beta.14 - 2026-07-14
 
 ### Added

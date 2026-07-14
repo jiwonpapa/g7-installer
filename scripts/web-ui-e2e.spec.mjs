@@ -364,6 +364,38 @@ test("wizard routes render concise result and optional setup guide", async ({ pa
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await expect(page.locator(".connect-intro-media-light")).toHaveCSS("opacity", "0");
     await expect(page.locator(".connect-intro-media-dark")).toHaveCSS("opacity", "1");
+    const darkOrbitPositions = await page.evaluate(() => {
+      const orbit = document.querySelector(".connect-orbit-logos");
+      if (!(orbit instanceof HTMLElement)) {
+        throw new Error("missing intro orbit logo layer");
+      }
+
+      return Object.fromEntries(
+        ["ubuntu", "nginx", "php", "mysql", "redis", "ssl"].map((name) => {
+          const node = document.querySelector(`.hero-node-${name}`);
+          if (!(node instanceof HTMLElement)) {
+            throw new Error(`missing ${name} intro logo`);
+          }
+          const style = getComputedStyle(node);
+          return [name, {
+            left: Number.parseFloat(style.left) / orbit.clientWidth * 100,
+            top: Number.parseFloat(style.top) / orbit.clientHeight * 100,
+          }];
+        }),
+      );
+    });
+    const expectedDarkOrbitPositions = {
+      ubuntu: { left: 70.2, top: 22.3 },
+      nginx: { left: 89.1, top: 34 },
+      php: { left: 92, top: 57.8 },
+      mysql: { left: 78.9, top: 79.5 },
+      redis: { left: 55.6, top: 71.5 },
+      ssl: { left: 50.7, top: 43.9 },
+    };
+    for (const [name, expected] of Object.entries(expectedDarkOrbitPositions)) {
+      expect(darkOrbitPositions[name].left).toBeCloseTo(expected.left, 1);
+      expect(darkOrbitPositions[name].top).toBeCloseTo(expected.top, 1);
+    }
     await page.getByRole("button", { name: "라이트 모드" }).click();
 
     await page.setViewportSize({ width: 390, height: 844 });
