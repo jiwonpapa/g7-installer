@@ -12,7 +12,7 @@
 | 파괴 작업 보존 | 인증서와 Certbot 자동 갱신 보존 정책 | reset/rollback golden 테스트 |
 | 의존성·라이선스 | `cargo audit`, `cargo deny` | quality-gate 워크플로 |
 | 릴리스 무결성 | 체크섬, CycloneDX SBOM, GitHub provenance | release 워크플로 |
-| 실제 VPS 검증 | staging LE, 앱 스모크, 상태/트랜잭션 계약, reset, fresh doctor | 승인형 ops-harness 워크플로 산출물 |
+| 실제 VPS 검증 | Python 하네스가 staging LE, 앱 스모크, 상태/트랜잭션 계약, reset, fresh doctor를 검증 | 승인형 ops-harness 워크플로 산출물 |
 | 커버리지 회귀 차단 | 전체 line 77%와 설치·reset·웹 API 위험 모듈별 하한 | llvm-cov JSON 래칫 검사 |
 | 실효 설정 검증 | 웹서버/PHP-FPM/MySQL native configtest와 DB·계정·Redis 계약 | 실제 VPS ops-harness 산출물 |
 

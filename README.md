@@ -22,6 +22,7 @@ Ubuntu VPS에 `g7inst`를 설치하고 웹 마법사로 그누보드7용 서버 
 
 | 상황 | 문서 |
 | --- | --- |
+| 프로젝트를 처음 봄 | [간략 소개](docs/introduction.md) |
 | Mac/Windows에서 명령만 따라 설치 | [따라하기식 설치 매뉴얼](docs/copy-paste-install.md) |
 | 처음 설치하는 초보자 | [초보용 설치 안내](docs/beginner-install.md) |
 | Lightsail 화면을 보며 상세 설정 | [Lightsail 상세 안내](docs/lightsail-ubuntu24-setup-guide.md) |

@@ -104,6 +104,8 @@ G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 ro
 - 릴리스 전 Ubuntu 24.04 fresh VPS 또는 VM smoke test를 통과해야 한다.
 - reset/rollback은 인증서, DB, 사이트 계정, 웹루트, systemd, apt purge 보존·삭제 golden 테스트를 가진다.
 - 실제 VPS 하네스는 staging 인증서, 앱 스모크, 리포트 계약, reset, fresh doctor를 분리 증명한다.
+- 인프라 거버넌스와 하네스 제어층은 Python 표준 라이브러리 기반으로 작성하고, Bash는 bootstrap과 호환 wrapper에 한정한다.
+- Python 하네스는 외부 패키지 의존성 없이 `argparse`, `subprocess`, `json`, `pathlib`, `dataclasses` 같은 표준 라이브러리만 사용한다.
 
 ## 11. 릴리스 원칙
 

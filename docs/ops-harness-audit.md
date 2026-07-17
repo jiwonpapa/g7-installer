@@ -21,7 +21,9 @@
 
 ## 실제 VPS 증명 계약
 
-`scripts/ops-harness.sh`는 `G7_OPS_CONFIRM_DISPOSABLE=1` 없이는 실행되지 않습니다.
+`scripts/ops-harness.sh`는 호환 wrapper이며 실제 제어 로직은 표준 라이브러리만 사용하는
+`scripts/ops_harness.py`에 있습니다. 이 하네스는 `G7_OPS_CONFIRM_DISPOSABLE=1` 없이는
+실행되지 않습니다.
 기본값은 실제 DNS 도메인, Let's Encrypt staging, 앱 HTTP 스모크이며 운영 인증서 발급은
 별도 명시 없이는 금지합니다.
 
@@ -65,6 +67,10 @@ G7_OPS_PHP_VERSION=8.3 \
 G7_OPS_DATABASE_VERSION=8.0 \
 bash scripts/ops-harness.sh
 ```
+
+Python 하네스는 SSH 실행, 산출물 저장, `report.json`/`state.json` 계약 검증, 신규 설치 패키지
+목록 산출, reset 검증, 앱 HTTP 스모크를 담당합니다. Bash wrapper는 CI와 기존 문서 명령 호환만
+맡습니다.
 
 Rust 장애 주입 테스트는 PHP/DB 후보 설정 실패 시 활성 파일이 생성되지 않는지, 트랜잭션이 기존 파일을 복원하는지, 패키지 재시도가 최초 기준선을 보존하는지 확인합니다. 로컬 브라우저 E2E는 관리자 명령 API를 mock 처리합니다. root 권한 서버 변경의 최종 증거는
 반드시 폐기 가능 VPS 하네스 artifact로 남깁니다.
