@@ -90,7 +90,8 @@ G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 ro
 - www canonical 정책은 설치 전 plan에 반드시 드러나야 한다.
 - Redis, 메일 발송, Certbot 자동갱신, DNS/IP 검증은 전체 기능 설치 프로필의 일부로 본다.
 - SMTP 비밀번호/API key 같은 비밀값은 CLI 인자와 로그에 남기지 않는다.
-- 대화형 확인은 명확해야 하며, CI나 자동화 환경을 위한 non-interactive 옵션을 고려한다.
+- 웹 설치 마법사는 실제 서버 변경 전 신규 VPS 전용 사용, 무료 오픈소스 면책, 데이터·과금 책임을 사용자가 명시 동의해야 한다.
+- 대화형 확인은 명확해야 하며, 로컬 자동화 환경을 위한 non-interactive 옵션을 고려한다.
 
 ## 10. 테스트 원칙
 
@@ -111,7 +112,8 @@ G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 ro
 
 - release artifact는 target triple별로 만든다.
 - `checksums.txt`는 release artifact와 함께 배포한다.
-- 릴리스에는 CycloneDX SBOM과 GitHub build provenance를 함께 배포한다.
+- 릴리스에는 CycloneDX SBOM, cargo metadata, checksums를 함께 배포한다.
+- GitHub Actions는 사용하지 않는다. 품질 게이트, 실제 VPS 하네스, 릴리스 산출물 생성은 로컬 명령으로 완료한다.
 - bootstrap은 latest release 감지, checksum 검증, `/usr/local/bin/g7inst` 설치만 담당한다.
 - `g7inst --version`은 설치기 버전과 build target을 출력한다.
 - self-update를 공개 기능으로 구현할 때는 현재 바이너리 교체 실패 시 복구 가능해야 한다.

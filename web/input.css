@@ -2181,6 +2181,81 @@
     @apply break-words font-semibold;
   }
 
+  .install-confirm-modal-box {
+    @apply max-w-4xl overflow-hidden p-0;
+    width: min(56rem, calc(100vw - 2rem));
+    max-height: calc(100dvh - 2rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .install-confirm-heading {
+    @apply border-b border-base-300 bg-base-200/40 px-6 py-5;
+  }
+
+  .install-confirm-kicker {
+    @apply inline-flex items-center gap-2 text-xs font-bold text-warning;
+  }
+
+  .install-confirm-kicker .icon {
+    @apply h-4 w-4;
+  }
+
+  .install-confirm-heading h3 {
+    @apply mt-3 text-xl font-bold;
+  }
+
+  .install-confirm-heading p {
+    @apply mt-2 text-sm leading-6 text-base-content/65;
+  }
+
+  .install-confirm-body {
+    @apply grid gap-5 px-6 py-5;
+  }
+
+  .install-disclaimer {
+    @apply rounded-md border border-warning/35 bg-warning/10 p-4;
+  }
+
+  .install-disclaimer h4 {
+    @apply text-sm font-bold text-base-content;
+  }
+
+  .install-disclaimer ul {
+    @apply mt-3 grid gap-2 pl-5 text-sm leading-6 text-base-content/75;
+    list-style: disc;
+  }
+
+  .install-disclaimer-check {
+    @apply mt-4 flex cursor-pointer items-start gap-3 rounded-md border border-warning/30 bg-base-100/75 p-3 text-sm font-semibold leading-6;
+  }
+
+  .install-disclaimer-check input {
+    @apply mt-1 shrink-0;
+  }
+
+  .install-confirm-actions {
+    @apply m-0 border-t border-base-300 bg-base-200/35 px-6 py-4;
+  }
+
+  @media (max-width: 639px) {
+    .install-confirm-modal-box {
+      width: calc(100vw - 1rem);
+      max-height: calc(100dvh - 1rem);
+    }
+
+    .install-confirm-heading,
+    .install-confirm-body,
+    .install-confirm-actions {
+      @apply px-4;
+    }
+
+    .install-confirm-actions form,
+    .install-confirm-actions .btn {
+      @apply w-full;
+    }
+  }
+
   .recovery-modal-box {
     @apply max-w-5xl overflow-hidden p-0;
     width: min(64rem, calc(100vw - 2rem));

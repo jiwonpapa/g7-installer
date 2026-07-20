@@ -81,6 +81,7 @@ const nodes = {
   installConfirmDialog: document.querySelector("#install-confirm-dialog"),
   installConfirmSummary: document.querySelector("#install-confirm-summary"),
   installConfirmStart: document.querySelector("#install-confirm-start"),
+  installDisclaimerAccepted: document.querySelector("#install-disclaimer-accepted"),
   installProgressDialog: document.querySelector("#install-progress-dialog"),
   installProgressClose: document.querySelector("#install-progress-close"),
   installAppSummary: document.querySelector("#install-app-summary"),
@@ -4333,16 +4334,37 @@ function installConfirmSummaryHtml(payload) {
 
 function confirmInstallStart(payload = optionPayload()) {
   if (!nodes.installConfirmDialog?.showModal) {
-    return Promise.resolve(window.confirm("기본 서버 구성을 시작할까요?"));
+    const confirmed = window.confirm("개발자 면책 조항에 동의하고 신규 VPS에서 기본 서버 구성을 시작할까요?");
+    payload.disclaimer_accepted = confirmed;
+    return Promise.resolve(confirmed);
   }
 
   nodes.installConfirmSummary.innerHTML = installConfirmSummaryHtml(payload);
+  if (nodes.installDisclaimerAccepted) {
+    nodes.installDisclaimerAccepted.checked = false;
+  }
+  if (nodes.installConfirmStart) {
+    nodes.installConfirmStart.disabled = true;
+    setButtonLabel(nodes.installConfirmStart, "동의 후 시작");
+  }
+  const syncDisclaimerState = () => {
+    const accepted = Boolean(nodes.installDisclaimerAccepted?.checked);
+    if (nodes.installConfirmStart) {
+      nodes.installConfirmStart.disabled = !accepted;
+      setButtonLabel(nodes.installConfirmStart, accepted ? "시작" : "동의 후 시작");
+    }
+  };
+  nodes.installDisclaimerAccepted?.addEventListener("change", syncDisclaimerState);
   nodes.installConfirmDialog.returnValue = "cancel";
   nodes.installConfirmDialog.showModal();
 
   return new Promise((resolve) => {
     nodes.installConfirmDialog.addEventListener("close", () => {
-      resolve(nodes.installConfirmDialog.returnValue === "start");
+      nodes.installDisclaimerAccepted?.removeEventListener("change", syncDisclaimerState);
+      const accepted = Boolean(nodes.installDisclaimerAccepted?.checked);
+      const confirmed = nodes.installConfirmDialog.returnValue === "start" && accepted;
+      payload.disclaimer_accepted = confirmed;
+      resolve(confirmed);
     }, { once: true });
   });
 }

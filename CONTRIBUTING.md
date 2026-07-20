@@ -16,9 +16,9 @@
 - reset/rollback 변경 시 보존 리소스 golden 테스트
 - 웹 UI 변경 시 Playwright E2E
 
-실제 서버 검증은 승인된 폐기 가능 Ubuntu VPS에서
-`.github/workflows/ops-harness.yml`을 수동 실행합니다. 운영 Let's Encrypt 발급은
+실제 서버 검증은 승인된 폐기 가능 Ubuntu VPS에서 로컬 터미널로
+`G7_OPS_CONFIRM_DISPOSABLE=1 bash scripts/ops-harness.sh`를 실행합니다. 운영 Let's Encrypt 발급은
 일반 테스트에 사용하지 않습니다.
 
 릴리스 태그는 `git tag -a vX.Y.Z -m "release X.Y.Z"` 형식의 annotated tag로 만들며,
-릴리스 워크플로가 crate 버전 일치와 태그 형식을 검증합니다.
+`bash scripts/local-release-gate.sh`로 품질 게이트와 릴리스 산출물 생성을 로컬에서 검증합니다.

@@ -8,9 +8,8 @@
 |---|---|---|
 | 빠른 게이트 | `bash scripts/quick-gate.sh` | shell/정적 UI/Rust 핵심 테스트 |
 | 전체 게이트 | `bash scripts/quality-gate.sh` | fmt, test, clippy, rustdoc, 전체 coverage 77%와 위험 모듈별 하한, audit, deny, 웹 빌드 |
-| CI | `.github/workflows/quality-gate.yml` | 전체 게이트, Rust 1.85, dual-musl 릴리스 dry-run |
-| 실제 VPS | `.github/workflows/ops-harness.yml` | 승인된 폐기 가능 Ubuntu 24.04 VPS 설치·초기화 |
-| 릴리스 | `.github/workflows/release.yml` | 태그/버전 일치, 전체 quality gate와 웹 E2E 재검증, 체크섬, SBOM, provenance, Release |
+| 로컬 릴리스 게이트 | `bash scripts/local-release-gate.sh` | 전체 게이트 후 x86_64/aarch64 musl 바이너리, 체크섬, SBOM 생성 |
+| 실제 VPS | `bash scripts/ops-harness.sh` | 승인된 폐기 가능 Ubuntu 24.04 VPS 설치·초기화 |
 
 ## 커버리지 회귀 하한
 
@@ -46,13 +45,6 @@
 15. MySQL configtest, 선택 버전, DB와 DB 계정 생성
 16. Redis localhost bind와 protected mode
 
-GitHub Actions 실행은 `disposable-vps` Environment 승인과 다음 secret이 필요합니다.
-
-- `G7_OPS_HOST`
-- `G7_OPS_USER`
-- `G7_OPS_SSH_PRIVATE_KEY`
-- `G7_OPS_SSH_KNOWN_HOSTS`
-
 ## 로컬 실행 예시
 
 ```bash
@@ -69,7 +61,7 @@ bash scripts/ops-harness.sh
 ```
 
 Python 하네스는 SSH 실행, 산출물 저장, `report.json`/`state.json` 계약 검증, 신규 설치 패키지
-목록 산출, reset 검증, 앱 HTTP 스모크를 담당합니다. Bash wrapper는 CI와 기존 문서 명령 호환만
+목록 산출, reset 검증, 앱 HTTP 스모크를 담당합니다. Bash wrapper는 기존 문서 명령 호환만
 맡습니다.
 
 Rust 장애 주입 테스트는 PHP/DB 후보 설정 실패 시 활성 파일이 생성되지 않는지, 트랜잭션이 기존 파일을 복원하는지, 패키지 재시도가 최초 기준선을 보존하는지 확인합니다. 로컬 브라우저 E2E는 관리자 명령 API를 mock 처리합니다. root 권한 서버 변경의 최종 증거는
@@ -77,7 +69,7 @@ Rust 장애 주입 테스트는 PHP/DB 후보 설정 실패 시 활성 파일이
 
 ## 남은 운영 조건
 
-- 실제 VPS 워크플로는 비용과 파괴 위험 때문에 수동 승인만 허용합니다.
-- 워크플로 입력에서 Nginx/Apache, PHP 8.3/8.5, MySQL 8.0/8.4 조합을 선택해 각각 증거를 남깁니다.
-- 운영 Let's Encrypt는 정기 CI 대상이 아닙니다.
+- 실제 VPS 하네스는 비용과 파괴 위험 때문에 `G7_OPS_CONFIRM_DISPOSABLE=1` 명시 승인만 허용합니다.
+- 환경변수로 Nginx/Apache, PHP 8.3/8.5, MySQL 8.0/8.4 조합을 선택해 각각 증거를 남깁니다.
+- 운영 Let's Encrypt는 반복 로컬 게이트 대상이 아닙니다.
 - 릴리스 전 최신 커밋의 quality gate와 필요한 VPS 조합 증거를 함께 확인합니다.

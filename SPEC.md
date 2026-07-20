@@ -420,15 +420,24 @@ installer 소유 파일만 자동 수정
 - 다운로드 파일은 checksum 검증 후 사용합니다.
 - bootstrap은 바이너리 서명 또는 checksum 검증을 필수로 합니다.
 - `curl | sudo bash`는 공개 bootstrap 코드와 checksum 검증으로 신뢰를 보완합니다.
+- 웹 설치 마법사는 실제 서버 변경 API 실행 전에 무료 오픈소스 면책, 신규 VPS 전용 사용, 데이터·과금 책임 동의를 요구합니다.
 
 ## 13. 릴리스/배포
 
-GitHub Releases 산출물:
+로컬 릴리스 산출물:
 
 ```text
 g7inst-x86_64-unknown-linux-musl
 g7inst-aarch64-unknown-linux-musl
 checksums.txt
+cargo-metadata.json
+sbom.cdx.json
+```
+
+릴리스 전 검증은 GitHub Actions 없이 로컬에서 실행합니다.
+
+```bash
+bash scripts/local-release-gate.sh
 ```
 
 패키징:

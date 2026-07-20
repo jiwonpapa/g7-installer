@@ -10,9 +10,9 @@
 | 설정 적용 안전성 | PHP-FPM/DB 후보 검사, 웹서버 native configtest, 파일 트랜잭션 후 reload/restart | 장애 주입·명령 형태·스냅샷 복원 테스트 |
 | 비밀값 연속성 | DB 전 단계의 비밀값을 root-only 임시 파일에 보관하고 DB 완료 후 삭제 | 권한·이스케이프·성공 후 삭제 테스트 |
 | 파괴 작업 보존 | 인증서와 Certbot 자동 갱신 보존 정책 | reset/rollback golden 테스트 |
-| 의존성·라이선스 | `cargo audit`, `cargo deny` | quality-gate 워크플로 |
-| 릴리스 무결성 | 체크섬, CycloneDX SBOM, GitHub provenance | release 워크플로 |
-| 실제 VPS 검증 | Python 하네스가 staging LE, 앱 스모크, 상태/트랜잭션 계약, reset, fresh doctor를 검증 | 승인형 ops-harness 워크플로 산출물 |
+| 의존성·라이선스 | `cargo audit`, `cargo deny` | `bash scripts/quality-gate.sh` |
+| 릴리스 무결성 | 체크섬, CycloneDX SBOM, cargo metadata | `bash scripts/local-release-gate.sh` |
+| 실제 VPS 검증 | Python 하네스가 staging LE, 앱 스모크, 상태/트랜잭션 계약, reset, fresh doctor를 검증 | 승인형 로컬 ops-harness 산출물 |
 | 커버리지 회귀 차단 | 전체 line 77%와 설치·reset·웹 API 위험 모듈별 하한 | llvm-cov JSON 래칫 검사 |
 | 실효 설정 검증 | 웹서버/PHP-FPM/MySQL native configtest와 DB·계정·Redis 계약 | 실제 VPS ops-harness 산출물 |
 
@@ -23,6 +23,6 @@
 
 ## 증거 보존
 
-- CI 로그와 dry-run 릴리스 산출물은 GitHub Actions에서 보존합니다.
-- 실제 VPS 실행 결과는 `target/ops-harness/<timestamp>`를 artifact로 업로드합니다.
+- 품질 게이트와 릴리스 산출물은 로컬 `target/`, `dist/release/`에 보존합니다.
+- 실제 VPS 실행 결과는 `target/ops-harness/<timestamp>`에 보존합니다.
 - 서버 명령 감사 로그는 `/var/log/g7-installer/commands.jsonl`에 저장합니다.

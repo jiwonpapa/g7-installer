@@ -25,7 +25,7 @@ if rg -n -i 'mariadb' README.md SPEC.md DEVELOPMENT_CONSTITUTION.md docs; then
   echo "public documentation must describe the MySQL-only database scope" >&2
   exit 1
 fi
-if rg -n -i 'wordpress|mariadb' .github/workflows/ops-harness.yml scripts/ops-harness.sh scripts/ops_harness.py; then
+if rg -n -i 'wordpress|mariadb' scripts/ops-harness.sh scripts/ops_harness.py; then
   echo "ops harness must match the G7/Laravel and MySQL-only product scope" >&2
   exit 1
 fi

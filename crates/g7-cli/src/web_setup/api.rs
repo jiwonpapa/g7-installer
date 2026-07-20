@@ -74,6 +74,8 @@ pub(super) struct BootstrapAuth {
 pub(super) struct SetupRequest {
     pub(super) domain: String,
     #[serde(default)]
+    pub(super) disclaimer_accepted: bool,
+    #[serde(default)]
     pub(super) local_test: bool,
     #[serde(default)]
     pub(super) install_template: Option<String>,
@@ -482,6 +484,7 @@ pub(super) async fn api_install_prepare(
     let session = require_authenticated_session(&state, &headers, peer.ip())?;
     require_csrf(&headers, &session)?;
     validate_template_app_request(&request)?;
+    validate_disclaimer_acceptance(&request)?;
     validate_site_password_request(&request)?;
     validate_database_request(&request)?;
     validate_mail_request(&request)?;
@@ -994,6 +997,19 @@ pub(super) fn options_from_request(request: SetupRequest) -> plan::PlanOptions {
 
 pub(super) fn default_php_source() -> String {
     plan::DEFAULT_PHP_SOURCE.to_string()
+}
+
+pub(super) fn validate_disclaimer_acceptance(
+    request: &SetupRequest,
+) -> std::result::Result<(), ApiError> {
+    if request.disclaimer_accepted {
+        return Ok(());
+    }
+
+    Err(
+        ApiError::bad_request("개발자 면책 및 신규 VPS 전용 사용약관 동의가 필요합니다.")
+            .with_hint("설치 시작 확인창에서 면책 조항을 읽고 동의 체크박스를 선택하세요."),
+    )
 }
 
 pub(super) fn validate_template_app_request(

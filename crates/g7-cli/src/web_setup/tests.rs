@@ -65,6 +65,7 @@ fn web_events_keep_ordered_reconnect_history() {
 fn setup_request(domain: &str) -> SetupRequest {
     SetupRequest {
         domain: domain.to_string(),
+        disclaimer_accepted: true,
         local_test: true,
         install_template: Some("recommended".to_string()),
         web_server: "nginx".to_string(),
@@ -1030,6 +1031,32 @@ async fn status_report_reset_and_rollback_error_paths_are_json()
             .expect("rollback hint")
             .contains("웹루트")
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn install_prepare_requires_disclaimer_acceptance()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let state = test_state();
+    let headers = authenticated_headers(&state)?;
+    let mut request = setup_request("g7-test.local");
+    request.disclaimer_accepted = false;
+
+    let error = match api_install_prepare(
+        axum::extract::State(state.clone()),
+        peer(),
+        headers,
+        Json(request),
+    )
+    .await
+    {
+        Ok(_) => panic!("install without disclaimer acceptance should be rejected"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("면책"));
+    assert!(!state.install_running.load(Ordering::SeqCst));
     Ok(())
 }
 

@@ -745,14 +745,33 @@
       </section>
     </main>
     <dialog id="install-confirm-dialog" class="modal">
-      <div class="modal-box">
-        <h3 class="text-lg font-semibold">서버 설치를 시작할까요?</h3>
-        <p class="mt-2 text-sm text-base-content/60">신규 Ubuntu VPS 기준으로 서버 패키지, 웹서버, PHP/DB, SSL, 앱 설치 준비를 진행합니다. 이미 운영 중인 서버라면 중단하고 새 서버에서 진행하세요.</p>
-        <div id="install-confirm-summary" class="report-card mt-5"></div>
-        <div class="modal-action">
+      <div class="modal-box install-confirm-modal-box">
+        <header class="install-confirm-heading">
+          <span class="install-confirm-kicker" data-ui-icon="shield-alert">최종 확인</span>
+          <h3>서버 설치를 시작할까요?</h3>
+          <p>신규 Ubuntu VPS 기준으로 서버 패키지, 웹서버, PHP/DB, SSL, 앱 설치 준비를 진행합니다. 이미 운영 중인 서버라면 취소하고 새 서버에서 진행하세요.</p>
+        </header>
+        <div class="install-confirm-body">
+          <div id="install-confirm-summary" class="report-card"></div>
+          <section class="install-disclaimer" aria-labelledby="install-disclaimer-title">
+            <h4 id="install-disclaimer-title">무료 오픈소스 사용 동의</h4>
+            <ul>
+              <li>이 프로그램은 Apache License 2.0 기준으로 무보증 제공되는 무료 도구입니다.</li>
+              <li>신규 VPS 전용입니다. 운영 중인 서버, 중요한 데이터가 있는 서버에서는 실행하지 마세요.</li>
+              <li>설치 과정에서 패키지, 웹서버, DB, 계정, 파일, SSL 설정이 생성·변경·삭제될 수 있습니다.</li>
+              <li>도메인, DNS, 백업, 외부 메일, VPS 과금과 복구 책임은 실행 사용자에게 있습니다.</li>
+              <li>개발자는 법이 허용하는 범위에서 데이터 손실, 장애, 보안 사고, 비용 발생에 책임지지 않습니다.</li>
+            </ul>
+            <label class="install-disclaimer-check">
+              <input id="install-disclaimer-accepted" class="checkbox checkbox-primary" type="checkbox" />
+              <span>위 내용을 읽었고 신규 VPS에서 실행하며, 설치 결과와 서버 변경 책임이 사용자에게 있음을 동의합니다.</span>
+            </label>
+          </section>
+        </div>
+        <div class="modal-action install-confirm-actions">
           <form method="dialog" class="flex gap-2">
             <button class="btn btn-ghost icon-button" value="cancel" data-icon="x">취소</button>
-            <button id="install-confirm-start" class="btn btn-primary icon-button" value="start" data-icon="play">시작</button>
+            <button id="install-confirm-start" class="btn btn-primary icon-button" value="start" data-icon="play" disabled>동의 후 시작</button>
           </form>
         </div>
       </div>
