@@ -107,6 +107,9 @@ G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 ro
 - 실제 VPS 하네스는 staging 인증서, 앱 스모크, 리포트 계약, reset, fresh doctor를 분리 증명한다.
 - 인프라 거버넌스와 하네스 제어층은 Python 표준 라이브러리 기반으로 작성하고, Bash는 bootstrap과 호환 wrapper에 한정한다.
 - Python 하네스는 외부 패키지 의존성 없이 `argparse`, `subprocess`, `json`, `pathlib`, `dataclasses` 같은 표준 라이브러리만 사용한다.
+- 개발속도와 빌드속도를 해치는 예쁜 구조를 금지한다. 새 추상화는 중복 제거, 빌드 범위 축소, 테스트 용이성 중 하나를 실제로 개선해야 한다.
+- `scripts/structure-audit.py`는 대형 파일 증가, 새 shell 예외, 실서비스 fixture 누수를 ratchet으로 막는다.
+- 변경 범위에 맞는 가장 작은 게이트를 우선 실행한다. 전체 커버리지와 릴리스 빌드는 릴리스 전 또는 파괴 범위가 큰 변경에 사용한다.
 
 ## 11. 릴리스 원칙
 
@@ -114,6 +117,7 @@ G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 ro
 - `checksums.txt`는 release artifact와 함께 배포한다.
 - 릴리스에는 CycloneDX SBOM, cargo metadata, checksums를 함께 배포한다.
 - GitHub Actions는 사용하지 않는다. 품질 게이트, 실제 VPS 하네스, 릴리스 산출물 생성은 로컬 명령으로 완료한다.
+- 로컬 릴리스 게이트는 임시 `CARGO_TARGET_DIR`를 사용하고 기본적으로 빌드 캐시를 삭제한다.
 - bootstrap은 latest release 감지, checksum 검증, `/usr/local/bin/g7inst` 설치만 담당한다.
 - `g7inst --version`은 설치기 버전과 build target을 출력한다.
 - self-update를 공개 기능으로 구현할 때는 현재 바이너리 교체 실패 시 복구 가능해야 한다.
@@ -127,6 +131,8 @@ G7 Installer는 새 Ubuntu VPS에 그누보드7 운영 환경을 설치하는 ro
 - `bash scripts/rustdoc-gate.sh` 통과
 - `cargo test` 통과
 - `cargo audit`와 `cargo deny check` 통과
+- `bash scripts/static-gate.sh` 통과
+- 릴리스 전 `bash scripts/coverage-gate.sh`와 `bash scripts/local-release-gate.sh` 통과
 - 관련 명령의 plan, state, log 동작 확인
 - root 권한 변경 작업은 fake runner 또는 VM smoke로 증명
 - 문서와 실제 동작이 어긋나지 않음

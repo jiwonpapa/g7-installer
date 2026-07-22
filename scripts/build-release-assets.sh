@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${G7_RELEASE_OUT_DIR:-${ROOT_DIR}/dist/release}"
+TARGET_DIR="${CARGO_TARGET_DIR:-${ROOT_DIR}/target}"
 TARGETS=(
   "x86_64-unknown-linux-musl"
   "aarch64-unknown-linux-musl"
@@ -17,7 +18,7 @@ TAG="v${VERSION}"
 
 for target in "${TARGETS[@]}"; do
   cargo build --locked --release --target "${target}" -p g7-cli --bin g7inst
-  install -m 0755 "target/${target}/release/g7inst" "${OUT_DIR}/g7inst-${target}"
+  install -m 0755 "${TARGET_DIR}/${target}/release/g7inst" "${OUT_DIR}/g7inst-${target}"
 done
 
 awk -v tag="${TAG}" '

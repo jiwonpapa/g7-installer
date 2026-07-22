@@ -43,10 +43,16 @@ G7 Installer는 무료 오픈소스(Apache License 2.0) 도구이며 신규 VPS 
 GitHub Actions는 사용하지 않습니다. 비용과 대기 시간을 줄이기 위해 개발, 품질 게이트, 릴리스 산출물 생성은 모두 로컬에서 실행합니다.
 
 ```bash
+bash scripts/static-gate.sh
 bash scripts/quick-gate.sh
 bash scripts/quality-gate.sh
+bash scripts/coverage-gate.sh
 bash scripts/local-release-gate.sh
 ```
+
+평소 문서/웹 정적 변경은 `static-gate`, Rust 로직 변경은 `quick-gate`, 릴리스 전에는
+`local-release-gate`를 사용합니다. `local-release-gate`는 임시 `CARGO_TARGET_DIR`에서
+커버리지와 x86_64/aarch64 릴리스 빌드를 수행하고 기본적으로 빌드 캐시를 자동 삭제합니다.
 
 ## 웹 UI 도움말 원칙
 
@@ -264,8 +270,10 @@ sudo g7inst reset --yes
 
 ## 상세 문서
 
+- 정적 빠른 검증: `bash scripts/static-gate.sh`
 - 개발 빠른 검증: `bash scripts/quick-gate.sh`
 - 전체 품질 검증: `bash scripts/quality-gate.sh`
+- 커버리지 검증: `bash scripts/coverage-gate.sh`
 - 로컬 릴리스 검증: `bash scripts/local-release-gate.sh`
 - [따라하기식 설치 매뉴얼](docs/copy-paste-install.md)
 - [초보용 설치 안내](docs/beginner-install.md)

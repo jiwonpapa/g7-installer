@@ -33,36 +33,6 @@ pub(super) struct ProgressContext<'a> {
     pub(super) owned_files_path: &'a Path,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InstallPaths {
-    root: PathBuf,
-}
-
-impl InstallPaths {
-    pub fn system() -> Self {
-        Self {
-            root: PathBuf::from("/"),
-        }
-    }
-
-    pub fn with_root(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
-    }
-
-    pub(super) fn resolve(&self, path: &str) -> PathBuf {
-        let path = Path::new(path);
-
-        if self.root == Path::new("/") {
-            return path.to_path_buf();
-        }
-
-        match path.strip_prefix("/") {
-            Ok(stripped) => self.root.join(stripped),
-            Err(_) => self.root.join(path),
-        }
-    }
-}
-
 pub fn run(domain: String, options: plan::PlanOptions) -> Result<InstallReport> {
     run_with_probe_and_paths(
         domain,

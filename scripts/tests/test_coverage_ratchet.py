@@ -1,7 +1,9 @@
 import importlib.util
 import tempfile
 import unittest
+from io import StringIO
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPT = Path(__file__).parents[1] / "check-coverage-ratchet.py"
@@ -29,7 +31,8 @@ class CoverageRatchetTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             report = self.report(root, MODULE.FLOORS)
-            self.assertEqual(MODULE.check_report(report, root), [])
+            with mock.patch.object(MODULE.sys, "stdout", StringIO()):
+                self.assertEqual(MODULE.check_report(report, root), [])
 
     def test_rejects_missing_and_regressed_critical_modules(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -39,7 +42,8 @@ class CoverageRatchetTests(unittest.TestCase):
             percentages.pop(missing)
             regressed = next(iter(percentages))
             percentages[regressed] -= 0.01
-            failures = MODULE.check_report(self.report(root, percentages), root)
+            with mock.patch.object(MODULE.sys, "stdout", StringIO()):
+                failures = MODULE.check_report(self.report(root, percentages), root)
             self.assertTrue(any(missing in item for item in failures))
             self.assertTrue(any(regressed in item for item in failures))
 

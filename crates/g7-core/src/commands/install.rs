@@ -47,6 +47,7 @@ mod apps;
 mod database;
 mod orchestrator;
 mod packages;
+mod paths;
 mod report;
 mod runtime;
 mod site;
@@ -54,9 +55,8 @@ mod tls;
 mod transaction;
 mod vhost;
 
-pub use orchestrator::{
-    InstallPaths, resume, resume_with_probe_and_paths, run, run_with_probe_and_paths,
-};
+pub use orchestrator::{resume, resume_with_probe_and_paths, run, run_with_probe_and_paths};
+pub use paths::InstallPaths;
 pub use report::{InstallCheck, InstallReport};
 
 use apps::*;
@@ -70,5 +70,7 @@ use tls::*;
 use transaction::*;
 use vhost::*;
 
+#[cfg(test)]
+mod runtime_tests;
 #[cfg(test)]
 mod tests;

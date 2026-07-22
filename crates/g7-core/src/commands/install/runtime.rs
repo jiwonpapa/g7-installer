@@ -1182,21 +1182,7 @@ pub(super) fn apply_swap_configuration<R: CommandRunner>(
         format!("{SWAP_UNIT_PATH} 문법을 활성화 전에 검증했습니다."),
     ));
 
-    let output = probe
-        .runner()
-        .run(&swap_apply_command(&sizing.swap_size))
-        .map_err(|err| {
-            command_error(
-                "swapfile",
-                format!("create and enable {SWAP_FILE_PATH}"),
-                err,
-            )
-        })?;
-    require_success(
-        "swapfile",
-        format!("create and enable {SWAP_FILE_PATH}"),
-        output,
-    )?;
+    apply_swapfile_system_commands(probe, sizing, Path::new(SWAP_FILE_PATH).exists())?;
     if !owned.iter().any(|path| path == SWAP_FILE_PATH) {
         owned.push(SWAP_FILE_PATH.to_string());
     }
@@ -1215,25 +1201,105 @@ pub(super) fn apply_swap_configuration<R: CommandRunner>(
     Ok(checks)
 }
 
-pub(super) fn swap_apply_command(swap_size: &str) -> CommandSpec {
-    let swap_size = shell_single_quote(swap_size);
-    let swap_size_mib = swap_size_to_mib(swap_size.trim_matches('\''));
-    CommandSpec::new("sh").arg("-c").arg(format!(
-        r#"set -eu
-swap_size={swap_size}
-if [ ! -f {SWAP_FILE_PATH} ]; then
-    fallocate -l "$swap_size" {SWAP_FILE_PATH} || dd if=/dev/zero of={SWAP_FILE_PATH} bs=1M count="{swap_size_mib}" status=none
-    chmod 600 {SWAP_FILE_PATH}
-    mkswap {SWAP_FILE_PATH} >/dev/null
-else
-    chmod 600 {SWAP_FILE_PATH}
-fi
-systemctl daemon-reload
-systemctl enable --now swapfile.swap >/dev/null
-sysctl --system >/dev/null
-swapon --show=NAME | grep -qx {SWAP_FILE_PATH}
-"#
-    ))
+pub(super) fn apply_swapfile_system_commands<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    sizing: &plan::ResolvedMemorySizing,
+    swap_file_exists: bool,
+) -> Result<()> {
+    if !swap_file_exists {
+        create_swapfile(probe, sizing)?;
+        let output = probe
+            .chmod_path("600", SWAP_FILE_PATH)
+            .map_err(|err| command_error("swapfile-permissions", chmod_swap_command(), err))?;
+        require_success("swapfile-permissions", chmod_swap_command(), output)?;
+
+        let command = CommandSpec::new("mkswap").arg(SWAP_FILE_PATH);
+        let output = probe
+            .runner()
+            .run(&command)
+            .map_err(|err| command_error("swapfile-format", command.display(), err))?;
+        require_success("swapfile-format", command.display(), output)?;
+    } else {
+        let output = probe
+            .chmod_path("600", SWAP_FILE_PATH)
+            .map_err(|err| command_error("swapfile-permissions", chmod_swap_command(), err))?;
+        require_success("swapfile-permissions", chmod_swap_command(), output)?;
+    }
+
+    let output = probe
+        .systemd_daemon_reload()
+        .map_err(|err| command_error("swap-daemon-reload", "systemctl daemon-reload", err))?;
+    require_success("swap-daemon-reload", "systemctl daemon-reload", output)?;
+
+    let output = probe.enable_service_now("swapfile.swap").map_err(|err| {
+        command_error(
+            "swap-unit-enable",
+            "systemctl enable --now swapfile.swap",
+            err,
+        )
+    })?;
+    require_success(
+        "swap-unit-enable",
+        "systemctl enable --now swapfile.swap",
+        output,
+    )?;
+
+    let command = CommandSpec::new("sysctl").arg("--system");
+    let output = probe
+        .runner()
+        .run(&command)
+        .map_err(|err| command_error("swap-sysctl-apply", command.display(), err))?;
+    require_success("swap-sysctl-apply", command.display(), output)?;
+
+    let command = CommandSpec::new("swapon").arg("--show=NAME");
+    let output = probe
+        .runner()
+        .run(&command)
+        .map_err(|err| command_error("swapfile-verify", command.display(), err))?;
+    require_success("swapfile-verify", command.display(), output.clone())?;
+    if !output
+        .stdout
+        .lines()
+        .any(|line| line.trim() == SWAP_FILE_PATH)
+    {
+        return Err(Error::InstallVerificationFailed {
+            checks: format!(
+                "swapfile-verify failed: {SWAP_FILE_PATH} is missing from swapon --show=NAME"
+            ),
+        });
+    }
+
+    Ok(())
+}
+
+fn create_swapfile<R: CommandRunner>(
+    probe: &SystemProbe<R>,
+    sizing: &plan::ResolvedMemorySizing,
+) -> Result<()> {
+    let command = CommandSpec::new("fallocate")
+        .arg("-l")
+        .arg(&sizing.swap_size)
+        .arg(SWAP_FILE_PATH);
+    match probe.runner().run(&command) {
+        Ok(output) if output.status == 0 => Ok(()),
+        _ => {
+            let fallback = CommandSpec::new("dd")
+                .arg("if=/dev/zero")
+                .arg(format!("of={SWAP_FILE_PATH}"))
+                .arg("bs=1M")
+                .arg(format!("count={}", swap_size_to_mib(&sizing.swap_size)))
+                .arg("status=none");
+            let output = probe
+                .runner()
+                .run(&fallback)
+                .map_err(|err| command_error("swapfile-create", fallback.display(), err))?;
+            require_success("swapfile-create", fallback.display(), output)
+        }
+    }
+}
+
+fn chmod_swap_command() -> &'static str {
+    "chmod 600 /swapfile"
 }
 
 pub(super) fn swap_size_to_mib(swap_size: &str) -> u64 {
@@ -1249,10 +1315,6 @@ pub(super) fn swap_size_to_mib(swap_size: &str) -> u64 {
     } else {
         digits.max(1024)
     }
-}
-
-pub(super) fn shell_single_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 pub(super) fn swap_unit_content() -> String {

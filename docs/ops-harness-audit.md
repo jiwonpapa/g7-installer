@@ -1,22 +1,36 @@
 # 운영 하네스 감사
 
-기준일: 2026-07-13
+기준일: 2026-07-22
 
 ## 자동 검증 계층
 
 | 계층 | 실행 | 검증 범위 |
 |---|---|---|
-| 빠른 게이트 | `bash scripts/quick-gate.sh` | shell/정적 UI/Rust 핵심 테스트 |
-| 전체 게이트 | `bash scripts/quality-gate.sh` | fmt, test, clippy, rustdoc, 전체 coverage 77%와 위험 모듈별 하한, audit, deny, 웹 빌드 |
-| 로컬 릴리스 게이트 | `bash scripts/local-release-gate.sh` | 전체 게이트 후 x86_64/aarch64 musl 바이너리, 체크섬, SBOM 생성 |
+| 정적 게이트 | `bash scripts/static-gate.sh` | shell/python/js 문법, 웹 정적 smoke, 구조 감사, 공개 문서 범위 |
+| 빠른 게이트 | `bash scripts/quick-gate.sh` | 정적 게이트, fmt, Rust 핵심 테스트 |
+| 전체 게이트 | `bash scripts/quality-gate.sh` | 빠른 게이트, workspace test, clippy, rustdoc, audit, deny, 웹 빌드 |
+| 커버리지 게이트 | `bash scripts/coverage-gate.sh` | 전체 coverage 77%와 위험 모듈별 하한 |
+| 로컬 릴리스 게이트 | `bash scripts/local-release-gate.sh` | 임시 `CARGO_TARGET_DIR`에서 전체/커버리지 게이트 후 x86_64/aarch64 musl 바이너리, 체크섬, SBOM 생성 |
 | 실제 VPS | `bash scripts/ops-harness.sh` | 승인된 폐기 가능 Ubuntu 24.04 VPS 설치·초기화 |
+
+`local-release-gate`는 기본적으로 임시 target directory를 만들고 완료 후 삭제합니다.
+릴리스 디버깅 때문에 캐시를 보존해야 할 때만 `G7_RELEASE_KEEP_TARGET=1`을 사용합니다.
+릴리스 산출물은 `dist/release`에 남고, GitHub Release 업로드 후 로컬에서 삭제해도 됩니다.
+
+## 구조 회귀 감사
+
+`scripts/structure-audit.py`는 빌드 속도와 수정 속도를 갉아먹는 구조를 조기에 막습니다.
+
+- 기존 대형 파일은 현재 line count를 기준으로 ratchet을 걸고, 새 파일은 900줄 초과를 실패로 봅니다.
+- 새 `CommandSpec::new("sh")`/`Command::new("sh")` 사용을 실패로 봅니다.
+- `g7devops.com`, `/home/g7devops` 같은 실서비스 fixture가 허용된 E2E/sample 파일 밖으로 새는지 검사합니다.
 
 ## 커버리지 회귀 하한
 
 전체 line coverage는 77% 이상이어야 합니다. 추가로 설치 트랜잭션 72%, 웹 API 64%,
 프로비저닝 액션 62%, 웹 라우트 63% 등 파괴 작업과 사용자 제어 경로는 파일별 하한을
 `scripts/check-coverage-ratchet.py`에서 검사합니다. 전체 수치가 유지되더라도 위험 모듈의
-커버리지가 하락하면 quality gate는 실패합니다.
+커버리지가 하락하면 coverage gate는 실패합니다.
 
 ## 실제 VPS 증명 계약
 

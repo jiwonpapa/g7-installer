@@ -57,6 +57,11 @@ reject_web_setup "/api/auth/login|LoginRequest|verify_server_account_password|ac
 reject web/index.html "login-password|login-username|login-form|서버 계정|로그인하고 계속" "setup auth regression: password login UI returned"
 reject web/app.js "/api/auth/login|login-password|login-username|login-form" "setup auth regression: password login frontend returned"
 
+if [[ "${G7_SETUP_AUTH_RUNTIME:-1}" != "1" ]]; then
+  echo "setup auth static smoke passed"
+  exit 0
+fi
+
 if [[ "$(id -u)" == "0" ]]; then
   echo "setup auth smoke skipped runtime non-root check because current user is root"
   exit 0
