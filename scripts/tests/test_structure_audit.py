@@ -77,10 +77,17 @@ class StructureAuditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "target").mkdir()
+            (root / "web" / "node_modules").mkdir(parents=True)
 
             failures = MODULE.check_build_artifacts(root)
 
-        self.assertEqual(failures, ["repo-local build artifact directory is present: target"])
+        self.assertEqual(
+            failures,
+            [
+                "repo-local build artifact directory is present: target",
+                "repo-local build artifact directory is present: web/node_modules",
+            ],
+        )
 
     def test_main_passes_without_build_artifact_mode(self):
         with tempfile.TemporaryDirectory() as tmp:

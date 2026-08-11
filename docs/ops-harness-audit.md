@@ -10,12 +10,23 @@
 | 빠른 게이트 | `bash scripts/quick-gate.sh` | 정적 게이트, fmt, Rust 핵심 테스트 |
 | 전체 게이트 | `bash scripts/quality-gate.sh` | 빠른 게이트, workspace test, clippy, rustdoc, audit, deny, 웹 빌드 |
 | 커버리지 게이트 | `bash scripts/coverage-gate.sh` | 전체 coverage 77%와 위험 모듈별 하한 |
-| 로컬 릴리스 게이트 | `bash scripts/local-release-gate.sh` | 임시 `CARGO_TARGET_DIR`에서 전체/커버리지 게이트 후 x86_64/aarch64 musl 바이너리, 체크섬, SBOM 생성 |
+| 릴리스 정책 게이트 | `python3 scripts/check-release-policy.py` | Keep a Changelog 형식, SemVer 버전, workspace crate 버전 일치 |
+| 로컬 릴리스 게이트 | `bash scripts/local-release-gate.sh` | repo 밖 `CARGO_TARGET_DIR` 캐시로 전체/커버리지 게이트 후 x86_64/aarch64 musl 바이너리, 체크섬, SBOM 생성 |
 | 실제 VPS | `bash scripts/ops-harness.sh` | 승인된 폐기 가능 Ubuntu 24.04 VPS 설치·초기화 |
 
-`local-release-gate`는 기본적으로 임시 target directory를 만들고 완료 후 삭제합니다.
-릴리스 디버깅 때문에 캐시를 보존해야 할 때만 `G7_RELEASE_KEEP_TARGET=1`을 사용합니다.
-릴리스 산출물은 `dist/release`에 남고, GitHub Release 업로드 후 로컬에서 삭제해도 됩니다.
+`quick-gate`, `quality-gate`, `coverage-gate`, `local-release-gate`는 기본적으로 repo 밖
+`CARGO_TARGET_DIR` 캐시를 사용합니다. 기본 위치는 macOS에서
+`~/Library/Caches/g7-installer/cargo-target`, 그 외 환경에서는
+`$XDG_CACHE_HOME/g7-installer/cargo-target` 또는 `~/.cache/g7-installer/cargo-target`입니다.
+백업에는 안 들어가고 다음 빌드는 캐시를 재사용합니다. 완전 임시 빌드가 필요할 때만
+`G7_USE_TEMP_TARGET=1`을 사용합니다. 릴리스 산출물은 `dist/release`에 남고, GitHub Release
+업로드 후 `bash scripts/clean-artifacts.sh --yes`로 삭제합니다.
+
+백업 전 표준 정리 명령:
+
+```bash
+bash scripts/clean-artifacts.sh --yes
+```
 
 ## 구조 회귀 감사
 

@@ -51,8 +51,20 @@ bash scripts/local-release-gate.sh
 ```
 
 평소 문서/웹 정적 변경은 `static-gate`, Rust 로직 변경은 `quick-gate`, 릴리스 전에는
-`local-release-gate`를 사용합니다. `local-release-gate`는 임시 `CARGO_TARGET_DIR`에서
-커버리지와 x86_64/aarch64 릴리스 빌드를 수행하고 기본적으로 빌드 캐시를 자동 삭제합니다.
+`local-release-gate`를 사용합니다. Rust 빌드 캐시는 기본적으로 repo 밖
+`~/Library/Caches/g7-installer/cargo-target` 또는 `$XDG_CACHE_HOME/g7-installer/cargo-target`에
+유지합니다. 그래서 백업에는 안 잡히고 다음 빌드는 빨라집니다. 완전 임시 빌드가 필요할 때만
+`G7_USE_TEMP_TARGET=1`을 붙입니다.
+백업 전에는 아래 명령으로 프로젝트 내부 산출물만 정리합니다.
+
+```bash
+bash scripts/clean-artifacts.sh --yes
+```
+
+이 명령은 `target`, `dist`, `test-results`, `playwright-report`, `coverage`, `web/node_modules`,
+Python 캐시와 coverage/profiling 파일만 지웁니다. `.env`, SSH 키, `*.pem` 같은 비밀 파일은
+무조건 보존합니다.
+반복 개발 중 웹 의존성 재설치 시간을 아끼려면 `bash scripts/clean-artifacts.sh --yes --keep-web-deps`를 사용합니다.
 
 ## 웹 UI 도움말 원칙
 
@@ -274,7 +286,10 @@ sudo g7inst reset --yes
 - 개발 빠른 검증: `bash scripts/quick-gate.sh`
 - 전체 품질 검증: `bash scripts/quality-gate.sh`
 - 커버리지 검증: `bash scripts/coverage-gate.sh`
+- 릴리스 정책 검증: `python3 scripts/check-release-policy.py`
+- 백업 전 산출물 정리: `bash scripts/clean-artifacts.sh --yes`
 - 로컬 릴리스 검증: `bash scripts/local-release-gate.sh`
+- [변경 기록](CHANGELOG.md)
 - [따라하기식 설치 매뉴얼](docs/copy-paste-install.md)
 - [초보용 설치 안내](docs/beginner-install.md)
 - [Lightsail 상세 안내](docs/lightsail-ubuntu24-setup-guide.md)

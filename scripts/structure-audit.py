@@ -116,9 +116,21 @@ def check_live_fixtures(root: Path, files: list[Path]) -> list[str]:
     return failures
 
 
+BUILD_ARTIFACT_PATHS = (
+    "target",
+    "dist",
+    "coverage",
+    "test-results",
+    "playwright-report",
+    "web/node_modules",
+    "web/test-results",
+    "web/playwright-report",
+)
+
+
 def check_build_artifacts(root: Path) -> list[str]:
     failures = []
-    for name in ("target", "dist"):
+    for name in BUILD_ARTIFACT_PATHS:
         path = root / name
         if path.exists():
             failures.append(f"repo-local build artifact directory is present: {name}")

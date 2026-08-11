@@ -1,10 +1,21 @@
-# 변경 기록
+# Changelog
 
-형식은 Keep a Changelog 원칙을 따르며 버전은 Semantic Versioning을 사용합니다.
+이 프로젝트의 변경 기록은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 형식을 따르고,
+버전은 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
-## Unreleased
+## [Unreleased]
 
-## 0.3.0-beta.17 - 2026-07-20
+### Added
+
+- Keep a Changelog 1.1.0과 Semantic Versioning 2.0.0 기준을 검사하는 릴리스 정책 게이트 추가
+- 백업 전 프로젝트 내부 산출물만 정리하는 `scripts/clean-artifacts.sh` 추가
+
+### Changed
+
+- 로컬 게이트가 Rust 빌드 캐시를 repo 밖 사용자 캐시 디렉터리에 유지해 반복 빌드 속도를 보존하도록 변경
+- `web/node_modules`는 기본 게이트 정리에서 보존하고 명시 요청 시에만 삭제하도록 정리 정책 변경
+
+## [0.3.0-beta.17] - 2026-07-20
 
 ### Changed
 
@@ -12,21 +23,21 @@
 - 프로젝트 라이선스를 Apache License 2.0으로 전환하고 무보증 안내를 README, 웹 설치 동의문, 개발 헌법에 반영
 - 웹 설치 준비 전에 무보증·신규 서버 전용 안내 동의를 필수로 확인하도록 개선
 
-## 0.3.0-beta.16 - 2026-07-14
+## [0.3.0-beta.16] - 2026-07-14
 
 ### Fixed
 
 - 데스크톱 20px 상단 여백에서 앱 배경과 다른 흰색 캔버스가 노출되던 마진 병합 문제 수정
 - 라이트·다크 캔버스 배경 일치, 데스크톱 패딩, 모바일 무여백 회귀 검사 추가
 
-## 0.3.0-beta.15 - 2026-07-14
+## [0.3.0-beta.15] - 2026-07-14
 
 ### Changed
 
 - 다크모드 인트로의 Ubuntu, Nginx, PHP, MySQL, Redis, SSL 아이콘을 실제 행성 중심에 맞춤
 - 라이트모드 좌표와 분리한 다크모드 전용 좌표 및 6개 좌표 회귀 검사 추가
 
-## 0.3.0-beta.14 - 2026-07-14
+## [0.3.0-beta.14] - 2026-07-14
 
 ### Added
 
@@ -38,14 +49,14 @@
 - 테마 전환 시 인트로 이미지, 설명 문구, 상태 알림, 궤도 아이콘 대비가 함께 바뀌도록 개선
 - 모바일 다크 인트로의 이미지 농도와 텍스트 가독성 조정
 
-## 0.3.0-beta.13 - 2026-07-14
+## [0.3.0-beta.13] - 2026-07-14
 
 ### Changed
 
 - 실제 종료 동작이 없고 SSH 터널 사용자에게 혼란을 주던 웹 헤더의 비활성 종료 버튼 제거
 - 무기능 종료 컨트롤이 다시 노출되지 않도록 웹 정적 회귀 검사 추가
 
-## 0.3.0-beta.12 - 2026-07-14
+## [0.3.0-beta.12] - 2026-07-14
 
 ### Changed
 
@@ -53,7 +64,7 @@
 - 영구 삭제, 보존, 자동 백업 미제공 항목을 구역과 색상으로 분리해 복구 불가 경고 강화
 - 초기화 실행 버튼을 위험 색상으로 통일하고 확인 문구 입력 전 잠금 회귀 테스트 추가
 
-## 0.3.0-beta.11 - 2026-07-14
+## [0.3.0-beta.11] - 2026-07-14
 
 ### Changed
 
@@ -62,7 +73,7 @@
 - Ubuntu 26.04 및 미래 버전 판정, PHP 기본 후보 사용, MySQL 계열 판정 회귀 테스트 추가
 - 웹 마법사와 설치 문서의 OS 및 저장소 안내 갱신
 
-## 0.3.0-beta.10 - 2026-07-13
+## [0.3.0-beta.10] - 2026-07-13
 
 ### Added
 
@@ -80,7 +91,7 @@
 - finalize가 공식 Release의 stale Vite manifest만으로 정상 G7 웹 설치를 차단하던 문제 수정
 - 초기화가 G7 드라이버·메일 settings JSON, storage 링크, Queue·Scheduler·Reverb unit을 모두 제거하는 계약을 실제 VPS와 회귀 테스트로 재검증
 
-## 0.3.0-beta.9 - 2026-07-13
+## [0.3.0-beta.9] - 2026-07-13
 
 ### Added
 
@@ -101,7 +112,7 @@
 - 공식 Release clone의 Vite manifest 참조 파일 누락을 앱 인계 전에 정확한 파일명으로 차단
 - 서버 리포트가 없는 fresh 상태에서 이전 브라우저 세션의 앱 완료 표시가 남던 문제 수정
 
-## 0.3.0-beta.8 - 2026-07-13
+## [0.3.0-beta.8] - 2026-07-13
 
 ### Added
 
@@ -113,7 +124,7 @@
 - 첫 화면의 접속 상태와 SSH 터널 정보를 유지하면서 서버 점검 동선을 단일 시작 버튼으로 정리
 - 모바일 첫 화면에서 핵심 문구, 상태, 시작 버튼이 한 화면에 들어오도록 반응형 레이아웃 최적화
 
-## 0.3.0-beta.7 - 2026-07-13
+## [0.3.0-beta.7] - 2026-07-13
 
 ### Added
 
@@ -127,7 +138,7 @@
 - 설치 안내서 구성 점검을 서비스 재시작이나 파일 권한 변경이 없는 읽기 전용 검사로 변경
 - 전체 초기화와 패키지 되돌리기를 완료 화면 하단 위험 구역으로 이동
 
-## 0.3.0-beta.4 - 2026-07-13
+## [0.3.0-beta.4] - 2026-07-13
 
 ### Changed
 
@@ -141,7 +152,7 @@
 - 숨겨야 할 이어서 진행·패키지 되돌리기 버튼이 비활성 상태로 남던 문제 수정
 - 기존 설치 서버에서 의미 없는 `점검 통과 후 다음` 버튼이 표시되던 문제 수정
 
-## 0.3.0-beta.3 - 2026-07-13
+## [0.3.0-beta.3] - 2026-07-13
 
 ### Changed
 
@@ -154,7 +165,7 @@
 - 이미 구성된 서버에서 Nginx, 포트, 설치 상태 파일이 있다는 이유로 전체 상태가 단순 실패로 표시되던 문제 수정
 - DB 생성 기록만으로 앱 설치 완료를 판단하지 않고 실제 DB와 G7 설치 잠금 파일을 함께 확인하도록 수정
 
-## 0.3.0-beta.2 - 2026-07-13
+## [0.3.0-beta.2] - 2026-07-13
 
 ### Added
 
@@ -174,7 +185,7 @@
 - 직접 HTTPS 정규화, `/install/` 경로, 기존 인증서 재사용 단계가 완료 리포트와 어긋나던 문제 수정
 - 공개 범위에서 제거된 앱·DB 선택 항목이 운영 하네스와 프로비저닝 코드에 남아 있던 문제 수정
 
-## 0.3.0-beta.1 - 2026-07-12
+## [0.3.0-beta.1] - 2026-07-12
 
 ### Added
 
@@ -190,7 +201,7 @@
 - 설치 진행 화면을 G7 실행 헤더, 단계 그래프, 단일 실시간 로그 구조로 통일
 - 릴리스 bootstrap이 자신과 같은 태그의 바이너리와 체크섬을 받도록 고정
 
-## 0.2.47 - 2026-07-11
+## [0.2.47] - 2026-07-11
 
 ### Fixed
 
@@ -198,7 +209,7 @@
 - 재설치 초기화의 `apt autoremove`가 Certbot과 웹서버 플러그인을 연쇄 제거하지 않도록 인증서 관련 패키지 보호
 - 설치 및 이어서 진행 완료 직후 복구 상태를 다시 동기화해 전체 초기화 버튼이 늦게 활성화되던 문제 수정
 
-## 0.2.46 - 2026-07-11
+## [0.2.46] - 2026-07-11
 
 ### Fixed
 
@@ -209,7 +220,7 @@
 - 패키지 롤백도 설치기가 만든 MySQL 데이터 디렉터리를 함께 제거
 - 패키지 설치 실패 리포트에 `apt` 표준 출력과 오류 요약을 포함
 
-## 0.2.45 - 2026-07-11
+## [0.2.45] - 2026-07-11
 
 ### Fixed
 
@@ -234,7 +245,7 @@
 - 설치 순서를 사이트 계정, PHP 런타임, vhost/HTTP, DB 순으로 교정하고 최종 안내서에 표준 설정·로그·검증 명령 경로를 보강
 - 활성 서비스 설정은 Ubuntu 표준 `/etc` 경로에 두고 설치기 상태·로그·백업 경로와 구분해 README와 최종 안내서에 명시
 
-## 0.2.44 - 2026-07-11
+## [0.2.44] - 2026-07-11
 
 ### Fixed
 
@@ -251,7 +262,7 @@
 
 - 공개 설치 UI, API와 사용자 문서를 그누보드7 단독 지원 범위로 통일
 
-## 0.2.38 - 2026-07-10
+## [0.2.38] - 2026-07-10
 
 ### Fixed
 
@@ -262,21 +273,21 @@
 - Nginx vhost에서 불필요한 확장자 캐시 규칙과 G7 전용 `/app`, `/apps` 자동 프록시 제거
 - 정적 파일과 동적 애플리케이션 요청을 기본 `try_files` front controller 흐름으로 단순화
 
-## 0.2.37 - 2026-07-10
+## [0.2.37] - 2026-07-10
 
 ### Fixed
 
 - G7 브라우저 설치 전에 `.env.example`을 `.env`로 준비하지 않아 필수 요구사항 검사가 중단되던 회귀 수정
 - 기존 `.env`는 덮어쓰지 않고 보존하며 최종 권한을 사이트 계정 전용 `0600`으로 제한
 
-## 0.2.36 - 2026-07-10
+## [0.2.36] - 2026-07-10
 
 ### Fixed
 
 - `cp -a`로 배포한 Git 저장소의 인덱스 stat 캐시 차이를 실제 파일 변경으로 오인하던 문제 수정
 - Git 인덱스를 갱신하지 않는 추적 파일 상태 검증으로 정상 복제본과 실제 변조를 구분
 
-## 0.2.35 - 2026-07-10
+## [0.2.35] - 2026-07-10
 
 ### Fixed
 
@@ -289,19 +300,19 @@
 - PHP-FPM, CLI, 확장 패키지를 하나의 PHP 런타임 그룹으로 통합하고 실패 시에만 세부 목록 자동 펼침
 - 설치 모달과 우측 패널이 같은 실시간 로그 DOM을 이동해 사용하도록 변경
 
-## 0.2.34 - 2026-07-10
+## [0.2.34] - 2026-07-10
 
 ### Fixed
 
 - 사이트 계정으로 소유권을 변경한 G7 배포 저장소를 root가 검증할 때 Git `dubious ownership`으로 중단되던 문제 수정
 
-## 0.2.33 - 2026-07-10
+## [0.2.33] - 2026-07-10
 
 ### Fixed
 
 - 중단된 재설치 초기화를 다시 실행할 때 DB 서비스가 정지되어 있으면 잠시 시작한 뒤 멱등 DB 삭제를 재시도
 
-## 0.2.32 - 2026-07-10
+## [0.2.32] - 2026-07-10
 
 ### Fixed
 
@@ -315,7 +326,7 @@
 - G7 앱 설정을 공식 브라우저 `/install`로 인계하고 사전 Composer·NPM·Artisan 실행 제거
 - 재설치 초기화에서 사이트 계정 프로세스·로그인 세션만 종료하고 컨트롤러·SSH 터널·인증서는 보존
 
-## 0.2.31 - 2026-07-10
+## [0.2.31] - 2026-07-10
 
 ### Added
 
@@ -330,7 +341,7 @@
 - UFW·fail2ban 설치·변경을 범위 밖으로 명시하고 관련 실행 경로를 제거
 - VPS 하네스 셸 권한 래퍼와 Certbot README 오탐을 수정
 
-## 0.2.30 - 2026-07-10
+## [0.2.30] - 2026-07-10
 
 ### Added
 
@@ -344,6 +355,39 @@
 - doctor가 서비스·포트·설정 상태를 확인할 수 없으면 설치를 차단
 - 운영 하네스가 전체 리포트 계약, 앱 스모크, 초기화 자원 제거와 인증서 보존을 검증
 
-## 0.2.29 - 2026-07-09
+## [0.2.29] - 2026-07-09
+
+### Changed
 
 - 설치 엔진 모듈 분리와 운영 하네스 기반을 정리했습니다.
+
+[Unreleased]: https://github.com/jiwonpapa/g7-installer/compare/v0.3.0-beta.17...HEAD
+[0.3.0-beta.17]: https://github.com/jiwonpapa/g7-installer/compare/v0.3.0-beta.16...v0.3.0-beta.17
+[0.3.0-beta.16]: https://github.com/jiwonpapa/g7-installer/compare/v0.3.0-beta.15...v0.3.0-beta.16
+[0.3.0-beta.15]: https://github.com/jiwonpapa/g7-installer/compare/v0.3.0-beta.14...v0.3.0-beta.15
+[0.3.0-beta.14]: https://github.com/jiwonpapa/g7-installer/compare/v0.3.0-beta.13...v0.3.0-beta.14
+[0.3.0-beta.13]: https://github.com/jiwonpapa/g7-installer/compare/v0.3.0-beta.12...v0.3.0-beta.13
+[0.3.0-beta.12]: https://github.com/jiwonpapa/g7-installer/compare/v0.3.0-beta.11...v0.3.0-beta.12
+[0.3.0-beta.11]: https://github.com/jiwonpapa/g7-installer/compare/v0.3.0-beta.10...v0.3.0-beta.11
+[0.3.0-beta.10]: https://github.com/jiwonpapa/g7-installer/compare/v0.3.0-beta.9...v0.3.0-beta.10
+[0.3.0-beta.9]: https://github.com/jiwonpapa/g7-installer/compare/v0.3.0-beta.8...v0.3.0-beta.9
+[0.3.0-beta.8]: https://github.com/jiwonpapa/g7-installer/compare/v0.3.0-beta.7...v0.3.0-beta.8
+[0.3.0-beta.7]: https://github.com/jiwonpapa/g7-installer/compare/v0.3.0-beta.4...v0.3.0-beta.7
+[0.3.0-beta.4]: https://github.com/jiwonpapa/g7-installer/compare/v0.3.0-beta.3...v0.3.0-beta.4
+[0.3.0-beta.3]: https://github.com/jiwonpapa/g7-installer/compare/v0.3.0-beta.2...v0.3.0-beta.3
+[0.3.0-beta.2]: https://github.com/jiwonpapa/g7-installer/compare/v0.3.0-beta.1...v0.3.0-beta.2
+[0.3.0-beta.1]: https://github.com/jiwonpapa/g7-installer/compare/v0.2.47...v0.3.0-beta.1
+[0.2.47]: https://github.com/jiwonpapa/g7-installer/compare/v0.2.46...v0.2.47
+[0.2.46]: https://github.com/jiwonpapa/g7-installer/compare/v0.2.45...v0.2.46
+[0.2.45]: https://github.com/jiwonpapa/g7-installer/compare/v0.2.44...v0.2.45
+[0.2.44]: https://github.com/jiwonpapa/g7-installer/compare/v0.2.38...v0.2.44
+[0.2.38]: https://github.com/jiwonpapa/g7-installer/compare/v0.2.37...v0.2.38
+[0.2.37]: https://github.com/jiwonpapa/g7-installer/compare/v0.2.36...v0.2.37
+[0.2.36]: https://github.com/jiwonpapa/g7-installer/compare/v0.2.35...v0.2.36
+[0.2.35]: https://github.com/jiwonpapa/g7-installer/compare/v0.2.34...v0.2.35
+[0.2.34]: https://github.com/jiwonpapa/g7-installer/compare/v0.2.33...v0.2.34
+[0.2.33]: https://github.com/jiwonpapa/g7-installer/compare/v0.2.32...v0.2.33
+[0.2.32]: https://github.com/jiwonpapa/g7-installer/compare/v0.2.31...v0.2.32
+[0.2.31]: https://github.com/jiwonpapa/g7-installer/compare/v0.2.30...v0.2.31
+[0.2.30]: https://github.com/jiwonpapa/g7-installer/compare/v0.2.29...v0.2.30
+[0.2.29]: https://github.com/jiwonpapa/g7-installer/releases/tag/v0.2.29

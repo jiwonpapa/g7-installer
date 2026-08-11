@@ -6,7 +6,13 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
 cleanup() {
-  find scripts -type d -name __pycache__ -prune -exec rm -rf {} +
+  local status=$?
+  if [[ "${status}" == "0" ]]; then
+    bash scripts/clean-artifacts.sh --yes --keep-release --keep-web-deps --quiet
+  else
+    echo "[static-gate] failed; keeping artifacts for debugging" >&2
+  fi
+  exit "${status}"
 }
 trap cleanup EXIT
 
@@ -14,6 +20,7 @@ echo "[static-gate] shell syntax"
 bash -n scripts/*.sh
 echo "[static-gate] python syntax and harness tests"
 python3 -m py_compile \
+  scripts/check-release-policy.py \
   scripts/check-coverage-ratchet.py \
   scripts/generate-sbom.py \
   scripts/ops_harness.py \
@@ -21,6 +28,8 @@ python3 -m py_compile \
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 echo "[static-gate] structure audit"
 python3 scripts/structure-audit.py
+echo "[static-gate] release policy"
+python3 scripts/check-release-policy.py
 echo "[static-gate] web static smoke"
 bash scripts/web-static-smoke.sh
 echo "[static-gate] setup auth static smoke"

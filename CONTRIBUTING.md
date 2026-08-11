@@ -13,6 +13,8 @@
 - Rust 로직 변경: `bash scripts/quick-gate.sh`
 - 공유 경계, reset/rollback, 릴리스 후보: `bash scripts/quality-gate.sh`
 - 릴리스 전 커버리지 확인: `bash scripts/coverage-gate.sh`
+- 백업 전 산출물 정리: `bash scripts/clean-artifacts.sh --yes`
+- 릴리스 정책 검증: `python3 scripts/check-release-policy.py`
 - `cargo fmt --check`
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `cargo test --workspace`
@@ -25,6 +27,8 @@
 일반 테스트에 사용하지 않습니다.
 
 릴리스 태그는 `git tag -a vX.Y.Z -m "release X.Y.Z"` 형식의 annotated tag로 만들며,
+버전 문자열 자체는 `X.Y.Z` 또는 `X.Y.Z-prerelease` SemVer입니다. `CHANGELOG.md`는
+Keep a Changelog 형식으로 `Unreleased`와 링크형 릴리스 제목을 유지합니다.
 `bash scripts/local-release-gate.sh`로 품질 게이트, 커버리지, 릴리스 산출물 생성을 로컬에서
-검증합니다. 이 릴리스 게이트는 기본적으로 임시 `CARGO_TARGET_DIR`를 사용하고 완료 후 빌드
-캐시를 삭제합니다. 캐시를 보존해야 할 때만 `G7_RELEASE_KEEP_TARGET=1`을 사용합니다.
+검증합니다. Rust 빌드 캐시는 기본적으로 repo 밖 사용자 캐시 디렉터리에 유지합니다.
+완전 임시 빌드가 필요할 때만 `G7_USE_TEMP_TARGET=1`을 사용합니다.

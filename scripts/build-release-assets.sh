@@ -3,18 +3,30 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${G7_RELEASE_OUT_DIR:-${ROOT_DIR}/dist/release}"
-TARGET_DIR="${CARGO_TARGET_DIR:-${ROOT_DIR}/target}"
 TARGETS=(
   "x86_64-unknown-linux-musl"
   "aarch64-unknown-linux-musl"
 )
 
 cd "${ROOT_DIR}"
+source scripts/gate-env.sh
+g7_prepare_cargo_target "build-release-assets" "${G7_RELEASE_TARGET_DIR:-}"
+TARGET_DIR="${CARGO_TARGET_DIR}"
+
+cleanup() {
+  local status=$?
+  g7_cleanup_temp_cargo_target "${G7_RELEASE_KEEP_TARGET:-0}"
+  exit "${status}"
+}
+trap cleanup EXIT
+
 rm -rf "${OUT_DIR}"
 mkdir -p "${OUT_DIR}"
 
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' crates/g7-cli/Cargo.toml | head -n 1)"
 TAG="v${VERSION}"
+
+python3 scripts/check-release-policy.py
 
 for target in "${TARGETS[@]}"; do
   cargo build --locked --release --target "${target}" -p g7-cli --bin g7inst

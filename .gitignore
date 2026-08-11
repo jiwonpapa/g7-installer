@@ -2,6 +2,7 @@
 /target/
 /dist/
 __pycache__/
+.pytest_cache/
 *.pyc
 /web/node_modules/
 
@@ -37,6 +38,7 @@ id_dsa.pub
 /web/playwright-report/
 *.profraw
 *.profdata
+lcov.info
 
 # Editor and OS metadata
 .DS_Store

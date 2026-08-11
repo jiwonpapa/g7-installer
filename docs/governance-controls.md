@@ -11,6 +11,7 @@
 | 비밀값 연속성 | DB 전 단계의 비밀값을 root-only 임시 파일에 보관하고 DB 완료 후 삭제 | 권한·이스케이프·성공 후 삭제 테스트 |
 | 파괴 작업 보존 | 인증서와 Certbot 자동 갱신 보존 정책 | reset/rollback golden 테스트 |
 | 구조 회귀 | 대형 파일 ratchet, 새 shell 예외, 실서비스 fixture 누수 | `bash scripts/static-gate.sh` |
+| 릴리스 정책 | Keep a Changelog 형식, SemVer 버전, workspace crate 버전 일치 | `python3 scripts/check-release-policy.py` |
 | 의존성·라이선스 | `cargo audit`, `cargo deny` | `bash scripts/quality-gate.sh` |
 | 커버리지 | 전체 77%와 위험 모듈별 하한 | `bash scripts/coverage-gate.sh` |
 | 릴리스 무결성 | 체크섬, CycloneDX SBOM, cargo metadata, 임시 target 자동 정리 | `bash scripts/local-release-gate.sh` |
@@ -25,6 +26,7 @@
 
 ## 증거 보존
 
-- 품질 게이트와 릴리스 산출물은 로컬 `target/`, `dist/release/`에 보존합니다.
-- 실제 VPS 실행 결과는 `target/ops-harness/<timestamp>`에 보존합니다.
+- 품질 게이트는 기본적으로 repo 밖 `CARGO_TARGET_DIR` 캐시를 사용하고 프로젝트 내부 산출물만 정리합니다.
+- 릴리스 산출물은 `dist/release/`에 생성되며 업로드 확인 후 `bash scripts/clean-artifacts.sh --yes`로 정리합니다.
+- 실제 VPS 실행 결과는 기본 `target/ops-harness/<timestamp>`에 생성되며 백업 전 정리 대상입니다.
 - 서버 명령 감사 로그는 `/var/log/g7-installer/commands.jsonl`에 저장합니다.

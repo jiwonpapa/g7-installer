@@ -2,25 +2,26 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OWN_TARGET_DIR="${G7_RELEASE_TARGET_DIR:-}"
-CLEAN_TARGET=0
 
 cd "${ROOT_DIR}"
-
-if [[ -z "${OWN_TARGET_DIR}" ]]; then
-  OWN_TARGET_DIR="$(mktemp -d "${TMPDIR:-/tmp}/g7inst-release-target.XXXXXX")"
-  CLEAN_TARGET=1
-fi
+source scripts/gate-env.sh
+g7_prepare_cargo_target "local-release-gate" "${G7_RELEASE_TARGET_DIR:-}"
 
 cleanup() {
-  if [[ "${CLEAN_TARGET}" == "1" && "${G7_RELEASE_KEEP_TARGET:-0}" != "1" ]]; then
-    rm -rf "${OWN_TARGET_DIR}"
+  local status=$?
+  g7_cleanup_temp_cargo_target "${G7_RELEASE_KEEP_TARGET:-0}"
+  if [[ "${status}" == "0" ]]; then
+    if [[ "${G7_RELEASE_CLEAN_WEB_DEPS:-0}" == "1" ]]; then
+      bash scripts/clean-artifacts.sh --yes --keep-release --quiet
+    else
+      bash scripts/clean-artifacts.sh --yes --keep-release --keep-web-deps --quiet
+    fi
+  else
+    echo "[local-release-gate] failed; keeping non-target artifacts for debugging" >&2
   fi
+  exit "${status}"
 }
 trap cleanup EXIT
-
-export CARGO_TARGET_DIR="${OWN_TARGET_DIR}"
-echo "[local-release-gate] isolated cargo target: ${CARGO_TARGET_DIR}"
 
 echo "[local-release-gate] quality gate"
 bash scripts/quality-gate.sh

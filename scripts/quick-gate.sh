@@ -4,6 +4,21 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cd "${ROOT_DIR}"
+source scripts/gate-env.sh
+
+g7_prepare_cargo_target "quick-gate" "${G7_QUICK_TARGET_DIR:-}"
+
+cleanup() {
+  local status=$?
+  g7_cleanup_temp_cargo_target "${G7_QUICK_KEEP_TARGET:-0}"
+  if [[ "${status}" == "0" ]]; then
+    bash scripts/clean-artifacts.sh --yes --keep-release --keep-web-deps --quiet
+  else
+    echo "[quick-gate] failed; keeping non-target artifacts for debugging" >&2
+  fi
+  exit "${status}"
+}
+trap cleanup EXIT
 
 echo "[quick-gate] static gate"
 bash scripts/static-gate.sh
